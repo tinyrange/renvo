@@ -209,7 +209,7 @@ type linkedTarget struct {
 // PrepareTarget is cold work, separate from execution. Replacing an indexed
 // proof cannot race a borrowed native view because both hold the arena lock.
 func (c *LinkedCall) PrepareTarget(pc uint64, entry, instructions int) error {
-	if c == nil || c.arena == nil || pc&3 != 0 || instructions < 1 || instructions > 256 {
+	if c == nil || c.arena == nil || instructions < 1 || instructions > 256 {
 		return fmt.Errorf("invalid prepared target")
 	}
 	a := c.arena

@@ -1289,32 +1289,20 @@ func appMain() int {
 	}
 }
 
-func TestLinkBuildCoreLowersEndianSelectors(t *testing.T) {
+func TestLinkBuildCorePreservesEndianNamedSelectors(t *testing.T) {
+	// Endian names are ordinary field/method selectors, not syntax. The old
+	// token rewrite silently erased both names even outside encoding/binary.
 	result := buildFromFiles(t, []load.SourceFile{
 		{Path: "/repo/case/go.mod", Src: []byte("module example.com/case\n")},
-		{Path: "/repo/case/binary/binary.go", Src: []byte(`package binary
-
-func PutUint32(b []byte, v int) {
-	b[0] = byte(v)
-}
-
-func Uint32(b []byte) int {
-	return int(b[0])
-}
-`)},
 		{Path: "/repo/case/cmd/app/main.go", Src: []byte(`package main
 
-import "example.com/case/binary"
-
+type Word struct { Value int }
+type Orders struct { LittleEndian Word; BigEndian Word }
 func appMain() int {
-	buf := make([]byte, 4)
-	binary.LittleEndian.PutUint32(buf, uint32(7))
-	if int(binary.LittleEndian.Uint32(buf)) == 7 {
-		print("PASS\n")
-		return 0
-	}
-	print("FAIL\n")
-	return 1
+    x := Orders{}
+    x.LittleEndian.Value = 7
+    x.BigEndian.Value = 9
+    return x.LittleEndian.Value + x.BigEndian.Value
 }
 `)},
 	})
@@ -1322,13 +1310,10 @@ func appMain() int {
 	if !linked.Ok {
 		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
 	}
-	decoded := linked.Program
-	if bytes.Contains(decoded.Text, []byte("LittleEndian.")) {
-		t.Fatalf("linked text still contains endian selector:\n%s", string(decoded.Text))
-	}
-	if !bytes.Contains(decoded.Text, []byte("PutUint32(buf, uint32(7))")) ||
-		!bytes.Contains(decoded.Text, []byte("Uint32(buf)")) {
-		t.Fatalf("linked text missing lowered endian calls:\n%s", string(decoded.Text))
+	for _, name := range []string{"LittleEndian.Value", "BigEndian.Value"} {
+		if !bytes.Contains(linked.Program.Text, []byte(name)) {
+			t.Fatalf("erased ordinary selector %s: %s", name, linked.Program.Text)
+		}
 	}
 }
 

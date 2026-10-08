@@ -1066,7 +1066,6 @@ func linkedTokenActions(program *unit.Program, aliases *[]string, symbolOffsets 
 		markCoreUnsafeLayoutTokens(program, actions)
 		markCoreUnsafePointerCallTokens(program, actions)
 	}
-	markCoreEndianSelectorTokens(program, actions)
 	for i := 0; i < len(program.Symbols); i++ {
 		symbol := program.Symbols[i]
 		index := packageSymbolAliasIndex(*aliases, symbolOffsets, symbol.Package, i)
@@ -1251,15 +1250,6 @@ func coreSelectorIsUnsafePointer(program *unit.Program, selector unit.Selector) 
 		return functionValueTokenTextEquals(program, selector.BaseTok, name)
 	}
 	return false
-}
-
-func markCoreEndianSelectorTokens(program *unit.Program, actions []tokenAction) {
-	for i := 0; i+2 < len(program.Tokens); i++ {
-		if (coreTokenTextEquals(program, i, "LittleEndian") || coreTokenTextEquals(program, i, "BigEndian")) && functionValueTokenCharIs(program, i+1, '.') {
-			markCoreRedirectToken(actions, i, i+2)
-			markCoreRedirectToken(actions, i+1, i+2)
-		}
-	}
 }
 
 func coreProgramImportsUnsafe(program *unit.Program) bool {

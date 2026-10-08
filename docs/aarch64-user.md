@@ -1,8 +1,11 @@
 # AArch64 Linux user emulator
 
-The authoritative sources are `emulators/aarch64.rfe` (CPU and tier controller)
-and `emulators/linux-arm64-user.rfe` (memory, ELF loader and Linux personality).
-Their embedded tests are exercised by the repository's RFE archive suite.
+The authoritative guest adapters are `emulators/aarch64.rfe` (CPU, decoding and
+IR lowering) and `emulators/linux-arm64-user.rfe` (AArch64 ELF/register/trap
+conventions and host services). Shared tiering lives in `internal/rfe/engine`;
+checked memory, ELF loading and Linux syscall services live in
+`internal/rfe/linuxuser`. The archive suite exercises the adapters alongside
+the shared packages' own tests.
 
 ## Running
 
@@ -35,6 +38,36 @@ page generations. Custom unversioned memories use instruction-byte validation.
 Memory faults preserve the completed instruction prefix. Native failures and
 resource exhaustion retain architectural fallback rather than bypassing checks.
 RFE packages and generated host code are trusted; this is **not a security sandbox**.
+
+## Guest architecture boundary
+
+`engine.Architecture` supplies the state shape, PC slot, instruction alignment,
+execute-checked fetch/decode and IR lowering. `engine.CPU` supplies stable views
+of state, memory and retirement, plus the architectural interpreter. The shared
+controller owns tier promotion, bounded caches, region discovery and dispatch.
+Instructions carry explicit PCs and byte lengths; budgets count instructions,
+not bytes. Code-page dependencies include every byte of the last instruction,
+including page-straddling instructions. Unversioned validation uses the guest's
+fetch callback, not an assumed byte order. Native admission retains full PC tags
+and host entry alignment; guest instruction alignment stays with the adapter.
+
+`linuxuser.ELFABI` describes machine identity, accepted flags and entry extent.
+`linuxuser.SyscallABI` maps syscall registers and recognizes traps. The current
+services implement the common Linux syscall-number slice used by this AArch64
+personality; other ABIs must translate differing numbers and data layouts.
+The host supplies secure startup entropy and realtime/monotonic clocks; the
+portable services neither substitute weak randomness nor use instruction ticks.
+
+Shared IR has total signed/unsigned division and remainder at 32/64-bit widths:
+zero divisors produce all-ones quotients or the dividend remainder; signed
+MIN/-1 produces MIN with remainder zero. Results are zero-extended bit patterns.
+Guest adapters explicitly implement differing policies (AArch64 chooses a zero
+quotient on division by zero) and any required result sign extension.
+
+A synthetic two-register guest tests mixed two-/four-byte instructions,
+halfword targets, straddling-page invalidation, precise faults and native region
+budgets. This is preparation for another ISA, **not a RISC-V implementation**:
+a new guest still needs its decoder, interpreter, lowering and ABI adapter.
 
 ## Native runtime and diagnostics
 

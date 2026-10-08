@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "88f6e602684a5a97ac0877071de499110fe84be5bfc6ef637bbc56f3ecf2c1fd"
+const CompilerSourceDigest = "d13774d2a15105f37a9cbc2fbec115922278cc7211eb5bd9a4c28c628ef8d19a"
 
 // source: backend/compiler_common_impl.go
 
@@ -84,13 +84,10 @@ if stateWords < 1 || stateWords > 256 || len(records) == 0 || len(records)%4 != 
 return false
 }
 count := len(records) / 4
-maxOperation := 34
-if memory {
-maxOperation = 37
-}
+maxOperation := 41
 for i := 0; i < count; i++ {
 op, left, right, immediate := records[i*4], records[i*4+1], records[i*4+2], records[i*4+3]
-if op < 0 || op == 35 || op > maxOperation || !memory && (op >= 13 && op <= 16 || op == 26) || (op == 1 || op == 2) && (immediate < 0 || immediate >= stateWords) {
+if op < 0 || op == 35 || op > maxOperation || !memory && (op >= 13 && op <= 16 || op == 26 || op == 36 || op == 37) || (op == 1 || op == 2) && (immediate < 0 || immediate >= stateWords) {
 return false
 }
 if renvoRFEHasLeft(op) && (left < 0 || left >= i || renvoMemoryEffectOnly(records[left*4])) {
@@ -138,7 +135,7 @@ return false
 if op == 21 && (immediate < 0 || immediate >= i || renvoMemoryEffectOnly(records[immediate*4])) {
 return false
 }
-if op >= 17 && op <= 20 && immediate != 32 && immediate != 64 {
+if (op >= 17 && op <= 20 || op >= 38 && op <= 41) && immediate != 32 && immediate != 64 {
 return false
 }
 if op == 15 && (immediate < 0 || immediate > 256) {
@@ -14656,8 +14653,13 @@ if e.kind == renvoExprSelector || e.kind == renvoExprIndex || e.kind == renvoExp
 e.kind == renvoExprUnary && renvoTokCharIs(p, e.tok, '*') {
 return true
 }
-if e.kind == renvoExprSlice && renvoTypeIsSlice(meta, renvoInferParsedExprType(g, ep, e.left)) {
+if e.kind == renvoExprSlice {
+if renvoTypeIsSlice(meta, renvoInferParsedExprType(g, ep, e.left)) {
 return renvoReturnedSliceCanReuseDescriptor(g, ep, e.left)
+}
+
+
+return renvoReturnedArrayHasStableStorage(g, ep, e.left)
 }
 if e.kind == renvoExprCall {
 callee := renvoExprIdentCode(p, ep, e.left)
@@ -14708,6 +14710,33 @@ if localIndex < 0 {
 return true
 }
 return g.locals[localIndex].constValid != 0 || renvoLocalIsCurrentFuncParam(g, localIndex)
+}
+
+
+
+func renvoReturnedArrayHasStableStorage(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
+if idx < 0 || idx >= len(ep.exprs) {
+return false
+}
+e := &ep.exprs[idx]
+t := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, idx))
+if t.kind == renvoTypePointer {
+return true
+}
+if e.kind == renvoExprUnary && renvoTokCharIs(g.prog, e.tok, '*') {
+return true
+}
+if e.kind == renvoExprSelector || e.kind == renvoExprIndex {
+base := renvoResolveType(g.meta, renvoInferParsedExprType(g, ep, e.left))
+if base.kind == renvoTypePointer || base.kind == renvoTypeSlice {
+return true
+}
+return renvoReturnedArrayHasStableStorage(g, ep, e.left)
+}
+if e.kind == renvoExprIdent {
+return renvoFindLocalIndex(g, e.nameStart, e.nameEnd) < 0 && renvoFindGlobalType(g, e.nameStart, e.nameEnd) != 0
+}
+return false
 }
 
 func renvoLocalIsCurrentFuncParam(g *renvoLinearGen, localIndex int) bool {
@@ -28403,6 +28432,13 @@ renvoRFECarry(a, op, immediate&255)
 renvoRFESaveValue(a, locations, i)
 return true
 }
+if op >= 38 && op <= 41 {
+renvoRFELoadValue(a, records, locations, left, 0)
+renvoRFELoadValue(a, records, locations, right, tertiary)
+renvoRFEDivision(a, op, immediate)
+renvoRFESaveValue(a, locations, i)
+return true
+}
 if op >= 27 && op <= 32 {
 renvoRFELoadValue(a, records, locations, left, 0)
 if op == 27 || op == 28 {
@@ -30397,6 +30433,89 @@ if renvoRFEArm(a) {
 frame = 29
 }
 renvoRFERegStore(a, dst, frame, locations[i], 8)
+}
+}
+
+
+
+func renvoRFEDivision(a *renvoAsm, op int, width int) {
+signed := op == 39 || op == 41
+remainder := op == 40 || op == 41
+rhs := 1
+if renvoRFEArm(a) {
+rhs = 2
+}
+if width == 32 {
+if renvoRFEArm(a) {
+renvoAsmEmit32(a, 0x2a0003e0)
+renvoAsmEmit32(a, 0x2a0203e2)
+} else if signed {
+renvoAsmEmit3(a, 0x48, 0x63, 0xc0)
+renvoAsmEmit3(a, 0x48, 0x63, 0xc9)
+} else {
+renvoAsmEmit2(a, 0x89, 0xc0)
+renvoAsmEmit2(a, 0x89, 0xc9)
+}
+}
+zero, done := renvoAsmNewLabel(a), renvoAsmNewLabel(a)
+renvoRFEJumpZero(a, rhs, zero)
+if renvoRFEArm(a) {
+instruction := 0x1ac00800
+if signed {
+instruction = 0x1ac00c00
+}
+if width == 64 {
+instruction |= 0x80000000
+}
+dst := 0
+if remainder {
+dst = 1
+}
+renvoAsmEmit32(a, instruction|(2<<16)|dst)
+if remainder {
+instruction = 0x1b008000
+if width == 64 {
+instruction |= 0x80000000
+}
+renvoAsmEmit32(a, instruction|(2<<16)|(1<<5))
+}
+} else {
+normal := renvoAsmNewLabel(a)
+if signed && width == 64 {
+renvoRFERegImmediate(a, 100, rhs, -1)
+renvoRFEJump(a, 1, normal)
+renvoRFERegImm(a, 2, -9223372036854775807-1)
+renvoRFERegBinary(a, 100, 0, 2)
+renvoRFEJump(a, 1, normal)
+if remainder {
+renvoRFERegImm(a, 0, 0)
+}
+renvoAsmJmpLabel(a, done)
+}
+renvoAsmMarkLabel(a, normal)
+if signed {
+renvoAsmEmit2(a, 0x48, 0x99)
+renvoAsmEmit3(a, 0x48, 0xf7, 0xf9)
+} else {
+renvoRFERegImm(a, 2, 0)
+renvoAsmEmit3(a, 0x48, 0xf7, 0xf1)
+}
+if remainder {
+renvoRFERegMove(a, 0, 2)
+}
+}
+renvoAsmJmpLabel(a, done)
+renvoAsmMarkLabel(a, zero)
+if !remainder {
+renvoRFERegImm(a, 0, -1)
+}
+renvoAsmMarkLabel(a, done)
+if width == 32 {
+if renvoRFEArm(a) {
+renvoAsmEmit32(a, 0x2a0003e0)
+} else {
+renvoAsmEmit2(a, 0x89, 0xc0)
+}
 }
 }
 

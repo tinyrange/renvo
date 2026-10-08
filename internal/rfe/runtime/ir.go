@@ -55,6 +55,10 @@ func (b *Builder) emit(op Op) Value {
 		}
 	case ArithmeticCondition, LogicalCondition:
 		mask = 1
+	case UnsignedDivide, SignedDivide, UnsignedRemainder, SignedRemainder:
+		if op.Imm == 32 {
+			mask = 0xffffffff
+		}
 	case CarryArithmetic:
 		if op.Imm&127 == 32 {
 			mask = 0xffffffff
@@ -348,7 +352,7 @@ func Validate(ops []Op, words int) error {
 		if carryKind(o.Kind) && (o.Imm>>8 >= uint64(i) || effectOnly(ops[o.Imm>>8].Kind) || !validFlags(Op{Kind: ArithmeticFlags, Imm: o.Imm & 255})) {
 			return fmt.Errorf("invalid carry operand/width")
 		}
-		if !validFlags(o) || !validRich(o) {
+		if !validFlags(o) || !validRich(o) || !validDivision(o) {
 			return fmt.Errorf("invalid flags width")
 		}
 		if !pureOperation(o.Kind) {
@@ -405,6 +409,8 @@ func interpretValues(ops []Op, state, values []uint64) {
 			if values[o.A] != 0 {
 				values[i] = values[o.B]
 			}
+		case UnsignedDivide, SignedDivide, UnsignedRemainder, SignedRemainder:
+			values[i] = divisionOperation(o.Kind, values[o.A], values[o.B], o.Imm)
 		case CarryArithmetic, CarryFlags:
 			values[i] = carryOperation(o.Kind, values[o.A], values[o.B], values[o.Imm>>8], o.Imm&255)
 		case UnsignedMulHigh, SignedMulHigh, LeadingZeros, LeadingSigns, ReverseBytes, ReverseBits:

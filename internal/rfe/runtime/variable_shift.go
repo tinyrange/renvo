@@ -10,7 +10,7 @@ const (
 )
 
 func pureOperation(k int) bool {
-	return k >= Const && k <= Mul || k >= VariableShl && k <= LogicalCondition || k >= UnsignedMulHigh && k <= CarryFlags
+	return divisionKind(k) || k >= Const && k <= Mul || k >= VariableShl && k <= LogicalCondition || k >= UnsignedMulHigh && k <= CarryFlags
 }
 func variableOperation(k int, value, count uint64, width uint64) uint64 {
 	count &= width - 1

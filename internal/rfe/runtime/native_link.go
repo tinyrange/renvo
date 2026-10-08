@@ -36,7 +36,7 @@ func (m *MemoryContext) LookupLink(pc uint64) *NativeLink {
 }
 func (m *MemoryContext) ClearLinks() { m.Blocks = [1024]NativeLink{}; m.linkVictim = 0 }
 func (m *MemoryContext) PublishLink(pc uint64, entry int, instructions int, prefix [17]uint8) {
-	if pc&3 != 0 || entry < 0 || entry&15 != 0 || instructions < 1 || instructions > 256 {
+	if entry < 0 || entry&15 != 0 || instructions < 1 || instructions > 256 {
 		return
 	}
 	for i := 0; i <= instructions && i < len(prefix); i++ {

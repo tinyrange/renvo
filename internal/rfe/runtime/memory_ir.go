@@ -112,7 +112,7 @@ func ValidateMemory(ops []Op, words int) error {
 		if carryKind(o.Kind) && (o.Imm>>8 >= uint64(i) || effectOnly(ops[o.Imm>>8].Kind) || !validFlags(Op{Kind: ArithmeticFlags, Imm: o.Imm & 255})) {
 			return fmt.Errorf("invalid carry operand/width")
 		}
-		if !validFlags(o) || !validRich(o) {
+		if !validFlags(o) || !validRich(o) || !validDivision(o) {
 			return fmt.Errorf("invalid flags width")
 		}
 		if !pureOperation(o.Kind) && (o.Kind < MemoryLoad || o.Kind > Guard) && o.Kind != RegionGuard && o.Kind != LoopContinue && o.Kind != PairHigh && o.Kind != MemoryPairStore {

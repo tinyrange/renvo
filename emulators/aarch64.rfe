@@ -7,107 +7,85 @@ RFE 1
   "import": "renvo.dev/emulators/aarch64"
 }
 
--- batch.go --
+-- adapter.go --
 package aarch64
 
-import emu "renvo.dev/internal/rfe/runtime"
+import (
+	"renvo.dev/internal/rfe/engine"
+	emu "renvo.dev/internal/rfe/runtime"
+)
 
-// Run executes one bounded dispatch quantum. Step remains the single-block API.
-// Only already-native blocks and cached architectural instructions participate;
-// discovery requiring promotion returns to Step outside the arena lock. Every
-// block entry still validates executable code, including after guest stores.
-func (e *Engine) Run(c *CPU, remaining uint64) error {
-	return e.run(c, remaining, 1)
+type EngineConfig = engine.EngineConfig
+type Stats = engine.Stats
+type Engine = engine.Engine
+type NativeMemory = engine.NativeMemory
+
+func DefaultEngineConfig() EngineConfig              { return engine.DefaultEngineConfig() }
+func NewEngine(config EngineConfig) (*Engine, error) { return engine.New(config, Architecture()) }
+func (c *CPU) Registers() []uint64                   { return c.State[:] }
+func (c *CPU) MemoryBus() engine.Memory              { return c.Memory }
+func (c *CPU) Retirement() *uint64                   { return &c.Retired }
+
+func Architecture() engine.Architecture {
+	return engine.Architecture{Name: "a64", StateWords: StateWords, PC: PC, Alignment: 4, Fetch: fetchInstruction, Lower: lowerInstruction}
 }
-
-// RunQuanta selects the configured native scheduling slice when supported.
-// Conservative hosts retain separate short calls; Step is still single-block.
-func (e *Engine) RunQuanta(c *CPU, remaining uint64) error {
-	return e.run(c, remaining, 16)
+func fetchInstruction(memory engine.Memory, pc uint64) (engine.Instruction, error) {
+	bits, err := memory.Read(pc, 4, true)
+	if err != nil {
+		return engine.Instruction{}, err
+	}
+	op := uint32(bits)
+	kind := branchKind(op)
+	_, pure := decodePure(op)
+	_, scalar := decodeScalar(op)
+	scalar = scalar || nativePair(op)
+	ins := engine.Instruction{PC: pc, Bits: bits, Length: 4, Terminal: kind != 0, Memory: scalar}
+	ins.InterpretOnly = kind == 0 && !pure && !scalar
+	switch {
+	case op&0x3e000000 == 0x28000000:
+		ins.Class = 2
+	case op&0x3f000000 == 0x39000000 || op&0x3f200000 == 0x38000000 || op&0x3f200c00 == 0x38200800:
+		ins.Class = 1
+	}
+	ins.Flow = engine.Successors{Known: true}
+	switch kind {
+	case 0:
+		ins.Flow.Next = pc + 4
+	case 1:
+		ins.Flow.Known = op>>31 == 0 // calls are not region edges
+		ins.Flow.Next = pc + uint64(signed(uint64(op&0x3ffffff), 26)*4)
+	case 2, 3:
+		ins.Flow.Next = pc + uint64(signed(uint64(op>>5&0x7ffff), 19)*4)
+		ins.Flow.Alternate, ins.Flow.Conditional = pc+4, true
+	case 4:
+		ins.Flow.Next = pc + uint64(signed(uint64(op>>5&0x3fff), 14)*4)
+		ins.Flow.Alternate, ins.Flow.Conditional = pc+4, true
+	default:
+		ins.Flow.Known = false
+	}
+	return ins, nil
 }
-
-func (e *Engine) run(c *CPU, remaining uint64, quanta int) error {
-	if e.native == nil || remaining == 0 {
-		return e.Step(c, remaining)
-	}
-	first := e.block(c)
-	if first == nil || !first.native || uint64(len(first.words)) > remaining {
-		return e.stepBlock(c, remaining, first)
-	}
-	if memory, ok := c.Memory.(NativeMemory); ok {
-		if context := memory.NativeContext(); context != nil {
-			stamp := first.context // block() just validated this context in the same thread
-			if stamp.Identity != nil {
-				return e.runLinked(c, remaining, first, memory, context, stamp, quanta)
-			}
-		}
-	}
-	budget := remaining
-	if budget > 64 {
-		budget = 64
-	}
-	var pending *compiledBlock
-	memory, capable := c.Memory.(NativeMemory)
-	var context *emu.MemoryContext
-	if capable {
-		context = memory.NativeContext()
-	}
-	selectBlock := func(completed int) (int, bool, error) {
-		// This callback runs after each successful native call (also after the
-		// final call), never after a failed native entry check.
-		if pending != nil {
-			if pending.effects {
-				before, status := c.Retired, context.Status
-				err := e.accountMemory(c, pending, memory, context)
-				budget -= c.Retired - before
-				pending = nil
-				if status != 0 || err != nil {
-					return 0, false, err
-				}
-			} else {
-				retired := uint64(len(pending.words))
-				c.Retired += retired
-				e.Stats.Native += retired
-				budget -= retired
-				pending = nil
-			}
-		}
-		for budget != 0 {
-			block := first
-			first = nil
-			if block == nil {
-				block = e.block(c)
-			}
-			if block == nil || uint64(len(block.words)) > budget {
-				return 0, false, nil
-			}
-			if block.interpretOnly {
-				before := c.Retired
-				err := block.executeCached(c)
-				retired := c.Retired - before
-				e.Stats.Interpreted += retired
-				budget -= retired
-				if err != nil {
-					return 0, false, err
-				}
-				continue
-			}
-			if !block.native || block.effects && context == nil {
-				return 0, false, nil
-			}
-			block.visits++
-			pending = block
-			return block.entry, true, nil
-		}
-		return 0, false, nil
-	}
+func lowerInstruction(b *emu.Builder, ins engine.Instruction, completed int) bool {
+	op := uint32(ins.Bits)
+	return lowerPair(b, op, ins.PC, completed) || lowerScalar(b, op, ins.PC, completed) || Lower(b, op) || lowerBranch(b, op)
+}
+func (c *CPU) ExecuteInstruction(ins engine.Instruction) error {
+	op := uint32(ins.Bits)
 	var err error
-	if context == nil {
-		_, err = e.native.CallBatch(c.State[:], 64, selectBlock)
-	} else {
-		_, err = e.native.CallBatchMemory(c.State[:], context, 64, selectBlock)
+	switch ins.Class {
+	case 1:
+		err = c.singleMemory(op)
+	case 2:
+		err = c.pairMemory(op)
+	default:
+		return c.Execute(op)
 	}
-	return err
+	if err != nil {
+		return &Exception{Kind: "memory", PC: c.State[PC], Opcode: op, Cause: err}
+	}
+	c.State[PC] += 4
+	c.Retired++
+	return nil
 }
 
 -- batch_test.go --
@@ -128,7 +106,7 @@ func hotBatchLoop(t *testing.T) (*Engine, *CPU, *testMemory) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if e.native == nil {
+	if !e.NativeAvailable() {
 		e.Close()
 		t.Skip("native host unavailable")
 	}
@@ -498,31 +476,6 @@ func TestBranchBlockBudgetInvalidationAndTargetFault(t *testing.T) {
 	}
 }
 
--- cached.go --
-package aarch64
-
-// executeCached skips only instruction classification. The original scalar and
-// pair handlers still perform all encoding, address, permission and writeback
-// checks. Code validation is performed by Engine.block before this call.
-func (b *compiledBlock) executeCached(c *CPU) error {
-	op := b.words[0]
-	var err error
-	switch b.memoryKind {
-	case 1:
-		err = c.singleMemory(op)
-	case 2:
-		err = c.pairMemory(op)
-	default:
-		return c.Execute(op)
-	}
-	if err != nil {
-		return &Exception{Kind: "memory", PC: c.State[PC], Opcode: op, Cause: err}
-	}
-	c.State[PC] += 4
-	c.Retired++
-	return nil
-}
-
 -- cached_test.go --
 package aarch64
 
@@ -615,88 +568,12 @@ func TestCachedMemoryOpcodeInvalidation(t *testing.T) {
 -- code_version.go --
 package aarch64
 
-// CodeIdentity is deliberately non-zero-sized so different address spaces
-// cannot share an identity through Go's zero-size allocation coalescing.
-// It is a host-side ownership token, never a guest pointer or numeric address.
-type CodeIdentity struct{ marker byte }
-type CodeStamp struct {
-	Identity *CodeIdentity
-	Epoch    uint64
-}
+import "renvo.dev/internal/rfe/engine"
 
-// VersionedMemory is optional. A stamp covers one 4 KiB guest page. Implementers
-// must change it for every content/permission/mapping change and check execute
-// permission on every query. Stamps must never be reused, including after remap.
-// The memory implementation and engine are single-threaded in this milestone.
-type VersionedMemory interface {
-	CodeVersion(address uint64) (CodeStamp, error)
-}
-
-// CodeContextMemory is optional and single-threaded. Its identity/epoch must
-// change before any executable byte, execute permission or executable mapping
-// changes. It may remain stable for writes to non-executable data. Epochs must
-// never be reused within an identity, including across copies of the memory.
-// A context stamp only permits reusing previously checked page dependencies;
-// it is not a substitute for validating a newly discovered block.
-type CodeContextMemory interface {
-	VersionedMemory
-	CodeContext() CodeStamp
-}
-
-type codeDependency struct {
-	address uint64
-	stamp   CodeStamp
-}
-
-func (e *Engine) validVersions(c *CPU, block *compiledBlock, context CodeStamp) bool {
-	memory, ok := c.Memory.(VersionedMemory)
-	if !ok {
-		return false
-	}
-	for _, dependency := range block.dependencies {
-		stamp, err := memory.CodeVersion(dependency.address)
-		e.Stats.VersionChecks++
-		if err != nil || stamp.Identity == nil || stamp != dependency.stamp {
-			return false
-		}
-	}
-	block.context = context
-	return true
-}
-
-func (e *Engine) validBytes(c *CPU, pc uint64, block *compiledBlock) bool {
-	for i, word := range block.words {
-		fetched, err := c.Memory.Read(pc+uint64(i)*4, 4, true)
-		e.Stats.CodeReads++
-		if err != nil || uint32(fetched) != word {
-			return false
-		}
-	}
-	return true
-}
-func (e *Engine) dependencies(c *CPU, pc uint64, block *compiledBlock) {
-	memory, ok := c.Memory.(VersionedMemory)
-	if !ok {
-		return
-	}
-	first, last := pc&^uint64(4095), (pc+uint64(len(block.words)-1)*4)&^uint64(4095)
-	for address := first; ; address += 4096 {
-		stamp, err := memory.CodeVersion(address)
-		e.Stats.VersionChecks++
-		if err != nil || stamp.Identity == nil {
-			block.dependencies = nil
-			return
-		}
-		block.dependencies = append(block.dependencies, codeDependency{address, stamp})
-		if address == last {
-			break
-		}
-	}
-	if contextual, ok := c.Memory.(CodeContextMemory); ok {
-		block.context = contextual.CodeContext()
-		e.Stats.ContextChecks++
-	}
-}
+type CodeIdentity = engine.CodeIdentity
+type CodeStamp = engine.CodeStamp
+type VersionedMemory = engine.VersionedMemory
+type CodeContextMemory = engine.CodeContextMemory
 
 -- cpu.go --
 // Package aarch64 implements a bounded, little-endian A64 user CPU.
@@ -1544,19 +1421,6 @@ func TestTieringInvalidationAndBudget(t *testing.T) {
 	}
 }
 
--- dispatch.go --
-package aarch64
-
-// Clear both lookup structures together. A colliding direct-cache entry may
-// refer to another PC and must remain intact. Native storage stays append-only.
-func (e *Engine) discard(pc uint64) {
-	delete(e.blocks, pc)
-	entry := &e.dispatch[(pc>>2)&1023]
-	if entry.pc == pc {
-		*entry = dispatchEntry{}
-	}
-}
-
 -- dispatch_test.go --
 package aarch64
 
@@ -1589,7 +1453,7 @@ func TestDirectDispatchCollisionPCSpecializationAndInvalidation(t *testing.T) {
 				t.Fatalf("collision/ADR wrong PC=%x got=%x err=%v", pc, c.State, err)
 			}
 		}
-		if len(e.blocks) != 2 {
+		if e.CachedBlocks() != 2 {
 			t.Fatal("direct cache changed bounded profile count")
 		}
 		binary.LittleEndian.PutUint32(m.data, 0x10000020) // ADR X0,+4
@@ -1603,8 +1467,55 @@ func TestDirectDispatchCollisionPCSpecializationAndInvalidation(t *testing.T) {
 		}
 		// A new PC at the cache budget stays interpreter-only, even on collisions.
 		c.State[PC] = 8192
-		if err := e.Step(&c, 2); err != nil || c.State[0] != 8192 || c.State[PC] != 8196 || len(e.blocks) != 2 {
+		if err := e.Step(&c, 2); err != nil || c.State[0] != 8192 || c.State[PC] != 8196 || e.CachedBlocks() != 2 {
 			t.Fatal("cache budget bypass")
+		}
+	}
+}
+
+-- division_test.go --
+package aarch64
+
+import (
+	"encoding/binary"
+	"testing"
+)
+
+func TestDivisionGuestPolicyAcrossTiers(t *testing.T) {
+	values := []uint64{0, 1, 2, 7, 0x80000000, 0xffffffff, 1 << 63, ^uint64(0)}
+	for _, op := range []uint32{0x1ac20820, 0x1ac20c20, 0x9ac20820, 0x9ac20c20} {
+		for _, mode := range []string{"ir", "native"} {
+			cfg := DefaultEngineConfig()
+			cfg.Mode = mode
+			cfg.IRThreshold = 1
+			cfg.NativeThreshold = 1
+			cfg.MaxInstructions = 1
+			e, err := NewEngine(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			m := &testMemory{data: make([]byte, 4), executable: true}
+			binary.LittleEndian.PutUint32(m.data, op)
+			for _, a := range values {
+				for _, b := range values {
+					c := CPU{Memory: m}
+					c.State[1], c.State[2] = a, b
+					want := c
+					if err = want.Step(); err != nil {
+						t.Fatal(err)
+					}
+					if err = e.Step(&c, 1); err != nil {
+						t.Fatal(err)
+					}
+					if c.State != want.State || c.Retired != want.Retired {
+						t.Fatal("division policy", mode, op, a, b, c.State, want.State)
+					}
+				}
+			}
+			if e.Stats.IR+e.Stats.Native != uint64(len(values)*len(values)) {
+				t.Fatal("division stayed interpreted", mode, e.Stats)
+			}
+			e.Close()
 		}
 	}
 }
@@ -1613,7 +1524,6 @@ func TestDirectDispatchCollisionPCSpecializationAndInvalidation(t *testing.T) {
 package aarch64
 
 import (
-	"fmt"
 	emu "renvo.dev/internal/rfe/runtime"
 )
 
@@ -1621,7 +1531,7 @@ import (
 // remain outside this pure-instruction API. A false result never modifies b.
 func Lower(b *emu.Builder, op uint32) bool {
 	d, ok := decodePure(op)
-	if !ok || d.kind == divide {
+	if !ok {
 		return false
 	}
 	constant := b.Constant
@@ -1734,303 +1644,6 @@ func Lower(b *emu.Builder, op uint32) bool {
 	}
 	b.Store(PC, binary(emu.Add, b.Load(PC), constant(4)))
 	return true
-}
-
-type EngineConfig struct {
-	Mode                  string // interpreter, ir, native; native includes both lower tiers
-	IRThreshold           uint64
-	NativeThreshold       uint64
-	MaxBlocks             int
-	MaxInstructions       int // cold block discovery width
-	MaxRegionInstructions int // independently optimized region width
-	MaxNativeInstructions int // bounded uninterrupted scheduling slice
-	NativeBytes           int
-	ProfileNative         bool // emit Linux perf-map symbols; enabled by CLI -stats
-}
-
-func DefaultEngineConfig() EngineConfig {
-	return EngineConfig{Mode: "native", IRThreshold: 8, NativeThreshold: 64, MaxBlocks: 4096, MaxInstructions: 16, MaxRegionInstructions: 256, MaxNativeInstructions: 65536, NativeBytes: 8 << 20}
-}
-
-type Stats struct {
-	LoopIterations                                         uint64 // native loop iterations, without a Go transition
-	NativeSessions, LinkMissStops, BudgetStops, OtherStops uint64
-
-	Regions, RegionExits                               uint64 // bounded cyclic regions and successful side exits
-	ProfileErrors                                      uint64
-	Linked                                             uint64 // instructions retired inside the native dispatcher
-	Interpreted, IR, Native                            uint64 // retired instructions in each tier
-	Blocks, Promotions, Invalidations, CompileFailures uint64
-	NativeBytes                                        int
-	NativeMemory, MemoryExits                          uint64 // native scalar instructions and precise slow exits
-	CodeReads, VersionChecks, ContextChecks            uint64 // translation discovery/revalidation only
-}
-
-type compiledBlock struct {
-	regionAttempted, region         bool
-	regionGeneration                uint64 // retry only after another native promotion
-	regionEntry, regionInstructions int
-	regionPrefix                    [17]uint8
-	dependencies                    []codeDependency
-	context                         CodeStamp
-	words                           []uint32
-	visits                          uint64
-	ops                             []emu.Op
-	prepared                        *emu.PreparedBlock
-	entry                           int
-	native, attempted               bool
-	interpretOnly                   bool  // cached instruction word, still architecturally executed
-	memoryKind                      uint8 // scalar/pair dispatch classification, not a memory permission cache
-	effects                         bool
-	memoryPrefix                    [17]uint8 // scalar accesses retired in each prefix of the block
-}
-
-type dispatchEntry struct {
-	pc    uint64
-	block *compiledBlock
-}
-
-type Engine struct {
-	config      EngineConfig
-	blocks      map[uint64]*compiledBlock
-	dispatch    [1024]dispatchEntry
-	ir          emu.IRMachine
-	native      *emu.Native
-	Stats       Stats
-	linkContext CodeStamp
-	linkReady   bool // immutable state ABI, prepared once for this native engine
-}
-
-func NewEngine(config EngineConfig) (*Engine, error) {
-	if config.Mode != "interpreter" && config.Mode != "ir" && config.Mode != "native" {
-		return nil, fmt.Errorf("invalid engine %q", config.Mode)
-	}
-	if config.MaxRegionInstructions == 0 {
-		config.MaxRegionInstructions = config.MaxInstructions
-	}
-	if config.MaxNativeInstructions == 0 {
-		config.MaxNativeInstructions = 64
-	}
-	if config.MaxRegionInstructions < 1 || config.MaxRegionInstructions > 256 || config.MaxNativeInstructions < 1 || config.MaxNativeInstructions > emu.NativeSessionLimit {
-		return nil, fmt.Errorf("invalid execution slice configuration")
-	}
-	if config.IRThreshold == 0 || config.NativeThreshold < config.IRThreshold || config.MaxBlocks < 1 || config.MaxBlocks > 65536 || config.MaxInstructions < 1 || config.MaxInstructions > 16 || config.NativeBytes < 4096 || config.NativeBytes > 64<<20 {
-		return nil, fmt.Errorf("invalid engine budget")
-	}
-	e := &Engine{config: config, blocks: map[uint64]*compiledBlock{}}
-	if config.Mode == "native" {
-		n, err := emu.NewNative(config.NativeBytes)
-		if err != nil {
-			e.Stats.CompileFailures++
-		} else {
-			e.native = n
-			if config.ProfileNative {
-				_ = n.EnablePerfMap()
-				e.Stats.ProfileErrors = n.SymbolErrors
-			}
-		}
-	}
-	return e, nil
-}
-func (e *Engine) Close() error {
-	if e.native != nil {
-		err := e.native.Close()
-		e.native = nil
-		return err
-	}
-	return nil
-}
-func (e *Engine) block(c *CPU) *compiledBlock {
-	pc := c.State[PC]
-	if pc&3 != 0 || c.Memory == nil {
-		return nil
-	}
-	cache := &e.dispatch[(pc>>2)&1023]
-	old := cache.block
-	direct := old != nil && cache.pc == pc
-	if !direct {
-		old = e.blocks[pc]
-	}
-	if old == nil {
-		return e.discoverBlock(c, pc, cache)
-	}
-	valid := false
-	if len(old.dependencies) != 0 {
-		var context CodeStamp
-		if memory, ok := c.Memory.(CodeContextMemory); ok {
-			context = memory.CodeContext()
-			e.Stats.ContextChecks++
-			valid = context.Identity != nil && context == old.context
-		}
-		if !valid {
-			valid = e.validVersions(c, old, context)
-		}
-	} else {
-		valid = e.validBytes(c, pc, old)
-	}
-	if !valid {
-		e.discard(pc)
-		e.Stats.Invalidations++
-		return nil
-	}
-	// A direct hit already contains exactly this pointer; do not rewrite its
-	// GC-tracked slot on every executed block. Map hits still repair collisions.
-	if !direct {
-		*cache = dispatchEntry{pc, old}
-	}
-	return old
-}
-
-// Keep decoding, allocation and the large instruction descriptor out of the
-// guarded lookup's frame; none of these are needed for a hot block entry.
-func (e *Engine) discoverBlock(c *CPU, pc uint64, cache *dispatchEntry) *compiledBlock {
-	if len(e.blocks) >= e.config.MaxBlocks {
-		return nil
-	}
-	block := &compiledBlock{}
-	nativeMemory, capable := c.Memory.(NativeMemory)
-	allowMemory := capable && e.native != nil && nativeMemory.NativeContext() != nil
-	for i := 0; i < e.config.MaxInstructions; i++ {
-		addr := pc + uint64(i)*4
-		if addr < pc {
-			break
-		}
-		word, err := c.Memory.Read(addr, 4, true)
-		e.Stats.CodeReads++
-		if err != nil {
-			break
-		}
-		terminal := branchKind(uint32(word)) != 0
-		d, ok := decodePure(uint32(word))
-		_, scalar := decodeScalar(uint32(word))
-		scalar = scalar || nativePair(uint32(word))
-		if !terminal && (!ok || d.kind == divide) && !(scalar && allowMemory) {
-			if len(block.words) == 0 {
-				block.words = append(block.words, uint32(word))
-				block.interpretOnly = true
-				switch {
-				case uint32(word)&0x3e000000 == 0x28000000:
-					block.memoryKind = 2
-				case uint32(word)&0x3f000000 == 0x39000000 || uint32(word)&0x3f200000 == 0x38000000 || uint32(word)&0x3f200c00 == 0x38200800:
-					block.memoryKind = 1
-				}
-			}
-			break
-		}
-		block.words = append(block.words, uint32(word))
-		block.memoryPrefix[len(block.words)] = block.memoryPrefix[len(block.words)-1]
-		if scalar && allowMemory {
-			block.effects = true
-			block.memoryPrefix[len(block.words)]++
-		}
-		if terminal {
-			break
-		}
-	}
-	if len(block.words) == 0 {
-		return nil
-	}
-	e.dependencies(c, pc, block)
-	e.blocks[pc] = block
-	*cache = dispatchEntry{pc, block}
-	e.Stats.Blocks++
-	return block
-}
-
-// Step retires at most remaining instructions. Code page stamps (or bytes for
-// unversioned memories) and execute permission are checked on every block entry.
-// Code cache exhaustion always falls back; invalid native entries are never
-// reused or reclaimed underneath a call.
-func (e *Engine) Step(c *CPU, remaining uint64) error {
-	if remaining == 0 {
-		return fmt.Errorf("instruction budget exhausted")
-	}
-	if e.config.Mode == "interpreter" {
-		return e.interpret(c)
-	}
-	return e.stepBlock(c, remaining, e.block(c))
-}
-
-// stepBlock consumes a lookup already validated in this single-threaded engine.
-// This lets Run fall back without a second lookup/context query at the same PC.
-func (e *Engine) stepBlock(c *CPU, remaining uint64, block *compiledBlock) error {
-	if block == nil || uint64(len(block.words)) > remaining {
-		return e.interpret(c)
-	}
-	if block.interpretOnly {
-		// block() has validated this instruction's execute permission and
-		// code version (or bytes). Avoid fetching it a second time. Memory,
-		// division, traps and unsupported instructions keep CPU semantics.
-		before := c.Retired
-		err := block.executeCached(c)
-		e.Stats.Interpreted += c.Retired - before
-		return err
-	}
-	block.visits++
-	if block.effects {
-		return e.stepMemory(c, block)
-	}
-	if block.visits < e.config.IRThreshold {
-		return e.interpret(c)
-	}
-	if block.ops == nil {
-		var b emu.Builder
-		// This translation is reachable only through its guarded PC key.
-		// Specialize PC-relative values and sequential PC updates at build time.
-		b.Store(PC, b.Constant(c.State[PC]))
-		for _, word := range block.words {
-			if !Lower(&b, word) && !lowerBranch(&b, word) {
-				e.Stats.CompileFailures++
-				e.discard(c.State[PC])
-				return e.interpret(c)
-			}
-		}
-		block.ops = b.Finish(StateWords)
-		prepared, err := emu.Prepare(block.ops, StateWords)
-		if err != nil {
-			e.Stats.CompileFailures++
-			e.discard(c.State[PC])
-			return e.interpret(c)
-		}
-		block.prepared = prepared
-	}
-	if e.native != nil && !block.attempted && block.visits >= e.config.NativeThreshold {
-		block.attempted = true
-		entry, err := e.native.Compile(block.ops, StateWords)
-		if err != nil {
-			e.Stats.CompileFailures++
-		} else {
-			block.entry = entry
-			_ = e.native.NameEntry(entry, fmt.Sprintf("a64_%x_pure_%d_ops", c.State[PC], len(block.ops)))
-			e.Stats.ProfileErrors = e.native.SymbolErrors
-			block.native = true
-			e.Stats.Promotions++
-		}
-		e.Stats.NativeBytes = e.native.Bytes
-	}
-	var err error
-	if block.native && e.native != nil {
-		err = e.native.Call(block.entry, c.State[:])
-	} else {
-		err = e.ir.Run(block.prepared, c.State[:])
-	}
-	if err != nil {
-		return err
-	}
-	retired := uint64(len(block.words))
-	c.Retired += retired
-	if block.native && e.native != nil {
-		e.Stats.Native += retired
-	} else {
-		e.Stats.IR += retired
-	}
-	return nil
-}
-func (e *Engine) interpret(c *CPU) error {
-	before := c.Retired
-	err := c.Step()
-	e.Stats.Interpreted += c.Retired - before
-	return err
 }
 
 -- integer.go --
@@ -2586,125 +2199,6 @@ func TestAllConditionalSelectAndCompareCodes(t *testing.T) {
 	}
 }
 
--- link.go --
-package aarch64
-
-import emu "renvo.dev/internal/rfe/runtime"
-
-// Only blocks validated in the current code context are published. Native
-// non-executable stores preserve that context. All other memory operations exit
-// before returning to Go, so no code-context change can occur within this loop.
-func (e *Engine) runLinked(c *CPU, remaining uint64, first *compiledBlock, memory NativeMemory, context *emu.MemoryContext, stamp CodeStamp, quanta int) error {
-	if context.ClaimLinks(e.native) || e.linkContext != stamp {
-		context.ClearLinks()
-		e.linkContext = stamp
-	}
-	if !e.linkReady {
-		if err := e.native.PrepareLinks(StateWords, PC); err != nil {
-			// Arena exhaustion preserves the original leaf fallback.
-			return e.stepBlock(c, remaining, first)
-		}
-		e.linkReady = true
-		e.Stats.NativeBytes = e.native.Bytes
-		e.Stats.ProfileErrors = e.native.SymbolErrors
-	}
-	if !first.region && (!first.regionAttempted || first.regionGeneration != e.Stats.Promotions) {
-		e.prepareRegion(c, first)
-		e.Stats.NativeBytes = e.native.Bytes
-		e.Stats.ProfileErrors = e.native.SymbolErrors
-	}
-	pc := c.State[PC]
-	entry, instructions := first.entry, len(first.words)
-	region := first.region && uint64(first.regionInstructions) <= remaining
-	if region {
-		entry, instructions = first.regionEntry, first.regionInstructions
-	}
-	link := context.LookupLink(pc)
-	// A block entry and its prefix are immutable in the append-only arena.
-	// Avoid revalidating/copying a publication already in this exact context.
-	if link == nil || link.Entry != uint64(entry) || link.Instructions != uint64(instructions) {
-		if err := e.native.PrepareTargetLink(pc, entry, StateWords, instructions); err != nil {
-			return err
-		}
-		if region {
-			context.PublishLink(pc, entry, instructions, first.regionPrefix)
-		} else {
-			context.PublishLink(pc, entry, instructions, first.memoryPrefix)
-		}
-	}
-	link = context.LookupLink(pc)
-	if link == nil {
-		return e.stepBlock(c, remaining, first)
-	}
-	// This publication has completed cold region preparation at the current
-	// promotion generation. Regions are immutable and need no future retry.
-	link.Reserved = e.Stats.Promotions
-	if first.region {
-		link.Reserved = ^uint64(0)
-	}
-	first.visits++
-	budget := remaining
-	if budget > uint64(e.config.MaxNativeInstructions) {
-		budget = uint64(e.config.MaxNativeInstructions)
-	}
-	var err error
-	if e.config.MaxNativeInstructions > 64 {
-		err = e.native.RunLinkedSession(c.State[:], context, budget)
-		if err != nil {
-			return err
-		}
-	} else if quanta == 1 || e.config.MaxNativeInstructions < 64 {
-		err = e.native.CallLinked(c.State[:], context, budget)
-		if err != nil {
-			return err
-		}
-	} else {
-		// No Go guest-memory mutation occurs between these distinct native
-		// calls. Non-executable native stores preserve the initial code proof;
-		// a fault or cold target stops scheduling before any host slow path.
-		_, err = e.native.RunLinkedQuanta(c.State[:], context, quanta, remaining, e.Stats.Promotions)
-	}
-	e.Stats.NativeSessions++
-	if context.Status == 0 && context.Remaining != 0 {
-		pc := c.State[PC]
-		link := context.LookupLink(pc)
-		if link == nil {
-			e.Stats.LinkMissStops++
-		} else if link.Instructions > context.Remaining {
-			e.Stats.BudgetStops++
-		} else {
-			e.Stats.OtherStops++
-		}
-	}
-	e.Stats.RegionExits += context.LoopExits
-	e.Stats.LoopIterations += context.LoopIterations
-	c.Retired += context.Total
-	e.Stats.Native += context.Total
-	e.Stats.Linked += context.Total
-	e.Stats.NativeMemory += context.MemoryTotal
-	if err != nil {
-		return err
-	}
-	if context.Status == emu.RegionExit {
-		e.Stats.RegionExits++
-		return nil
-	}
-	if context.Status != 0 {
-		e.Stats.MemoryExits++
-		if context.Status == 1 {
-			memory.NativeRefill(context.Address)
-		}
-		return e.interpret(c)
-	}
-	if context.Total == 0 {
-		if quanta != 1 {
-			first = e.block(c)
-		}
-		return e.stepBlock(c, remaining, first)
-	}
-	return nil
-}
-
 -- lower_integer.go --
 package aarch64
 
@@ -2778,6 +2272,12 @@ func lowerExtra(b *emu.Builder, d instruction) emu.Value {
 			k = emu.Sub
 		}
 		result = binary(k, reg(d.ra), product)
+	case divide:
+		kind := emu.UnsignedDivide
+		if d.operation != 0 {
+			kind = emu.SignedDivide
+		}
+		result = b.Choose(b.Binary(emu.Equal, rhs, constant(0)), constant(0), b.Divide(kind, a, rhs, d.width))
 	case highMultiply:
 		result = b.MultiplyHigh(a, rhs, d.invert)
 	case multiply:
@@ -2837,19 +2337,8 @@ func lowerExtra(b *emu.Builder, d instruction) emu.Value {
 package aarch64
 
 import (
-	"fmt"
 	emu "renvo.dev/internal/rfe/runtime"
 )
-
-// NativeMemory is a trusted, single-threaded host capability. Descriptors must
-// remain GC-rooted, match live permissions/mappings and share generation clocks
-// across aliases. Native stores to executable pages always leave to architecture.
-// A refill only changes lookup metadata; it must not perform the guest access.
-type NativeMemory interface {
-	CodeContextMemory
-	NativeContext() *emu.MemoryContext
-	NativeRefill(address uint64)
-}
 
 type scalarPlan struct {
 	size, opc, rn, rd, mode, rm, option int
@@ -2952,69 +2441,6 @@ func lowerScalar(b *emu.Builder, op uint32, pc uint64, completed int) bool {
 	}
 	b.Store(PC, b.Constant(pc+4))
 	return true
-}
-func (e *Engine) stepMemory(c *CPU, block *compiledBlock) error {
-	memory, ok := c.Memory.(NativeMemory)
-	if !ok || e.native == nil || block.visits < e.config.NativeThreshold {
-		return e.interpret(c)
-	}
-	context := memory.NativeContext()
-	if context == nil {
-		return e.interpret(c)
-	}
-	if !block.attempted {
-		block.attempted = true
-		var b emu.Builder
-		pc := c.State[PC]
-		b.Store(PC, b.Constant(pc))
-		for i, word := range block.words {
-			if !lowerPair(&b, word, pc+uint64(i)*4, i) && !lowerScalar(&b, word, pc+uint64(i)*4, i) && !Lower(&b, word) && !lowerBranch(&b, word) {
-				e.Stats.CompileFailures++
-				e.discard(pc)
-				return e.interpret(c)
-			}
-		}
-		b.Checkpoint(StateWords, len(block.words))
-		block.ops = b.FinishMemory(StateWords)
-		entry, err := e.native.CompileMemory(block.ops, StateWords)
-		if err != nil {
-			e.Stats.CompileFailures++
-		} else {
-			block.entry, block.native = entry, true
-			_ = e.native.NameEntry(entry, fmt.Sprintf("a64_%x_memory_%d_ops", pc, len(block.ops)))
-			e.Stats.ProfileErrors = e.native.SymbolErrors
-			e.Stats.Promotions++
-		}
-		e.Stats.NativeBytes = e.native.Bytes
-	}
-	if !block.native {
-		return e.interpret(c)
-	}
-	if err := e.native.CallMemory(block.entry, c.State[:], context); err != nil {
-		return err
-	}
-	return e.accountMemory(c, block, memory, context)
-}
-
-// A slow exit has committed exactly the instructions preceding the access. The
-// architecture performs the faulting/slow instruction once, never replays a
-// prefix that may contain stores, and reports its original PC/opcode/cause.
-func (e *Engine) accountMemory(c *CPU, block *compiledBlock, memory NativeMemory, context *emu.MemoryContext) error {
-	retired := context.Retired
-	if retired > uint64(len(block.words)) || context.Status == 0 && retired != uint64(len(block.words)) {
-		return fmt.Errorf("invalid native memory progress")
-	}
-	c.Retired += retired
-	e.Stats.Native += retired
-	e.Stats.NativeMemory += uint64(block.memoryPrefix[retired])
-	if context.Status != 0 {
-		e.Stats.MemoryExits++
-		if context.Status == 1 {
-			memory.NativeRefill(context.Address)
-		}
-		return e.interpret(c)
-	}
-	return nil
 }
 
 -- multiply_wide_test.go --
@@ -3443,284 +2869,5 @@ func TestPairsAndRegisterOffsets(t *testing.T) {
 	} // LDR W0,[X1,W2,SXTW #2]
 	if c.State[0] != 0 {
 		t.Fatal("signed register offset")
-	}
-}
-
--- region.go --
-package aarch64
-
-import (
-	"fmt"
-	emu "renvo.dev/internal/rfe/runtime"
-)
-
-// Regions compile one iteration of a bounded cyclic trace with native loop phis
-// and exit maps. No new decoded pages or larger static block are introduced.
-// Step keeps its original leaf entry; only the native linked Run path uses them.
-func selfLoop(pc uint64, words []uint32) bool {
-	if len(words) == 0 {
-		return false
-	}
-	last := words[len(words)-1]
-	at := pc + uint64(len(words)-1)*4
-	if at < pc {
-		return false
-	}
-	var displacement int64
-	switch branchKind(last) {
-	case 1:
-		if last>>31 != 0 {
-			return false
-		} // BL is not a loop region edge
-		displacement = signed(uint64(last&0x3ffffff), 26) * 4
-	case 2, 3:
-		displacement = signed(uint64(last>>5&0x7ffff), 19) * 4
-	case 4:
-		displacement = signed(uint64(last>>5&0x3fff), 14) * 4
-	default:
-		return false
-	}
-	return at+uint64(displacement) == pc
-}
-
-// Already validated hot blocks may form a bounded cyclic trace. Each internal
-// branch is checked natively; only its chosen edge stays inside the region.
-type regionPart struct {
-	pc    uint64
-	block *compiledBlock
-}
-
-func directTargets(pc uint64, words []uint32) (uint64, uint64, bool) {
-	if len(words) == 0 {
-		return 0, 0, false
-	}
-	at := pc + uint64(len(words)-1)*4
-	op := words[len(words)-1]
-	switch branchKind(op) {
-	case 1:
-		if op>>31 != 0 {
-			return 0, 0, false
-		}
-		return at + uint64(signed(uint64(op&0x3ffffff), 26)*4), 0, false
-	case 2, 3:
-		return at + uint64(signed(uint64(op>>5&0x7ffff), 19)*4), at + 4, true
-	case 4:
-		return at + uint64(signed(uint64(op>>5&0x3fff), 14)*4), at + 4, true
-	case 0:
-		return at + 4, 0, false
-	}
-	return 0, 0, false
-}
-func (e *Engine) regionParts(c *CPU, first *compiledBlock) []regionPart {
-	root := c.State[PC]
-	if selfLoop(root, first.words) {
-		return []regionPart{{root, first}}
-	}
-	memory, ok := c.Memory.(CodeContextMemory)
-	if !ok {
-		return nil
-	}
-	stamp := memory.CodeContext()
-	if stamp.Identity == nil || first.context != stamp || len(first.dependencies) == 0 {
-		return nil
-	}
-	parts := []regionPart{{root, first}}
-	seen := map[uint64]bool{root: true}
-	// Explore both legal direct edges, but cap cold discovery independently of
-	// native execution. A failed taken edge must not hide a fallthrough cycle.
-	attempts := 0
-	best := []regionPart(nil)
-	bestInstructions := 0
-	var search func(int) []regionPart
-	search = func(total int) []regionPart {
-		if len(parts) > 1 && total > bestInstructions {
-			best = append([]regionPart(nil), parts...)
-			bestInstructions = total
-		}
-		current := parts[len(parts)-1]
-		if len(current.block.words) == 0 || branchKind(current.block.words[len(current.block.words)-1]) == 5 {
-			return nil
-		}
-		next, alternate, conditional := directTargets(current.pc, current.block.words)
-		targets := []uint64{next}
-		if conditional && alternate != next {
-			// Prefer the conventional loop back edge, otherwise fallthrough.
-			// This is only discovery order: every selected edge is still guarded.
-			if next > current.pc && alternate < next {
-				targets = []uint64{alternate, next}
-			} else {
-				targets = append(targets, alternate)
-			}
-		}
-		for _, target := range targets {
-			attempts++
-			if attempts > 256 {
-				return nil
-			}
-			if target == root {
-				return append([]regionPart(nil), parts...)
-			}
-			candidate := e.blocks[target]
-			if seen[target] || candidate == nil || !candidate.native || candidate.context != stamp || len(candidate.dependencies) == 0 || len(candidate.words) == 0 || total+len(candidate.words) > e.config.MaxRegionInstructions {
-				continue
-			}
-			seen[target] = true
-			parts = append(parts, regionPart{target, candidate})
-			result := search(total + len(candidate.words))
-			parts = parts[:len(parts)-1]
-			delete(seen, target)
-			if len(result) != 0 {
-				return result
-			}
-		}
-		return nil
-	}
-	if cycle := search(len(first.words)); len(cycle) != 0 {
-		return cycle
-	}
-	return best
-}
-
-func (e *Engine) prepareRegion(c *CPU, block *compiledBlock) {
-	if block.region || !block.native || e.native == nil || block.regionAttempted && block.regionGeneration == e.Stats.Promotions {
-		return
-	}
-	block.regionAttempted = true
-	block.regionGeneration = e.Stats.Promotions
-	parts := e.regionParts(c, block)
-	if len(parts) == 0 {
-		return
-	}
-	count := 0
-	for _, part := range parts {
-		count += len(part.block.words)
-	}
-	if count > e.config.MaxRegionInstructions {
-		return
-	}
-	var b emu.Builder
-	pc := c.State[PC]
-	b.Store(PC, b.Constant(pc))
-	completed := 0
-	prefix := [17]uint8{}
-	for index, part := range parts {
-		for i, word := range part.block.words {
-			if !lowerPair(&b, word, part.pc+uint64(i)*4, completed) && !lowerScalar(&b, word, part.pc+uint64(i)*4, completed) && !Lower(&b, word) && !lowerBranch(&b, word) {
-				return
-			}
-			completed++
-			if completed < len(prefix) {
-				prefix[completed] = prefix[completed-1] + part.block.memoryPrefix[i+1] - part.block.memoryPrefix[i]
-			}
-		}
-		if index+1 < len(parts) {
-			b.Checkpoint(StateWords, completed)
-			b.RegionGuard(b.Binary(emu.Equal, b.Load(PC), b.Constant(parts[index+1].pc)))
-			// A successful guard proves this exact edge. Refine forwarded PC
-			// only after the precise checkpoint/guard, never on a side exit.
-			b.Store(PC, b.Constant(parts[index+1].pc))
-		}
-	}
-	b.Checkpoint(StateWords, count)
-	// If neither legal direct successor can return to the root, this is
-	// provably a one-shot trace. Preserve the generic cyclic path for indirect
-	// branches and BL, whose targets this discovery routine does not model.
-	lastPart := parts[len(parts)-1]
-	lastWord := lastPart.block.words[len(lastPart.block.words)-1]
-	next, alternate, conditional := directTargets(lastPart.pc, lastPart.block.words)
-	oneShot := branchKind(lastWord) != 5 && !(branchKind(lastWord) == 1 && lastWord>>31 != 0) && next != pc && (!conditional || alternate != pc)
-	if oneShot {
-		b.LoopContinue(b.Constant(0))
-	} else {
-		b.LoopContinue(b.Binary(emu.Equal, b.Load(PC), b.Constant(pc)))
-	}
-	entry, err := e.native.CompileLoop(b.FinishMemory(StateWords), StateWords, count)
-	if err != nil {
-		e.Stats.CompileFailures++
-		return
-	}
-	// Validation of this entry must cover all constituent pages, not just its
-	// original block. An executable mutation clears links before revalidation.
-	dependencies := append([]codeDependency(nil), block.dependencies...)
-	for _, part := range parts[1:] {
-		for _, dependency := range part.block.dependencies {
-			found := false
-			for _, old := range dependencies {
-				if old.address == dependency.address {
-					found = true
-					break
-				}
-			}
-			if !found {
-				dependencies = append(dependencies, dependency)
-			}
-		}
-	}
-	block.dependencies = dependencies
-	block.regionEntry, block.regionInstructions, block.region = entry, count, true
-	block.regionPrefix = prefix
-	e.Stats.Regions++
-	e.Stats.NativeBytes = e.native.Bytes
-	_ = e.native.NameEntry(entry, fmt.Sprintf("a64_%x_region_%d_instructions", pc, count))
-	e.Stats.ProfileErrors = e.native.SymbolErrors
-}
-
--- region_discovery_test.go --
-package aarch64
-
-import "testing"
-
-type regionDiscoveryMemory struct {
-	testMemory
-	stamp CodeStamp
-}
-
-func (m *regionDiscoveryMemory) CodeContext() CodeStamp                { return m.stamp }
-func (m *regionDiscoveryMemory) CodeVersion(uint64) (CodeStamp, error) { return m.stamp, nil }
-
-func TestRegionDiscoveryAlternativeCycleAndAcyclicBounds(t *testing.T) {
-	stamp := CodeStamp{Identity: new(CodeIdentity), Epoch: 1}
-	memory := &regionDiscoveryMemory{stamp: stamp}
-	c := CPU{Memory: memory}
-	makeBlock := func(words ...uint32) *compiledBlock {
-		return &compiledBlock{native: true, words: words, context: stamp, dependencies: []codeDependency{{0, stamp}}}
-	}
-	e := Engine{config: DefaultEngineConfig(), blocks: map[uint64]*compiledBlock{}}
-	// The first (backward) edge enters a different cycle. The alternative edge
-	// returns to this root and must not be hidden by the failed first search.
-	c.State[PC] = 16
-	first := makeBlock(0x54ffff81)       // B.NE 0
-	e.blocks[0] = makeBlock(0x14000000)  // B 0
-	e.blocks[20] = makeBlock(0x17ffffff) // B 16
-	parts := e.regionParts(&c, first)
-	if len(parts) != 2 || parts[0].pc != 16 || parts[1].pc != 20 {
-		t.Fatalf("alternative cycle lost: %+v", parts)
-	}
-	// A noncyclic path is still useful, but it must stay inside the static cap.
-	c.State[PC] = 0
-	first = makeBlock(0xd2800000)
-	e.blocks = map[uint64]*compiledBlock{4: makeBlock(0xd2800021), 8: makeBlock(0xd65f03c0)}
-	parts = e.regionParts(&c, first)
-	if len(parts) != 3 || parts[2].pc != 8 {
-		t.Fatalf("acyclic path missing: %+v", parts)
-	}
-	e.config.MaxRegionInstructions = 2
-	parts = e.regionParts(&c, first)
-	if len(parts) != 2 || parts[1].pc != 4 {
-		t.Fatalf("static trace bound violated: %+v", parts)
-	}
-	e.blocks[4].context.Epoch++
-	if len(e.regionParts(&c, first)) != 0 {
-		t.Fatal("cross-context candidate admitted")
-	}
-	e.blocks[4].context = stamp
-	e.blocks[4].dependencies = nil
-	if len(e.regionParts(&c, first)) != 0 {
-		t.Fatal("unvalidated dependency admitted")
-	}
-	e.blocks[4].dependencies = []codeDependency{{0, stamp}}
-	e.blocks[4].native = false
-	if len(e.regionParts(&c, first)) != 0 {
-		t.Fatal("uncompiled candidate admitted")
 	}
 }

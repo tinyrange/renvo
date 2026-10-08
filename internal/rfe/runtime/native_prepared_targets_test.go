@@ -20,9 +20,22 @@ func TestPreparedTargetFullTagsCountsOffsetsAndOwners(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Guest alignment belongs to the architecture adapter. The common arena
+	// accepts every low-bit pattern, but still compares the complete PC tag.
 	for _, pc := range []uint64{1, 2, 3} {
-		if n.PrepareTargetLink(pc, entry, 3, 1) == nil {
-			t.Fatal("unaligned proof", pc)
+		if err = n.PrepareTargetLink(pc, entry, 3, 1); err != nil {
+			t.Fatal("guest PC rejected by host arena", pc, err)
+		}
+		m := new(MemoryContext)
+		m.ClaimLinks(n)
+		m.PublishLink(pc, entry, 1, [17]uint8{})
+		state := []uint64{0, 0, pc ^ 1}
+		if err = n.CallLinked(state, m, 1); err != nil || m.Total != 0 || state[0] != 0 {
+			t.Fatal("low PC bits ignored", pc, err, state)
+		}
+		state[2] = pc
+		if err = n.CallLinked(state, m, 1); err != nil || m.Total != 1 || state[0] != 1 {
+			t.Fatal("full PC tag not admitted", pc, err, state)
 		}
 	}
 	if err = n.PrepareTargetLink(0, entry, 3, 1); err != nil {

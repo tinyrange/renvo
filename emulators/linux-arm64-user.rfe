@@ -85,72 +85,6 @@ func TestTerminalBranchPageGuard(t *testing.T) {
 	}
 }
 
--- code_version.go --
-package arm64user
-
-import (
-	"fmt"
-	"renvo.dev/emulators/aarch64"
-	emu "renvo.dev/internal/rfe/runtime"
-)
-
-// Copies of a Memory share both the page map and version clock, so they cannot
-// accidentally reuse a generation when updating aliased pages.
-type memoryVersions struct {
-	identity  *aarch64.CodeIdentity
-	epoch     uint64
-	codeEpoch uint64             // last mutation affecting executable pages
-	pageCache [64]pageCacheEntry // shared by copies along with the mapping table
-	native    emu.MemoryContext  // host-owned, rooted native data descriptors
-}
-
-func (m *Memory) nextVersion() (uint64, error) {
-	if m.versions.epoch == ^uint64(0) {
-		return 0, fmt.Errorf("code-page version space exhausted")
-	}
-	m.versions.epoch++
-	return m.versions.epoch, nil
-}
-func (m *Memory) CodeContext() aarch64.CodeStamp {
-	return aarch64.CodeStamp{Identity: m.versions.identity, Epoch: m.versions.codeEpoch}
-}
-func (m *Memory) CodeVersion(address uint64) (aarch64.CodeStamp, error) {
-	if !validRange(address, 1) {
-		return aarch64.CodeStamp{}, fmt.Errorf("invalid access at %#x", address)
-	}
-	p := m.lookupPage(address / PageSize)
-	if p == nil || p.permissions&ExecutePermission == 0 {
-		return aarch64.CodeStamp{}, fmt.Errorf("unmapped or forbidden access at %#x", address)
-	}
-	return aarch64.CodeStamp{Identity: m.versions.identity, Epoch: p.epoch}, nil
-}
-
-// markWritten is called after full validation and successful version allocation.
-func (m *Memory) markWritten(p *page, version uint64) {
-	p.epoch = version
-	if p.permissions&ExecutePermission != 0 {
-		m.versions.codeEpoch = version
-	}
-}
-
-// commit is used only after a full-range write check. Every touched page gets
-// a fresh generation, including non-executable pages that may become executable.
-func (m *Memory) commit(address uint64, data []byte) error {
-	if len(data) == 0 {
-		return nil
-	}
-	version, err := m.nextVersion()
-	if err != nil {
-		return err
-	}
-	first, last := address/PageSize, (address+uint64(len(data))-1)/PageSize
-	for at := first; at <= last; at++ {
-		m.markWritten(m.pages[at], version)
-	}
-	m.copyIn(address, data)
-	return nil
-}
-
 -- code_version_test.go --
 package arm64user
 
@@ -337,7 +271,7 @@ func TestVersionExhaustionIsTransactional(t *testing.T) {
 		t.Fatal(err)
 	}
 	old, _ := m.CodeVersion(0x1000)
-	m.versions.epoch = ^uint64(0)
+	*m.NativeContext().Clock = ^uint64(0)
 	for _, mutate := range []func() error{
 		func() error { return m.Write(0x1ffc, 4, 0) },
 		func() error { return m.WriteBytes(0x1ffc, []byte{0, 0, 0, 0}) },
@@ -470,7 +404,7 @@ func TestCodeContextAllMutationPaths(t *testing.T) {
 		t.Fatal("aliased context divergence")
 	}
 	old = m.CodeContext()
-	m.versions.epoch = ^uint64(0)
+	*m.NativeContext().Clock = ^uint64(0)
 	if err := m.Unmap(0x1000, PageSize); err == nil {
 		t.Fatal("unmap code ignored generation exhaustion")
 	}
@@ -656,556 +590,79 @@ func TestGuardedMemoryInstructionCache(t *testing.T) {
 }
 
 -- loader.go --
-// Package arm64user supplies the initial static-ELF Linux AArch64 personality.
 package arm64user
 
 import (
 	"crypto/rand"
-	"encoding/binary"
 	"fmt"
+	"io"
 	"renvo.dev/emulators/aarch64"
-	"strings"
+	"renvo.dev/internal/rfe/linuxuser"
 	"time"
 )
 
-const stackTop uint64 = 0x7fff00000000
-const stackSize uint64 = 1 << 20
+const (
+	PageSize          = linuxuser.PageSize
+	AddressLimit      = linuxuser.AddressLimit
+	MemoryLimit       = linuxuser.MemoryLimit
+	ReadPermission    = linuxuser.ReadPermission
+	WritePermission   = linuxuser.WritePermission
+	ExecutePermission = linuxuser.ExecutePermission
+	stackTop          = linuxuser.StackTop
+	stackSize         = linuxuser.StackSize
+)
+
+type Memory = linuxuser.Memory
+
+func NewMemory() *Memory { return linuxuser.NewMemory() }
 
 type Process struct {
-	CPU                        aarch64.CPU
-	Memory                     *Memory
-	Break, breakBase, mmapNext uint64
-	started                    time.Time
+	*linuxuser.Process
+	CPU     aarch64.CPU
+	started time.Time
 }
 
-// Load accepts only static ET_EXEC files. Section tables are irrelevant to
-// execution and are never parsed or allocated. The bounded program table is
-// validated before any guest memory allocation. Failures expose no address space.
 func Load(image []byte, args []string) (*Process, error) {
-	if len(image) < 64 || len(image) > 64<<20 {
-		return nil, fmt.Errorf("invalid ELF image size")
-	}
-	u16, u32, u64 := binary.LittleEndian.Uint16, binary.LittleEndian.Uint32, binary.LittleEndian.Uint64
-	if string(image[:4]) != "\x7fELF" || image[4] != 2 || image[5] != 1 || image[6] != 1 || image[7] != 0 && image[7] != 3 || u16(image[16:]) != 2 || u16(image[18:]) != 183 || u32(image[20:]) != 1 || u32(image[48:]) != 0 || u16(image[52:]) != 64 {
-		return nil, fmt.Errorf("requires little-endian AArch64 static ET_EXEC ELF")
-	}
-	entry, phoff, count := u64(image[24:]), u64(image[32:]), uint64(u16(image[56:]))
-	phsize := count * 56
-	if count == 0 || count > 128 || entry&3 != 0 || u16(image[54:]) != 56 || phoff > uint64(len(image)) || phsize > uint64(len(image))-phoff {
-		return nil, fmt.Errorf("invalid ELF entry or program headers")
-	}
-	type program struct {
-		kind, flags                                      uint32
-		offset, address, fileSize, memorySize, alignment uint64
-	}
-	programs := make([]program, int(count))
-	for i := range programs {
-		record := image[phoff+uint64(i)*56:]
-		p := program{u32(record), u32(record[4:]), u64(record[8:]), u64(record[16:]), u64(record[32:]), u64(record[40:]), u64(record[48:])}
-		programs[i] = p
-		if p.kind == 2 || p.kind == 3 || p.kind == 7 {
-			return nil, fmt.Errorf("dynamic linking and TLS startup unsupported")
-		}
-		if p.kind == 0x6474e551 && p.flags&1 != 0 {
-			return nil, fmt.Errorf("executable stack unsupported")
-		}
-		if p.kind != 1 {
-			continue
-		}
-		if p.fileSize > p.memorySize || p.offset > uint64(len(image)) || p.fileSize > uint64(len(image))-p.offset || !validRange(p.address, p.memorySize) || p.memorySize > MemoryLimit || p.flags&^uint32(7) != 0 {
-			return nil, fmt.Errorf("invalid ELF load segment")
-		}
-		if p.alignment > 1 && (p.alignment&(p.alignment-1) != 0 || p.address%p.alignment != p.offset%p.alignment) {
-			return nil, fmt.Errorf("invalid ELF segment alignment")
-		}
-	}
-	m := NewMemory()
-	var high, phdr uint64
-	type interval struct{ start, end uint64 }
-	var segments []interval
-	for _, p := range programs {
-		if p.kind != 1 || p.memorySize == 0 {
-			continue
-		}
-		end := p.address + p.memorySize
-		for _, prior := range segments {
-			if p.address < prior.end && end > prior.start {
-				return nil, fmt.Errorf("overlapping ELF segments")
-			}
-		}
-		segments = append(segments, interval{p.address, end})
-		permissions := uint8(0)
-		if p.flags&4 != 0 {
-			permissions |= ReadPermission
-		}
-		if p.flags&2 != 0 {
-			permissions |= WritePermission
-		}
-		if p.flags&1 != 0 {
-			permissions |= ExecutePermission
-		}
-		for at := p.address &^ (PageSize - 1); at < pageUp(end); at += PageSize {
-			existing := m.pages[at/PageSize]
-			if existing != nil {
-				existing.permissions |= permissions
-			} else if err := m.Map(at, PageSize, permissions); err != nil {
-				return nil, err
-			}
-		}
-		m.copyIn(p.address, image[p.offset:p.offset+p.fileSize])
-		if end > high {
-			high = end
-		}
-		if phoff >= p.offset && phoff-p.offset <= p.fileSize && phsize <= p.fileSize-(phoff-p.offset) {
-			phdr = p.address + phoff - p.offset
-		}
-	}
-	if len(segments) == 0 || phdr == 0 {
-		return nil, fmt.Errorf("ELF program headers must be mapped")
-	}
-	if _, err := m.Read(entry, 4, true); err != nil {
-		return nil, fmt.Errorf("ELF entry: %w", err)
-	}
-	if err := m.Check(phdr, phsize, ReadPermission); err != nil {
-		return nil, fmt.Errorf("ELF program headers: %w", err)
-	}
-	var err error
-	if err = m.Map(stackTop-stackSize, stackSize, ReadPermission|WritePermission); err != nil {
-		return nil, err
-	}
-	if len(args) == 0 {
-		args = []string{"guest"}
-	}
-	if len(args) > 256 {
-		return nil, fmt.Errorf("too many guest arguments")
-	}
-	cursor := stackTop
-	push := func(data []byte) (uint64, error) {
-		if uint64(len(data)) > cursor-(stackTop-stackSize) {
-			return 0, fmt.Errorf("initial stack overflow")
-		}
-		cursor -= uint64(len(data))
-		return cursor, m.WriteBytes(cursor, data)
-	}
-	pointers := make([]uint64, len(args))
-	total := 0
-	for i := len(args) - 1; i >= 0; i-- {
-		total += len(args[i]) + 1
-		if total > 65536 || strings.ContainsRune(args[i], 0) {
-			return nil, fmt.Errorf("invalid guest argument")
-		}
-		pointers[i], err = push(append([]byte(args[i]), 0))
-		if err != nil {
-			return nil, err
-		}
-	}
-	random := make([]byte, 16)
-	if _, err = rand.Read(random); err != nil {
-		return nil, err
-	}
-	randomAddress, err := push(random)
+	shared, err := linuxuser.Load(image, args, linuxuser.ELFABI{Machine: 183, EntryAlignment: 4, EntryBytes: 4}, func(dst []byte) error { _, err := rand.Read(dst); return err })
 	if err != nil {
 		return nil, err
 	}
-	// argc, argv[], NULL, empty envp, and a conservative auxiliary vector.
-	words := []uint64{uint64(len(args))}
-	words = append(words, pointers...)
-	words = append(words, 0, 0)
-	words = append(words, 3, phdr, 4, 56, 5, count, 6, PageSize, 7, 0, 9, entry, 11, 0, 12, 0, 13, 0, 14, 0, 16, 0, 23, 0, 25, randomAddress, 31, pointers[0], 0, 0)
-	cursor = (cursor - uint64(len(words))*8) &^ uint64(15)
-	for i, value := range words {
-		if err = m.Write(cursor+uint64(i)*8, 8, value); err != nil {
-			return nil, err
+	p := &Process{Process: shared, started: time.Now()}
+	shared.Clock = func(id uint64) (int64, int64, bool) {
+		if id == 0 {
+			now := time.Now()
+			return now.Unix(), int64(now.Nanosecond()), true
 		}
+		if id == 1 {
+			elapsed := time.Since(p.started)
+			return int64(elapsed / time.Second), int64(elapsed % time.Second), true
+		}
+		return 0, 0, false
 	}
-	end := pageUp(high)
-	p := &Process{Memory: m, Break: end, breakBase: end, mmapNext: 0x100000000, started: time.Now()}
-	p.CPU.Memory = m
-	p.CPU.State[aarch64.PC] = entry
-	p.CPU.State[aarch64.SP] = cursor
+	p.CPU.Memory = shared.Memory
+	p.CPU.State[aarch64.PC], p.CPU.State[aarch64.SP] = shared.Entry, shared.StackPointer
 	return p, nil
 }
-
--- memory.go --
-package arm64user
-
-import (
-	"encoding/binary"
-	"fmt"
-	"renvo.dev/emulators/aarch64"
-)
-
-const (
-	PageSize          uint64 = 4096
-	AddressLimit      uint64 = 1 << 48
-	MemoryLimit       uint64 = 64 << 20
-	ReadPermission    uint8  = 1
-	WritePermission   uint8  = 2
-	ExecutePermission uint8  = 4
-)
-
-type page struct {
-	data        [4096]byte
-	permissions uint8
-	epoch       uint64
-}
-type Memory struct {
-	pages    map[uint64]*page
-	versions *memoryVersions
-}
-
-func NewMemory() *Memory {
-	return &Memory{pages: map[uint64]*page{}, versions: &memoryVersions{identity: &aarch64.CodeIdentity{}}}
-}
-func validRange(address, length uint64) bool {
-	return address < AddressLimit && length <= AddressLimit-address
-}
-func pageRange(address, length uint64) bool {
-	return length != 0 && address%PageSize == 0 && length%PageSize == 0 && validRange(address, length)
-}
-
-func (m *Memory) Map(address, length uint64, permissions uint8) error {
-	if !pageRange(address, length) || permissions&^uint8(7) != 0 || length > MemoryLimit || uint64(len(m.pages))*PageSize > MemoryLimit-length {
-		return fmt.Errorf("invalid or over-budget mapping")
-	}
-	for at := address; at < address+length; at += PageSize {
-		if m.pages[at/PageSize] != nil {
-			return fmt.Errorf("mapping overlaps at %#x", at)
+func syscallABI() linuxuser.SyscallABI {
+	return linuxuser.SyscallABI{Number: 8, Result: 0, Arguments: [6]int{0, 1, 2, 3, 4, 5}, Trap: func(err error) (bool, error) {
+		trap, ok := err.(*aarch64.Exception)
+		if !ok || trap.Kind != "svc" {
+			return false, nil
 		}
-	}
-	version, err := m.nextVersion()
-	if err != nil {
-		return err
-	}
-	for at := address; at < address+length; at += PageSize {
-		m.pages[at/PageSize] = &page{permissions: permissions, epoch: version}
-	}
-	if permissions&ExecutePermission != 0 {
-		m.versions.codeEpoch = version
-	}
-	return nil
+		if trap.Opcode>>5&65535 != 0 {
+			return false, fmt.Errorf("Linux requires SVC #0")
+		}
+		return true, nil
+	}}
 }
-func (m *Memory) Protect(address, length uint64, permissions uint8) error {
-	if !pageRange(address, length) || permissions&^uint8(7) != 0 || length > MemoryLimit {
-		return fmt.Errorf("invalid protection range")
-	}
-	for at := address; at < address+length; at += PageSize {
-		if m.pages[at/PageSize] == nil {
-			return fmt.Errorf("unmapped protection range")
-		}
-	}
-	version, err := m.nextVersion()
-	if err != nil {
-		return err
-	}
-	for at := address; at < address+length; at += PageSize {
-		if (m.pages[at/PageSize].permissions|permissions)&ExecutePermission != 0 {
-			m.versions.codeEpoch = version
-		}
-		m.versions.native.Forget(at / PageSize)
-		m.pages[at/PageSize].permissions = permissions
-		m.pages[at/PageSize].epoch = version
-	}
-	return nil
+func (p *Process) Syscall(output, diagnostics io.Writer) (bool, int) {
+	exited, code, _ := p.Process.ApplySyscall(p.CPU.State[:], syscallABI(), output, diagnostics)
+	return exited, code
 }
-func (m *Memory) Unmap(address, length uint64) error {
-	if !pageRange(address, length) || length > MemoryLimit {
-		return fmt.Errorf("invalid unmap range")
-	}
-	executable := false
-	for at := address; at < address+length; at += PageSize {
-		if p := m.lookupPage(at / PageSize); p != nil && p.permissions&ExecutePermission != 0 {
-			executable = true
-		}
-	}
-	if executable {
-		version, err := m.nextVersion()
-		if err != nil {
-			return err
-		}
-		m.versions.codeEpoch = version
-	}
-	for at := address; at < address+length; at += PageSize {
-		m.forgetPage(at / PageSize)
-		delete(m.pages, at/PageSize)
-	}
-	return nil
+func (p *Process) Run(config aarch64.EngineConfig, limit uint64, output, diagnostics io.Writer) (int, aarch64.Stats, error) {
+	return p.Process.Run(&p.CPU, aarch64.Architecture(), syscallABI(), config, limit, output, diagnostics)
 }
-func (m *Memory) Check(address, length uint64, permission uint8) error {
-	if !validRange(address, length) || length > MemoryLimit {
-		return fmt.Errorf("invalid access at %#x", address)
-	}
-	if length == 0 {
-		return nil
-	}
-	end := address + length
-	for at := address; at < end; {
-		p := m.lookupPage(at / PageSize)
-		if p == nil || p.permissions&permission != permission {
-			return fmt.Errorf("unmapped or forbidden access at %#x", at)
-		}
-		at = (at/PageSize + 1) * PageSize
-	}
-	return nil
-}
-
-// scalarPage checks the complete scalar access. A nil page with nil error
-// means a cross-page access; the caller then uses the full-range slow path.
-func (m *Memory) scalarPage(address uint64, size int, permission uint8) (*page, error) {
-	if size != 1 && size != 2 && size != 4 && size != 8 {
-		return nil, fmt.Errorf("invalid access size")
-	}
-	if !validRange(address, uint64(size)) {
-		return nil, fmt.Errorf("invalid access at %#x", address)
-	}
-	if address%PageSize+uint64(size) > PageSize {
-		return nil, nil
-	}
-	p := m.lookupPage(address / PageSize)
-	if p == nil || p.permissions&permission != permission {
-		return nil, fmt.Errorf("unmapped or forbidden access at %#x", address)
-	}
-	return p, nil
-}
-func pageRead(p *page, offset uint64, size int) uint64 {
-	switch size {
-	case 1:
-		return uint64(p.data[offset])
-	case 2:
-		return uint64(binary.LittleEndian.Uint16(p.data[offset : offset+2]))
-	case 4:
-		return uint64(binary.LittleEndian.Uint32(p.data[offset : offset+4]))
-	default:
-		return binary.LittleEndian.Uint64(p.data[offset : offset+8])
-	}
-}
-func pageWrite(p *page, offset uint64, size int, value uint64) {
-	switch size {
-	case 1:
-		p.data[offset] = byte(value)
-	case 2:
-		binary.LittleEndian.PutUint16(p.data[offset:offset+2], uint16(value))
-	case 4:
-		binary.LittleEndian.PutUint32(p.data[offset:offset+4], uint32(value))
-	default:
-		binary.LittleEndian.PutUint64(p.data[offset:offset+8], value)
-	}
-}
-
-// readChecked is called only after a complete permission/range precheck.
-// Each page is looked up once, not once for each byte.
-func (m *Memory) readChecked(address uint64, size int) uint64 {
-	var value uint64
-	for done := 0; done < size; {
-		offset := address % PageSize
-		count := size - done
-		if uint64(count) > PageSize-offset {
-			count = int(PageSize - offset)
-		}
-		p := m.lookupPage(address / PageSize)
-		for i := 0; i < count; i++ {
-			value |= uint64(p.data[offset+uint64(i)]) << uint((done+i)*8)
-		}
-		done += count
-		address += uint64(count)
-	}
-	return value
-}
-func (m *Memory) Read(address uint64, size int, execute bool) (uint64, error) {
-	permission := ReadPermission
-	if execute {
-		permission = ExecutePermission
-	}
-	p, err := m.scalarPage(address, size, permission)
-	if err != nil {
-		return 0, err
-	}
-	if p != nil {
-		return pageRead(p, address%PageSize, size), nil
-	}
-	if err := m.Check(address, uint64(size), permission); err != nil {
-		return 0, err
-	}
-	return m.readChecked(address, size), nil
-}
-func (m *Memory) Write(address uint64, size int, value uint64) error {
-	p, err := m.scalarPage(address, size, WritePermission)
-	if err != nil {
-		return err
-	}
-	if p != nil {
-		version, err := m.nextVersion()
-		if err != nil {
-			return err
-		}
-		m.markWritten(p, version)
-		pageWrite(p, address%PageSize, size, value)
-		return nil
-	}
-	if err := m.Check(address, uint64(size), WritePermission); err != nil {
-		return err
-	}
-	var data [8]byte
-	for i := 0; i < size; i++ {
-		data[i] = byte(value >> uint(i*8))
-	}
-	return m.commit(address, data[:size])
-}
-func (m *Memory) ReadBytes(address, length uint64) ([]byte, error) {
-	if length > 1<<20 {
-		return nil, fmt.Errorf("transfer exceeds budget")
-	}
-	if err := m.Check(address, length, ReadPermission); err != nil {
-		return nil, err
-	}
-	out := make([]byte, int(length))
-	for done := uint64(0); done < length; {
-		at := address + done
-		offset := at % PageSize
-		count := length - done
-		if count > PageSize-offset {
-			count = PageSize - offset
-		}
-		p := m.lookupPage(at / PageSize)
-		copy(out[done:done+count], p.data[offset:offset+count])
-		done += count
-	}
-	return out, nil
-}
-func (m *Memory) WriteBytes(address uint64, data []byte) error {
-	if err := m.Check(address, uint64(len(data)), WritePermission); err != nil {
-		return err
-	}
-	return m.commit(address, data)
-}
-
-// copyIn is only used after complete validation, or by the ELF loader before
-// exposing a new address space. Loader writes happen before any code stamps are
-// observed; all writes to a live space must go through commit. This helper never
-// allocates a page or changes permissions.
-func (m *Memory) copyIn(address uint64, data []byte) {
-	for len(data) > 0 {
-		offset := address % PageSize
-		count := len(data)
-		if uint64(count) > PageSize-offset {
-			count = int(PageSize - offset)
-		}
-		p := m.lookupPage(address / PageSize)
-		copy(p.data[offset:offset+uint64(count)], data[:count])
-		address += uint64(count)
-		data = data[count:]
-	}
-}
-func pageUp(value uint64) uint64 { return (value + PageSize - 1) &^ (PageSize - 1) }
-
--- memory_fast_test.go --
-package arm64user
-
-import "testing"
-
-func TestScalarAndBufferMemoryBoundaries(t *testing.T) {
-	m := NewMemory()
-	if err := m.Map(0x1000, 3*PageSize, 7); err != nil {
-		t.Fatal(err)
-	}
-	original := make([]byte, 3*int(PageSize))
-	for i := range original {
-		original[i] = byte(i*37 + i/13)
-		m.pages[1+uint64(i)/PageSize].data[uint64(i)%PageSize] = original[i]
-	}
-	offsets := []int{0, 1, 2, 3, 7, 15, 4088, 4089, 4090, 4091, 4092, 4093, 4094, 4095, 4096, 4097, 8188, 8191}
-	for _, size := range []int{1, 2, 4, 8} {
-		for _, offset := range offsets {
-			for _, execute := range []bool{false, true} {
-				want := uint64(0)
-				for j := 0; j < size; j++ {
-					want |= uint64(original[offset+j]) << uint(j*8)
-				}
-				got, err := m.Read(0x1000+uint64(offset), size, execute)
-				if err != nil || got != want {
-					t.Fatalf("size=%d offset=%d execute=%v got=%x want=%x err=%v", size, offset, execute, got, want, err)
-				}
-			}
-		}
-	}
-	for _, size := range []int{1, 2, 4, 8} {
-		for _, offset := range offsets {
-			if err := m.WriteBytes(0x1000, original); err != nil {
-				t.Fatal(err)
-			}
-			value := uint64(0xfedcba9876543210) ^ uint64(offset)
-			want := append([]byte(nil), original...)
-			for j := 0; j < size; j++ {
-				want[offset+j] = byte(value >> uint(j*8))
-			}
-			if err := m.Write(0x1000+uint64(offset), size, value); err != nil {
-				t.Fatal(err)
-			}
-			got, err := m.ReadBytes(0x1000, uint64(len(want)))
-			if err != nil || string(got) != string(want) {
-				t.Fatalf("scalar store damaged bytes size=%d offset=%d err=%v", size, offset, err)
-			}
-		}
-	}
-	for _, offset := range []int{0, 3, 4095} {
-		for _, length := range []int{0, 1, 17, 4096, 4103} {
-			if err := m.WriteBytes(0x1000, original); err != nil {
-				t.Fatal(err)
-			}
-			payload := make([]byte, length)
-			for i := range payload {
-				payload[i] = byte(i * 11)
-			}
-			want := append([]byte(nil), original...)
-			copy(want[offset:], payload)
-			if err := m.WriteBytes(0x1000+uint64(offset), payload); err != nil {
-				t.Fatal(err)
-			}
-			got, err := m.ReadBytes(0x1000, uint64(len(want)))
-			if err != nil || string(got) != string(want) {
-				t.Fatal("page-chunk buffer copy")
-			}
-		}
-	}
-	if err := m.Protect(0x2000, PageSize, ReadPermission); err != nil {
-		t.Fatal(err)
-	}
-	before, _ := m.ReadBytes(0x1ff8, 16)
-	stamp := m.CodeContext()
-	for _, write := range []func() error{
-		func() error { return m.Write(0x1ffc, 8, 0) },
-		func() error { return m.WritePair(0x1ff8, 8, 0, 0) },
-		func() error { return m.WriteBytes(0x1fff, []byte{0, 0}) },
-	} {
-		if err := write(); err == nil {
-			t.Fatal("cross-page write ignored permission")
-		}
-		after, _ := m.ReadBytes(0x1ff8, 16)
-		if string(after) != string(before) || m.CodeContext() != stamp {
-			t.Fatal("failed access partially committed")
-		}
-	}
-	if _, err := m.Read(0x1ffc, 8, true); err == nil {
-		t.Fatal("execute permission checked only on first page")
-	}
-	if err := m.Unmap(0x2000, PageSize); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := m.ReadPair(0x1ff8, 8); err == nil {
-		t.Fatal("pair read crossed missing page")
-	}
-	for _, size := range []int{-1, 0, 3, 16} {
-		if _, err := m.Read(0x1000, size, false); err == nil {
-			t.Fatal("invalid size read")
-		}
-		if err := m.Write(0x1000, size, 0); err == nil {
-			t.Fatal("invalid size write")
-		}
-	}
-	if _, err := m.Read(AddressLimit-4, 8, false); err == nil {
-		t.Fatal("address range overflow")
-	}
-}
+func errno(value uint64) uint64 { return ^value + 1 }
 
 -- native_link_test.go --
 package arm64user
@@ -1378,29 +835,6 @@ func TestNativeLinkedMixedFaultCommitsOnlyOnce(t *testing.T) {
 	}
 	if e.Stats.Linked < 5 || e.Stats.NativeMemory < 4 {
 		t.Fatal("mixed native linking not exercised", e.Stats)
-	}
-}
-
--- native_memory.go --
-package arm64user
-
-import emu "renvo.dev/internal/rfe/runtime"
-
-func (m *Memory) NativeContext() *emu.MemoryContext {
-	context := &m.versions.native
-	context.Clock = &m.versions.epoch
-	return context
-}
-func (m *Memory) NativeRefill(address uint64) {
-	if !validRange(address, 1) {
-		return
-	}
-	m.lookupPage(address / PageSize)
-}
-func (m *Memory) fillNative(number uint64, p *page) {
-	context := &m.versions.native
-	if context.Clock != nil {
-		context.Fill(number, &p.data, uint64(p.permissions), &p.epoch)
 	}
 }
 
@@ -1609,13 +1043,13 @@ func TestNativeMemoryExecutableStoreAndGenerationExhaustion(t *testing.T) {
 	m2 := nativeTestMemory(t, 0x91000400, 0xf8008420, 0x14000000)
 	m2.NativeContext()
 	m2.NativeRefill(0x3100)
-	m2.versions.epoch = ^uint64(0)
+	*m2.NativeContext().Clock = ^uint64(0)
 	c2 := aarch64.CPU{Memory: m2}
 	c2.State[0], c2.State[1], c2.State[aarch64.PC] = 41, 0x3100, 0x1000
 	err = e2.Run(&c2, 3)
 	trap, ok = err.(*aarch64.Exception)
 	value, _ := m2.Read(0x3100, 8, false)
-	if !ok || trap.Kind != "memory" || trap.PC != 0x1004 || c2.Retired != 1 || c2.State[0] != 42 || c2.State[1] != 0x3100 || value != 0 || m2.versions.epoch != ^uint64(0) {
+	if !ok || trap.Kind != "memory" || trap.PC != 0x1004 || c2.Retired != 1 || c2.State[0] != 42 || c2.State[1] != 0x3100 || value != 0 || *m2.NativeContext().Clock != ^uint64(0) {
 		t.Fatal("exhausted native store mutated state/data", c2.State, c2.Retired, value, err)
 	}
 }
@@ -1675,342 +1109,16 @@ func TestNativeDescriptorCollisionNeverAliasesGuestPages(t *testing.T) {
 	}
 }
 
--- page_cache.go --
-package arm64user
-
-// This is a mapping lookup cache, not an access/permission cache. Every caller
-// still checks current permissions on the returned page. Its owner is shared by
-// memory aliases, so Unmap cannot leave a detached page reachable via a copy.
-type pageCacheEntry struct {
-	number uint64
-	page   *page
-}
-
-func (m *Memory) lookupPage(number uint64) *page {
-	entry := &m.versions.pageCache[number&63]
-	if entry.page != nil && entry.number == number {
-		m.fillNative(number, entry.page)
-		return entry.page
-	}
-	p := m.pages[number]
-	if p != nil {
-		*entry = pageCacheEntry{number, p}
-		m.fillNative(number, p)
-	}
-	return p
-}
-
-func (m *Memory) forgetPage(number uint64) {
-	m.versions.native.Forget(number)
-	entry := &m.versions.pageCache[number&63]
-	if entry.number == number {
-		*entry = pageCacheEntry{}
-	}
-}
-
--- page_cache_test.go --
-package arm64user
-
-import "testing"
-
-func TestPageCacheAliasesPermissionsRemapAndCollision(t *testing.T) {
-	m := NewMemory()
-	const at uint64 = 0x1000
-	const collision uint64 = at + 64*PageSize
-	rwx := ReadPermission | WritePermission | ExecutePermission
-	if err := m.Map(at, PageSize, rwx); err != nil {
-		t.Fatal(err)
-	}
-	if err := m.Map(collision, PageSize, rwx); err != nil {
-		t.Fatal(err)
-	}
-	if err := m.Write(at, 8, 0x1234); err != nil {
-		t.Fatal(err)
-	}
-	if err := m.Write(collision, 8, 0x5678); err != nil {
-		t.Fatal(err)
-	}
-	alias := *m
-	for _, address := range []uint64{at, collision, at, collision, at} {
-		want := uint64(0x1234)
-		if address == collision {
-			want = 0x5678
-		}
-		if got, err := alias.Read(address, 8, false); err != nil || got != want {
-			t.Fatal("collision/alias read", got, err)
-		}
-	}
-	if err := alias.Protect(at, PageSize, WritePermission); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := m.Read(at, 8, false); err == nil {
-		t.Fatal("cached read bypassed protection")
-	}
-	if _, err := m.Read(at, 4, true); err == nil {
-		t.Fatal("cached instruction bypassed protection")
-	}
-	if _, err := m.CodeVersion(at); err == nil {
-		t.Fatal("cached code stamp bypassed protection")
-	}
-	if err := m.Protect(at, PageSize, ReadPermission); err != nil {
-		t.Fatal(err)
-	}
-	if err := alias.Write(at, 8, 99); err == nil {
-		t.Fatal("cached write bypassed protection")
-	}
-	// Warm through one owner; unmap through the other must discard detached data.
-	if got, err := m.Read(at, 8, false); err != nil || got != 0x1234 {
-		t.Fatal(got, err)
-	}
-	if err := alias.Unmap(at, PageSize); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := m.Read(at, 8, false); err == nil {
-		t.Fatal("detached cached page after alias unmap")
-	}
-	if err := alias.Map(at, PageSize, rwx); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := m.Read(at, 8, false); err != nil || got != 0 {
-		t.Fatal("remap reused old contents", got, err)
-	}
-	// Cross-page slow paths must not turn a cached first page into a partial store.
-	if err := m.Write(at+PageSize-8, 8, 0xabcdef); err != nil {
-		t.Fatal(err)
-	}
-	if err := alias.Write(at+PageSize-4, 8, ^uint64(0)); err == nil {
-		t.Fatal("cross-page write accepted unmapped second page")
-	}
-	if got, err := m.Read(at+PageSize-8, 8, false); err != nil || got != 0xabcdef {
-		t.Fatal("partial faulted write", got, err)
-	}
-}
-
--- pair.go --
-package arm64user
-
-import "fmt"
-
-func (m *Memory) ReadPair(address uint64, size int) (uint64, uint64, error) {
-	if size != 4 && size != 8 {
-		return 0, 0, fmt.Errorf("invalid pair size")
-	}
-	if validRange(address, uint64(size)*2) && address%PageSize+uint64(size)*2 <= PageSize {
-		p := m.lookupPage(address / PageSize)
-		if p == nil || p.permissions&ReadPermission == 0 {
-			return 0, 0, fmt.Errorf("unmapped or forbidden access at %#x", address)
-		}
-		offset := address % PageSize
-		return pageRead(p, offset, size), pageRead(p, offset+uint64(size), size), nil
-	}
-	if err := m.Check(address, uint64(size)*2, ReadPermission); err != nil {
-		return 0, 0, err
-	}
-	first := m.readChecked(address, size)
-	second := m.readChecked(address+uint64(size), size)
-	return first, second, nil
-}
-func (m *Memory) WritePair(address uint64, size int, first, second uint64) error {
-	if size != 4 && size != 8 {
-		return fmt.Errorf("invalid pair size")
-	}
-	if validRange(address, uint64(size)*2) && address%PageSize+uint64(size)*2 <= PageSize {
-		p := m.lookupPage(address / PageSize)
-		if p == nil || p.permissions&WritePermission == 0 {
-			return fmt.Errorf("unmapped or forbidden access at %#x", address)
-		}
-		version, err := m.nextVersion()
-		if err != nil {
-			return err
-		}
-		m.markWritten(p, version)
-		offset := address % PageSize
-		pageWrite(p, offset, size, first)
-		pageWrite(p, offset+uint64(size), size, second)
-		return nil
-	}
-	if err := m.Check(address, uint64(size)*2, WritePermission); err != nil {
-		return err
-	}
-	// Commit once, including version allocation, so even generation exhaustion
-	// cannot leave the first half of a pair written on an error.
-	var data [16]byte
-	for i := 0; i < size; i++ {
-		data[i] = byte(first >> (i * 8))
-		data[size+i] = byte(second >> (i * 8))
-	}
-	return m.commit(address, data[:size*2])
-}
-
 -- process.go --
 package arm64user
 
 import (
-	"encoding/binary"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"renvo.dev/emulators/aarch64"
-	"time"
 )
-
-func errno(value uint64) uint64 { return ^value + 1 }
-
-// Syscall implements only the documented first ABI slice. It never forwards a
-// guest syscall number, path, descriptor or address to the host kernel.
-func (p *Process) Syscall(output, diagnostics io.Writer) (exited bool, code int) {
-	x := &p.CPU.State
-	result := errno(38) // ENOSYS
-	switch x[8] {
-	case 93, 94: // exit, exit_group (single guest thread)
-		return true, int(x[0] & 255)
-	case 64: // write; bounded, Linux-compatible short transfers
-		writer := output
-		if x[0] == 2 {
-			writer = diagnostics
-		} else if x[0] != 1 {
-			result = errno(9)
-			break
-		}
-		if x[2] == 0 {
-			result = 0
-			break
-		}
-		length := x[2]
-		if length > 65536 {
-			length = 65536
-		}
-		data, err := p.Memory.ReadBytes(x[1], length)
-		if err != nil {
-			result = errno(14)
-			break
-		}
-		if writer == nil {
-			writer = io.Discard
-		}
-		n, err := writer.Write(data)
-		if n < 0 || n > len(data) {
-			result = errno(5)
-		} else if n > 0 || err == nil {
-			result = uint64(n)
-		} else {
-			result = errno(5)
-		}
-	case 113: // clock_gettime: real elapsed time, never guest instruction ticks
-		var seconds, nanoseconds int64
-		if x[0] == 0 {
-			now := time.Now()
-			seconds, nanoseconds = now.Unix(), int64(now.Nanosecond())
-		} else if x[0] == 1 {
-			elapsed := time.Since(p.started)
-			seconds, nanoseconds = int64(elapsed/time.Second), int64(elapsed%time.Second)
-		} else {
-			result = errno(22)
-			break
-		}
-		data := make([]byte, 16)
-		binary.LittleEndian.PutUint64(data, uint64(seconds))
-		binary.LittleEndian.PutUint64(data[8:], uint64(nanoseconds))
-		if err := p.Memory.WriteBytes(x[1], data); err != nil {
-			result = errno(14)
-		} else {
-			result = 0
-		}
-	case 172, 178: // getpid, gettid: one virtual process/thread
-		result = 1
-	case 214: // brk: return old break on failure, as the Linux kernel ABI does
-		requested := x[0]
-		result = p.Break
-		if requested == 0 || requested < p.breakBase || requested-p.breakBase > 16<<20 || !validRange(requested, 0) {
-			break
-		}
-		oldEnd, newEnd := pageUp(p.Break), pageUp(requested)
-		var err error
-		if newEnd > oldEnd {
-			err = p.Memory.Map(oldEnd, newEnd-oldEnd, ReadPermission|WritePermission)
-		} else if newEnd < oldEnd {
-			err = p.Memory.Unmap(newEnd, oldEnd-newEnd)
-		}
-		if err == nil {
-			p.Break = requested
-			result = requested
-		}
-	case 222: // mmap: anonymous private, no fixed/hint mapping yet
-		if x[0] != 0 || x[1] == 0 || x[1] > MemoryLimit || x[2]&^uint64(7) != 0 || x[3] != 0x22 || x[4] != ^uint64(0) || x[5] != 0 {
-			result = errno(22)
-			break
-		}
-		length := pageUp(x[1])
-		address := p.mmapNext
-		if err := p.Memory.Map(address, length, uint8(x[2])); err != nil {
-			result = errno(12)
-		} else {
-			result = address
-			p.mmapNext += length + PageSize
-		}
-	case 215: // munmap
-		if x[1] == 0 || x[1] > MemoryLimit || x[0]%PageSize != 0 {
-			result = errno(22)
-			break
-		}
-		if err := p.Memory.Unmap(x[0], pageUp(x[1])); err != nil {
-			result = errno(22)
-		} else {
-			result = 0
-		}
-	case 226: // mprotect
-		if x[2]&^uint64(7) != 0 || x[0]%PageSize != 0 || x[1] > MemoryLimit {
-			result = errno(22)
-			break
-		}
-		if x[1] == 0 {
-			result = 0
-			break
-		}
-		if err := p.Memory.Protect(x[0], pageUp(x[1]), uint8(x[2])); err != nil {
-			result = errno(12)
-		} else {
-			result = 0
-		}
-	}
-	x[0] = result
-	return false, 0
-}
-
-// Run uses an absolute retirement ceiling, so resuming a stopped process does
-// not accidentally grant another full budget. The returned statistics describe
-// this invocation. All native mappings are released on every exit path.
-func (p *Process) Run(config aarch64.EngineConfig, limit uint64, output, diagnostics io.Writer) (code int, stats aarch64.Stats, err error) {
-	engine, err := aarch64.NewEngine(config)
-	if err != nil {
-		return 0, stats, err
-	}
-	defer func() {
-		stats = engine.Stats
-		closeErr := engine.Close()
-		if err == nil {
-			err = closeErr
-		}
-	}()
-	for p.CPU.Retired < limit {
-		err = engine.RunQuanta(&p.CPU, limit-p.CPU.Retired)
-		if trap, ok := err.(*aarch64.Exception); ok && trap.Kind == "svc" {
-			if trap.Opcode>>5&65535 != 0 {
-				return 0, stats, fmt.Errorf("Linux requires SVC #0")
-			}
-			exited, status := p.Syscall(output, diagnostics)
-			if exited {
-				return status, stats, nil
-			}
-			err = nil
-		}
-		if err != nil {
-			return 0, stats, err
-		}
-	}
-	return 0, stats, fmt.Errorf("instruction budget exhausted after %d instructions", p.CPU.Retired)
-}
 
 func Main(args []string) int {
 	flags := flag.NewFlagSet("linux-arm64-user", flag.ContinueOnError)
@@ -2116,82 +1224,6 @@ func TestRunQuantaMatchesArchitecturalStepsAndRevalidates(t *testing.T) {
 	state := c.State
 	if err := e.RunQuanta(c, 1024); err == nil || c.State != state || c.Retired-before != 2 {
 		t.Fatal("precise mutated trap", err, c.State, c.Retired-before)
-	}
-}
-
-func TestPairFastPathBytesPermissionsVersionsAndAtomicity(t *testing.T) {
-	m := NewMemory()
-	if err := m.Map(4096, 8192, ReadPermission|WritePermission|ExecutePermission); err != nil {
-		t.Fatal(err)
-	}
-	alias := *m
-	for _, size := range []int{4, 8} {
-		for _, offset := range []uint64{0, 1, 4079, 4080, 4087, 4088, 4095} {
-			address := 4096 + offset
-			before := m.versions.epoch
-			if err := alias.WritePair(address, size, 0x0123456789abcdef, 0xfedcba9876543210); err != nil {
-				t.Fatal(err)
-			}
-			if m.versions.epoch != before+1 || m.CodeContext().Epoch != before+1 {
-				t.Fatal("pair did not commit one code generation")
-			}
-			first, second, err := m.ReadPair(address, size)
-			mask := ^uint64(0)
-			if size == 4 {
-				mask = 0xffffffff
-			}
-			if err != nil || first != 0x0123456789abcdef&mask || second != 0xfedcba9876543210&mask {
-				t.Fatal("pair values", size, offset, first, second, err)
-			}
-			data, err := m.ReadBytes(address, uint64(size*2))
-			if err != nil {
-				t.Fatal(err)
-			}
-			for i, value := range []uint64{0x0123456789abcdef, 0xfedcba9876543210} {
-				for j := 0; j < size; j++ {
-					if data[i*size+j] != byte(value>>uint(8*j)) {
-						t.Fatal("pair byte order", size, offset, data)
-					}
-				}
-			}
-		}
-	}
-	for _, permissions := range []uint8{ReadPermission, WritePermission, 0} {
-		if err := alias.Protect(4096, 4096, permissions); err != nil {
-			t.Fatal(err)
-		}
-		_, _, readErr := m.ReadPair(4097, 8)
-		before := m.versions.epoch
-		writeErr := m.WritePair(4097, 8, 13, 17)
-		if (readErr == nil) != (permissions&ReadPermission != 0) || (writeErr == nil) != (permissions&WritePermission != 0) {
-			t.Fatal("pair permission cache", permissions, readErr, writeErr)
-		}
-		if writeErr != nil && m.versions.epoch != before {
-			t.Fatal("failed pair allocated version")
-		}
-	}
-	if err := m.Protect(4096, 4096, 3); err != nil {
-		t.Fatal(err)
-	}
-	if err := m.Protect(8192, 4096, ReadPermission); err != nil {
-		t.Fatal(err)
-	}
-	beforeBytes := m.pages[1].data
-	before := m.versions.epoch
-	if err := alias.WritePair(8184, 8, 1, 2); err == nil || beforeBytes != m.pages[1].data || m.versions.epoch != before {
-		t.Fatal("cross-page partial pair")
-	}
-	m.versions.epoch = ^uint64(0)
-	if err := alias.WritePair(4097, 8, 1, 2); err == nil || beforeBytes != m.pages[1].data {
-		t.Fatal("same-page pair wrote before version allocation")
-	}
-	for _, address := range []uint64{AddressLimit - 8, AddressLimit, ^uint64(0)} {
-		if _, _, err := m.ReadPair(address, 8); err == nil {
-			t.Fatal("pair range bypass", address)
-		}
-		if err := m.WritePair(address, 8, 1, 2); err == nil {
-			t.Fatal("pair write range bypass", address)
-		}
 	}
 }
 
