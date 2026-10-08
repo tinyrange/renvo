@@ -99,6 +99,11 @@ type Document struct {
 	Ok           bool
 	sourceMap    []sourceSegment
 	packages     []virtualPackage
+
+	// Populated only on a local document copy during one validation. Never
+	// retained in a parsed/resolved result, whose declarations callers may edit.
+	backendFunctions        []embeddedFunction
+	backendFunctionsIndexed bool
 }
 
 // ImportLoader resolves an import path relative to the importing source. The

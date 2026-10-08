@@ -1317,7 +1317,53 @@ def repo_sync_expectations():
 
 repo = repo + module("repo", sync_expectations = repo_sync_expectations)
 
+# Fixed measurement workflows for the outstanding compiler CI regressions.
+def compiler_perf_arm():
+    """Run the unchanged policy-pinned Linux/ARM self-host gate.
+
+    Fixed target, reference policy, report and flags. No resource-gate changes,
+    reference override, caller command, environment, or general process access.
+    The canonical harness creates/removes its own temporary reference worktree.
+    """
+    if platform != "linux/amd64":
+        fail("ARM gate measurement requires the Linux amd64 development host")
+    return privileged.run(
+        "go", "run", "./cmd/renvoperf", "-target", "linux/arm",
+        "-report", _work().path("sandbox/agent-profiles/arm-gate.json"),
+        cwd = _work(), timeout_ms = 1800000, output_limit = 2097152,
+    )
+
+def compiler_perf_package_profile(package):
+    """Profile unchanged tests in exactly one of the two slow preflight packages."""
+    if package not in ["rtg", "backendjit"]:
+        fail("Only rtg and backendjit preflight packages may be profiled")
+    if "agent-profiles" not in _work().list_dir("sandbox"):
+        _work().mkdir("sandbox/agent-profiles")
+    prefix = _work().path("sandbox/agent-profiles/" + package)
+    return privileged.run(
+        "go", "test", "./internal/" + package, "-count=1", "-timeout=9m",
+        "-cpuprofile=" + prefix + ".cpu", "-o", prefix + ".test",
+        cwd = _work(), timeout_ms = 600000, output_limit = 2097152,
+    )
+
+def compiler_perf_package_report(package):
+    """Read a bounded CPU profile report for a fixed preflight package."""
+    if package not in ["rtg", "backendjit"]:
+        fail("Only rtg and backendjit profiles may be read")
+    prefix = _work().path("sandbox/agent-profiles/" + package)
+    return privileged.run(
+        "go", "tool", "pprof", "-top", "-nodecount=40",
+        prefix + ".test", prefix + ".cpu",
+        cwd = _work(), timeout_ms = 30000, output_limit = 1048576,
+    )
+
+compiler_perf = module("compiler_perf", arm = compiler_perf_arm,
+    package_profile = compiler_perf_package_profile,
+    package_report = compiler_perf_package_report)
+
+
 environment = {
+    "compiler_perf": compiler_perf,
     "workspace": workspace, "git": git, "go": go, "repo": repo, "coremark": coremark,
     "propose_agents_star": propose_agents_star, "publication": publication,
     "compiler_pr": compiler_pr, "pr_work": pr_work, "release": release,
@@ -1337,5 +1383,3 @@ default = privileged.model("gpt-6-astra").create(default_repl, prompt_addons = [
     "Preserve user changes. Additional capabilities require a new user-approved " +
     "configuration; do not bypass these restrictions through existing tools.",
 ])
-
-

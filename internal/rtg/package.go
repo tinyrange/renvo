@@ -584,6 +584,8 @@ func protectVirtualFunctionBindings(source []byte, tokens []Token, protected []b
 	if !file.Ok {
 		return
 	}
+	// Every function shares the same token stream; match its braces once.
+	blockEnds := virtualBlockEnds(source, tokens)
 	for i := 0; i < len(file.Funcs); i++ {
 		fn := file.Funcs[i]
 		var bindings []string
@@ -605,7 +607,7 @@ func protectVirtualFunctionBindings(source []byte, tokens []Token, protected []b
 		}
 		bodyStart := syntax.TokenStart(file.Tokens[fn.BodyStart]) - len(prefix)
 		bodyEnd := syntax.TokenEnd(file.Tokens[fn.BodyEnd-1]) - len(prefix)
-		protectVirtualLocalBindings(source, tokens, protected, bodyStart, bodyEnd)
+		protectVirtualLocalBindings(source, tokens, protected, bodyStart, bodyEnd, blockEnds)
 		for at := 0; at < len(tokens) && tokens[at].Kind != TokenEOF; at++ {
 			if tokens[at].Start < bodyStart || tokens[at].End > bodyEnd {
 				continue
@@ -618,8 +620,7 @@ func protectVirtualFunctionBindings(source []byte, tokens []Token, protected []b
 }
 
 func protectVirtualLocalBindings(source []byte, tokens []Token, protected []bool,
-	bodyStart int, bodyEnd int) {
-	blockEnds := virtualBlockEnds(source, tokens)
+	bodyStart int, bodyEnd int, blockEnds []int) {
 	for at := 0; at < len(tokens) && tokens[at].Kind != TokenEOF; at++ {
 		if tokens[at].Start < bodyStart || tokens[at].End > bodyEnd {
 			continue
