@@ -3,11 +3,17 @@ package link
 import "renvo.dev/internal/arena"
 import "renvo.dev/internal/unit"
 import "renvo.dev/internal/syntax"
+import "unsafe"
 
 // Encode non-ASCII identifiers after source-level resolution. Use an unused
 // prefix and the complete UTF-8 byte sequence, preserving identity without
 // collisions while keeping the compact backend source subset ASCII-only.
 func lowerUnicodeIdentifiers(program *unit.Program, transient bool) bool {
+	// Most linked programs are entirely ASCII. Scan contiguous native words
+	// before walking scattered token records and individual identifier bytes.
+	if unicodeSourceASCII(program.Text) {
+		return true
+	}
 	maybeUnicode := false
 	// Non-ASCII comments and string literals need no identifier rewriting.
 	// Inspect identifier bytes directly before allocating names or edits.
@@ -86,4 +92,30 @@ func lowerUnicodeIdentifiers(program *unit.Program, transient bool) bool {
 		return false
 	}
 	return reparseFunctionValueProgram(program, text, edits, originalLength, len(text))
+}
+
+// Check only aligned, in-bounds words so this prefilter is safe on every target.
+// Non-ASCII comments or literals simply fall back to the identifier-only walk.
+func unicodeSourceASCII(src []byte) bool {
+	wordSize := int(unsafe.Sizeof(uint(0)))
+	highBytes := (^uint(0) / 255) * 128
+	i := 0
+	for i < len(src) && uintptr(unsafe.Pointer(&src[i]))&uintptr(wordSize-1) != 0 {
+		if src[i] >= 128 {
+			return false
+		}
+		i++
+	}
+	for i+wordSize <= len(src) {
+		if *(*uint)(unsafe.Pointer(&src[i]))&highBytes != 0 {
+			return false
+		}
+		i += wordSize
+	}
+	for _, value := range src[i:] {
+		if value >= 128 {
+			return false
+		}
+	}
+	return true
 }
