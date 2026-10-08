@@ -8,7 +8,7 @@ import (
 func TestSourceEmbedArchiveMatchPreservesSelection(t *testing.T) {
 	random := rand.New(rand.NewSource(1))
 	for mode := 0; mode < 5; mode++ {
-		data := make([]byte, 5000+mode)
+		data := make([]byte, 20000+mode)
 		for i := range data {
 			switch mode {
 			case 0:
@@ -24,12 +24,21 @@ func TestSourceEmbedArchiveMatchPreservesSelection(t *testing.T) {
 			}
 		}
 		buckets := make([]int32, 65536)
-		previous := make([]int32, len(data))
+		previous := make([]int32, 4096)
+		referencePrevious := make([]int32, len(data))
 		for pos := 0; pos < len(data); pos++ {
-			distance, length := sourceEmbedArchiveMatch(data, buckets, previous, pos)
-			wantDistance, wantLength := referenceSourceEmbedArchiveMatch(data, buckets, previous, pos)
-			if distance != wantDistance || length != wantLength {
-				t.Fatalf("mode=%d pos=%d got=(%d,%d) want=(%d,%d)", mode, pos, distance, length, wantDistance, wantLength)
+			// Include the lazy next-byte probe before inserting the current byte.
+			for _, probe := range []int{pos, pos + 1} {
+				distance, length := sourceEmbedArchiveMatch(data, buckets, previous, probe)
+				wantDistance, wantLength := referenceSourceEmbedArchiveMatch(data, buckets, referencePrevious, probe)
+				if distance != wantDistance || length != wantLength {
+					t.Fatalf("mode=%d pos=%d probe=%d got=(%d,%d) want=(%d,%d)", mode, pos, probe, distance, length, wantDistance, wantLength)
+				}
+			}
+			// Keep a full historical chain for the unchanged reference matcher.
+			if pos+2 < len(data) {
+				bucket := sourceEmbedArchiveBucket(data, pos, len(buckets))
+				referencePrevious[pos] = buckets[bucket]
 			}
 			sourceEmbedArchiveAddPosition(data, buckets, previous, pos)
 		}

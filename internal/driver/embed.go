@@ -846,7 +846,8 @@ func appendSourceEmbedDecimal(out []byte, value int) []byte {
 func compressSourceEmbedArchive(data []byte) []byte {
 	const bucketCount = 262144
 	buckets := make([]int32, bucketCount)
-	previous := make([]int32, len(data))
+	// Only the last 4096 positions are reachable by the encoded distance.
+	previous := make([]int32, 4096)
 	var out []byte
 	for pos := 0; pos < len(data); {
 		flagPos := len(out)
@@ -890,7 +891,7 @@ func compressSourceEmbedArchive(data []byte) []byte {
 				if pos+2 < len(data) {
 					hash := (int(data[pos])*251+int(data[pos+1]))*251 + int(data[pos+2])
 					bucket := hash & (bucketCount - 1)
-					previous[pos] = buckets[bucket]
+					previous[pos&4095] = buckets[bucket]
 					buckets[bucket] = int32(pos + 1)
 				}
 				pos++
@@ -906,7 +907,7 @@ func sourceEmbedArchiveAddPosition(data []byte, buckets []int32, previous []int3
 		return
 	}
 	bucket := sourceEmbedArchiveBucket(data, pos, len(buckets))
-	previous[pos] = buckets[bucket]
+	previous[pos&4095] = buckets[bucket]
 	buckets[bucket] = int32(pos + 1)
 }
 
@@ -929,7 +930,7 @@ func sourceEmbedArchiveMatch(data []byte, buckets []int32, previous []int32, pos
 	checked := 0
 	// Reuse the three prefix bytes already loaded for candidate filtering.
 	bucket := ((int(first)*251+int(second))*251 + int(third)) & (len(buckets) - 1)
-	for candidate := int(buckets[bucket]) - 1; candidate >= 0 && checked < maxCandidates; candidate = int(previous[candidate]) - 1 {
+	for candidate := int(buckets[bucket]) - 1; candidate >= 0 && checked < maxCandidates; candidate = int(previous[candidate&4095]) - 1 {
 		distance := pos - candidate
 		if distance > 4096 {
 			break
