@@ -176,12 +176,22 @@ func Marshal(program Program) ([]byte, bool) {
 // output buffer. A blanket five bytes per token wastes nearly a megabyte on
 // large units whose kind, start delta, size and line delta each fit in one byte.
 func encodedTokensCoreSize(tokens []Token) int {
-	size := coreVarintSize(len(tokens)) + len(tokens)
+	size := coreVarintSize(len(tokens)) + len(tokens)*4
 	prevStart, prevLine := 0, 0
 	for i := 0; i < len(tokens); i++ {
 		tok := &tokens[i]
 		line := tok.KindLine >> 8
-		size += coreVarintSize(tok.Start-prevStart) + coreVarintSize(tok.Size) + coreVarintSize(line-prevLine)
+		// Most fields fit in one byte. Only visit the varint loop for
+		// larger fields, avoiding three calls for every ordinary token.
+		if delta := tok.Start - prevStart; delta >= 128 {
+			size += coreVarintSize(delta) - 1
+		}
+		if tok.Size >= 128 {
+			size += coreVarintSize(tok.Size) - 1
+		}
+		if delta := line - prevLine; delta >= 128 {
+			size += coreVarintSize(delta) - 1
+		}
 		prevStart, prevLine = tok.Start, line
 	}
 	return size
