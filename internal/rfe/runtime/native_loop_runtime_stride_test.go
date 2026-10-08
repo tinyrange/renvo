@@ -52,21 +52,21 @@ func TestNativeLoopRuntimeStrideAndLateFault(t *testing.T) {
 						page[k] = byte(k*37 + p*19 + 129)
 					}
 				}
+				m := new(MemoryContext)
+				epoch := uint64(1)
+				m.Fill(0, pages[0], 1, &epoch)
+				m.ClaimLinks(n)
+				m.PublishLink(0, entry, 3, [17]uint8{})
 				for budget := uint64(1); budget <= 64; budget++ {
 					for _, stride := range []uint64{0, 1, 3, 32, 4096, 0xffffffff, 0x100000001, ^uint64(0)} {
 						for _, initial := range []uint64{0, 0xfffffff0, 0xffffffff, 0xdeadbeeffffffff0} {
 							for _, offset := range []uint64{0, 4000, 4080, 4088, 4092} {
 								for _, readable := range []bool{false, true} {
-									epoch := uint64(1)
-									m := new(MemoryContext)
-									m.Fill(0, pages[0], 1, &epoch)
 									permission := uint64(0)
 									if readable {
 										permission = 1
 									}
 									m.Fill(1, pages[1], permission, &epoch)
-									m.ClaimLinks(n)
-									m.PublishLink(0, entry, 3, [17]uint8{})
 									base := offset - (uint64(uint32(initial)) << shift)
 									state := []uint64{initial, initial, 99, 98, stride, base, base + 4096, 0}
 									expected := append([]uint64(nil), state...)

@@ -980,8 +980,6 @@ func (c *CPU) executePure(d instruction) {
 		a = c.reg(d.rn, false)
 		if d.kind == logicalImmediate {
 			b = d.immediate
-		} else if d.kind == addExtended {
-			b = extended(b, d.shift) << d.amount
 		} else {
 			b = shift(b, d.shift, d.amount, d.width)
 			if d.invert {
@@ -1680,8 +1678,6 @@ func Lower(b *emu.Builder, op uint32) bool {
 		var rhs emu.Value
 		if d.kind == logicalImmediate {
 			rhs = constant(d.immediate)
-		} else if d.kind == addExtended {
-			rhs = narrow(b.Shift(emu.Shl, extendIR(b, reg(d.rm, false), d.shift), uint64(d.amount)))
 		} else {
 			rhs = shifted(reg(d.rm, false), d.shift, d.amount)
 			if d.invert {
@@ -2755,21 +2751,6 @@ func conditionIR(b *emu.Builder, flags emu.Value, cond int) emu.Value {
 		result = not(result)
 	}
 	return result
-}
-
-func flagsIR(b *emu.Builder, a, rhs, result emu.Value, width int, sub bool) emu.Value {
-	binary, constant := b.Binary, b.Constant
-	nz := binary(emu.Or, b.Choose(binary(emu.Equal, result, constant(0)), constant(Z), constant(0)), b.Choose(binary(emu.And, result, constant(uint64(1)<<(width-1))), constant(N), constant(0)))
-	var carry, overflow emu.Value
-	if sub {
-		carry = binary(emu.Equal, binary(emu.Less, a, rhs), constant(0))
-		overflow = binary(emu.And, binary(emu.Xor, a, rhs), binary(emu.Xor, a, result))
-	} else {
-		carry = binary(emu.Less, result, a)
-		overflow = binary(emu.And, binary(emu.Xor, binary(emu.Xor, a, rhs), constant(^uint64(0))), binary(emu.Xor, a, result))
-	}
-	overflow = binary(emu.And, overflow, constant(uint64(1)<<(width-1)))
-	return binary(emu.Or, nz, binary(emu.Or, b.Choose(carry, constant(C), constant(0)), b.Choose(overflow, constant(V), constant(0))))
 }
 
 func lowerExtra(b *emu.Builder, d instruction) emu.Value {

@@ -3,6 +3,17 @@ package main
 import emu "renvo.dev/internal/rfe/runtime"
 
 func main() {
+	// Renvo-built runners retain the complete native API for portable fallback.
+	// A missing loop method used to make importing the AArch64 engine fail.
+	if native, err := emu.NewNative(4096); err != nil {
+		var unavailable emu.Native
+		if _, err := unavailable.CompileLoop(nil, 1, 1); err == nil {
+			panic("unavailable native loop accepted")
+		}
+	} else {
+		native.Close()
+	}
+
 	var b emu.Builder
 	x := b.Load(0)
 	r := b.Binary(emu.And, b.Binary(emu.Add, x, b.Constant(1)), b.Constant(65535))

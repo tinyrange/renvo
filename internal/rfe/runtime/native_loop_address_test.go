@@ -38,6 +38,15 @@ func TestNativeLoopScaledAddressProjectionAndWrapping(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				page := new([4096]byte)
+				for i := range page {
+					page[i] = byte(i*37 + 129)
+				}
+				epoch := uint64(1)
+				m := new(MemoryContext)
+				m.Fill(0, page, 1, &epoch)
+				m.ClaimLinks(n)
+				m.PublishLink(0, entry, 1, [17]uint8{})
 				for budget := uint64(1); budget <= 64; budget++ {
 					for _, input := range []uint64{0, 0xffffffff, 0x100000000, 0xdeadbeef00000000, 1 << 63} {
 						for _, offset := range []uint64{0, 4064, 4088, 4092} {
@@ -46,15 +55,6 @@ func TestNativeLoopScaledAddressProjectionAndWrapping(t *testing.T) {
 								used = uint64(uint32(input))
 							}
 							base := offset - (used << shift)
-							page := new([4096]byte)
-							for i := range page {
-								page[i] = byte(i*37 + 129)
-							}
-							epoch := uint64(1)
-							m := new(MemoryContext)
-							m.Fill(0, page, 1, &epoch)
-							m.ClaimLinks(n)
-							m.PublishLink(0, entry, 1, [17]uint8{})
 							state := []uint64{input, base, 99, 98, 0}
 							expected := append([]uint64(nil), state...)
 							iterations := uint64(0)

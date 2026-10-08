@@ -16,6 +16,14 @@ func TestNativeLoopAlignmentVersionsAgainstScalar(t *testing.T) {
 	if err = n.PrepareLinks(5, 4); err != nil {
 		t.Fatal(err)
 	}
+	var initialPage [4096]byte
+	for i := range initialPage {
+		initialPage[i] = byte(i*37 + 129)
+	}
+	page := new([4096]byte)
+	epoch, clock := uint64(0), uint64(0)
+	m := &MemoryContext{Clock: &clock}
+	m.ClaimLinks(n)
 	for shift := 1; shift <= 4; shift++ {
 		size := 1 << uint(shift)
 		var b Builder
@@ -47,6 +55,7 @@ func TestNativeLoopAlignmentVersionsAgainstScalar(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		m.PublishLink(0, entry, 3, [17]uint8{})
 		for _, prepared := range []bool{false, true} {
 			if prepared {
 				if err = n.PrepareTargetLink(0, entry, 5, 3); err != nil {
@@ -58,18 +67,11 @@ func TestNativeLoopAlignmentVersionsAgainstScalar(t *testing.T) {
 					for _, offset := range []uint64{0, 1, 4096 - uint64(size), 4097 - uint64(size), 4095} {
 						for _, perms := range []uint64{0, 1, 3, 7} {
 							for _, startClock := range []uint64{1, ^uint64(0) - 1, ^uint64(0)} {
-								page := new([4096]byte)
-								for i := range page {
-									page[i] = byte(i*37 + 129)
-								}
-								expectedPage := *page
-								epoch, clock := uint64(0), startClock
+								*page = initialPage
+								expectedPage := initialPage
+								epoch, clock = 0, startClock
 								expectedEpoch, expectedClock := epoch, clock
-								m := new(MemoryContext)
-								m.Clock = &clock
 								m.Fill(0, page, perms, &epoch)
-								m.ClaimLinks(n)
-								m.PublishLink(0, entry, 3, [17]uint8{})
 								base := offset - (uint64(uint32(initial)) << uint(shift))
 								state := []uint64{initial, base, 99, 98, 0}
 								expected := append([]uint64(nil), state...)
