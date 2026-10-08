@@ -792,10 +792,7 @@ func quoteSourceEmbedExpression(data []byte) []byte {
 	if len(data) <= chunkSize {
 		return quoteSourceEmbedBytes(data)
 	}
-	// Reserve the escaped payload and separators once; append chunks directly
-	// rather than retaining a separately allocated quoted slice per chunk.
-	chunks := (len(data) + chunkSize - 1) / chunkSize
-	out := make([]byte, 0, sourceEmbedQuotedSize(data)+5*chunks-3)
+	out := make([]byte, 0, len(data)+len(data)/chunkSize*4)
 	out = append(out, '(')
 	for start := 0; start < len(data); start += chunkSize {
 		end := start + chunkSize
@@ -805,7 +802,7 @@ func quoteSourceEmbedExpression(data []byte) []byte {
 		if start > 0 {
 			out = append(out, " + "...)
 		}
-		out = appendSourceEmbedQuotedBytes(out, data[start:end])
+		out = append(out, quoteSourceEmbedBytes(data[start:end])...)
 	}
 	out = append(out, ')')
 	return out
@@ -971,25 +968,8 @@ func sourceEmbedArchiveBucket(data []byte, pos int, bucketCount int) int {
 	return hash & (bucketCount - 1)
 }
 
-func sourceEmbedQuotedSize(data []byte) int {
-	size := 2
-	for _, c := range data {
-		if c == '\\' || c == '"' {
-			size += 2
-		} else if c >= 32 && c <= 126 {
-			size++
-		} else {
-			size += 4
-		}
-	}
-	return size
-}
-
 func quoteSourceEmbedBytes(data []byte) []byte {
-	return appendSourceEmbedQuotedBytes(make([]byte, 0, sourceEmbedQuotedSize(data)), data)
-}
-
-func appendSourceEmbedQuotedBytes(out []byte, data []byte) []byte {
+	out := make([]byte, 0, len(data)+2)
 	out = append(out, '"')
 	const hex = "0123456789abcdef"
 	for i := 0; i < len(data); i++ {
