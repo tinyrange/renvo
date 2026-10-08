@@ -354,7 +354,7 @@ func definiteArgumentTypeKind(pkg *load.Package, info *PackageInfo, fileIndex in
 		return definiteTypeKind(pkg, info, fileIndex, typeStart, typeEnd, 0)
 	}
 	symbolIndex := lookupPackageSymbolTextCore(info, file, start)
-	if symbolIndex < 0 {
+	if symbolIndex < 0 || info.Symbols[symbolIndex].Kind != SymbolVar {
 		return definiteTypeUnknown
 	}
 	for i := 0; i < len(info.Decls); i++ {
