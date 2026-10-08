@@ -1362,6 +1362,80 @@ compiler_perf = module("compiler_perf", arm = compiler_perf_arm,
     package_report = compiler_perf_package_report)
 
 
+# Repository-history diagnostics using the canonical performance policy.
+def _compiler_perf_git_at(checkout, args):
+    return privileged.run(
+        cwd = _work(), timeout_ms = 120000, output_limit = 1048576,
+        *(["git", "--no-optional-locks", "-c", "core.fsmonitor=false", "-C", checkout] + args)
+    )
+
+def compiler_perf_revision(revision, expected_head, target = "linux/arm"):
+    """Measure a reviewed historical revision with the unchanged policy gate.
+
+    Accepts full commit SHAs and policy-defined targets, not commands or paths.
+    Candidate must be an ancestor of the reviewed current HEAD. Creates/reuses
+    an isolated clean detached worktree; retains it for inspection. Never edits,
+    resets, removes, publishes, or switches the original worktree. No reference,
+    workload, flag, environment, resource-limit or harness overrides.
+    Review each selected revision before running; diagnose failures, don't
+    repeatedly rerun unchanged deterministic failures.
+    """
+    revision = _compiler_sha(revision)
+    expected_head = _compiler_sha(expected_head)
+    if _publish_require(_publish_git(["rev-parse", "HEAD"])) != expected_head:
+        fail("Current HEAD no longer matches the reviewed harness revision")
+    _publish_require(_publish_git(["merge-base", "--is-ancestor", revision, expected_head]))
+    harness_status = _publish_require(_publish_git([
+        "status", "--porcelain", "--untracked-files=all", "--",
+        "cmd/renvoperf", "internal/perfgate", "internal/testmeasure", "go.mod", "go.sum",
+    ]))
+    if harness_status:
+        fail("Performance harness and policy must be unchanged and tracked")
+    policy = json.decode(_work().read_file("internal/perfgate/policy.json"))
+    if type(target) != "string" or target not in [item["name"] for item in policy["targets"]]:
+        fail("Expected a target from the current performance policy")
+    target_name = _name(target.replace("/", "-"))
+    directory = "sandbox/agent-perf-history"
+    if "agent-perf-history" not in _work().list_dir("sandbox"):
+        _work().mkdir(directory)
+    checkout = _work().path(directory + "/" + revision)
+    if revision not in _work().list_dir(directory):
+        _publish_require(_publish_git(["worktree", "add", "--detach", checkout, revision]))
+    common_args = ["rev-parse", "--path-format=absolute", "--git-common-dir"]
+    if _publish_require(_compiler_perf_git_at(checkout, common_args)) != _publish_require(_publish_git(common_args)):
+        fail("Diagnostic checkout does not belong to this repository")
+    if _publish_require(_compiler_perf_git_at(checkout, ["rev-parse", "HEAD"])) != revision:
+        fail("Diagnostic checkout no longer matches its reviewed revision")
+    if _publish_require(_compiler_perf_git_at(checkout, ["status", "--porcelain", "--untracked-files=normal"])):
+        fail("Diagnostic checkout has changes; no reset or cleanup is authorized")
+    return privileged.run(
+        "go", "run", "./cmd/renvoperf", "-target", target, "-root", checkout,
+        "-report", _work().path(directory + "/" + revision + "-" + target_name + ".json"),
+        cwd = _work(), timeout_ms = 1800000, output_limit = 2097152,
+    )
+
+compiler_perf = compiler_perf + module("compiler_perf", revision = compiler_perf_revision)
+
+
+# Cross-architecture correctness checks through the unchanged corpus driver.
+def cross_corpus(kind, filter):
+    """Run a filtered corpus with the repository's existing cross-arch opt-in.
+
+    No target override, arbitrary flags, caller environment, or command selection.
+    The same driver, expectations, timeout and resource gates remain in force.
+    """
+    if kind not in ["backend", "frontend"]:
+        fail("Corpus kind must be backend or frontend")
+    if type(filter) != "string" or not filter:
+        fail("Provide a nonempty corpus filter")
+    return privileged.run(
+        "env", "RENVO_CROSS_ARCH_TESTS=1", "bash", _work().path("tools/check"), kind, filter,
+        cwd = _work(), timeout_ms = 660000, output_limit = 2097152,
+    )
+
+repo = repo + module("repo", cross_corpus = cross_corpus)
+
+
 environment = {
     "compiler_perf": compiler_perf,
     "workspace": workspace, "git": git, "go": go, "repo": repo, "coremark": coremark,

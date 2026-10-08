@@ -7428,8 +7428,57 @@ if g.c.renvoTarget == renvoTargetLinux386 || g.c.renvoTarget == renvoTargetWindo
 		}
 		return false
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 return false
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+a := &g.asm
+		renvoEmitMakeZeroFreshArenaReturn(g)
+		// Preserve the returned allocation pointer in r0. Peel to a word
+		// boundary before issuing any multiword stores, and never clear past
+		// the requested extent: adjacent arena objects can still be live.
+		renvoArmAsmMovRegReg(a, 1, 0)
+		renvoArmAsmMovRegImm(a, 9, 0)
+		align := renvoAsmNewLabel(a)
+		words := renvoAsmNewLabel(a)
+		wordTail := renvoAsmNewLabel(a)
+		bytes := renvoAsmNewLabel(a)
+		done := renvoAsmNewLabel(a)
+		renvoAsmMarkLabel(a, align)
+		renvoArmAsmCmpRegImm(a, 2, 0)
+		renvoArmAsmBCondLabel(a, done, 0)
+		renvoArmAsmEmit(a, 0xe3110003) // TST r1, #3.
+		renvoArmAsmBCondLabel(a, words, 0)
+		renvoArmAsmEmit(a, 0xe4c19001) // STRB r9, [r1], #1.
+		renvoArmAsmAddRegImm(a, 2, 2, -1)
+		renvoAsmJmpLabel(a, align)
+		renvoAsmMarkLabel(a, words)
+		renvoArmAsmMovRegImm(a, 3, 0)
+		renvoArmAsmMovRegImm(a, 12, 0)
+		chunks := renvoAsmNewLabel(a)
+		renvoAsmMarkLabel(a, chunks)
+		renvoArmAsmCmpRegImm(a, 2, 12)
+		renvoArmAsmBCondLabel(a, wordTail, 3)
+		renvoArmAsmEmit(a, 0xe8a11208) // STMIA r1!, {r3,r9,r12}.
+		renvoArmAsmAddRegImm(a, 2, 2, -12)
+		renvoAsmJmpLabel(a, chunks)
+		renvoAsmMarkLabel(a, wordTail)
+		renvoArmAsmCmpRegImm(a, 2, 4)
+		renvoArmAsmBCondLabel(a, bytes, 3)
+		renvoArmAsmEmit(a, 0xe4819004) // STR r9, [r1], #4.
+		renvoArmAsmAddRegImm(a, 2, 2, -4)
+		renvoAsmJmpLabel(a, wordTail)
+		renvoAsmMarkLabel(a, bytes)
+		renvoArmAsmCmpRegImm(a, 2, 0)
+		renvoArmAsmBCondLabel(a, done, 0)
+		byteLoop := renvoAsmNewLabel(a)
+		renvoAsmMarkLabel(a, byteLoop)
+		renvoArmAsmEmit(a, 0xe4c19001) // STRB r9, [r1], #1.
+		renvoArmAsmEmit(a, 0xe2522001) // SUBS r2, r2, #1.
+		renvoArmAsmBCondLabel(a, byteLoop, 1)
+		renvoAsmMarkLabel(a, done)
+		renvoAsmRet(a)
+		return true
 }
 g.asm.patchFailed = true
 return false

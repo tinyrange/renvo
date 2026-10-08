@@ -59,10 +59,8 @@ func (f FS) ReadFileOK(name string) ([]byte, bool) {
 			return nil, false
 		}
 		if nameEnd-nameStart == len(name) && archiveHasPrefix(f.archive, nameStart, nameEnd, name) {
-			out := make([]byte, 0, dataEnd-dataStart)
-			for j := dataStart; j < dataEnd; j++ {
-				out = append(out, f.archive[j])
-			}
+			out := make([]byte, dataEnd-dataStart)
+			copy(out, f.archive[dataStart:dataEnd])
 			return out, true
 		}
 		pos = next

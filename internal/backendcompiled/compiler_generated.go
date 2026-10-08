@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "d13774d2a15105f37a9cbc2fbec115922278cc7211eb5bd9a4c28c628ef8d19a"
+const CompilerSourceDigest = "b90b52febd0eb5ddc76d90cabe0be2a583c02e40b8a7a47b89ecae69e0d25836"
 
 // source: backend/compiler_common_impl.go
 
@@ -42177,8 +42177,57 @@ return true
 }
 return false
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 return false
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+a := &g.asm
+renvoEmitMakeZeroFreshArenaReturn(g)
+
+
+
+renvoArmAsmMovRegReg(a, 1, 0)
+renvoArmAsmMovRegImm(a, 9, 0)
+align := renvoAsmNewLabel(a)
+words := renvoAsmNewLabel(a)
+wordTail := renvoAsmNewLabel(a)
+bytes := renvoAsmNewLabel(a)
+done := renvoAsmNewLabel(a)
+renvoAsmMarkLabel(a, align)
+renvoArmAsmCmpRegImm(a, 2, 0)
+renvoArmAsmBCondLabel(a, done, 0)
+renvoArmAsmEmit(a, 0xe3110003)
+renvoArmAsmBCondLabel(a, words, 0)
+renvoArmAsmEmit(a, 0xe4c19001)
+renvoArmAsmAddRegImm(a, 2, 2, -1)
+renvoAsmJmpLabel(a, align)
+renvoAsmMarkLabel(a, words)
+renvoArmAsmMovRegImm(a, 3, 0)
+renvoArmAsmMovRegImm(a, 12, 0)
+chunks := renvoAsmNewLabel(a)
+renvoAsmMarkLabel(a, chunks)
+renvoArmAsmCmpRegImm(a, 2, 12)
+renvoArmAsmBCondLabel(a, wordTail, 3)
+renvoArmAsmEmit(a, 0xe8a11208)
+renvoArmAsmAddRegImm(a, 2, 2, -12)
+renvoAsmJmpLabel(a, chunks)
+renvoAsmMarkLabel(a, wordTail)
+renvoArmAsmCmpRegImm(a, 2, 4)
+renvoArmAsmBCondLabel(a, bytes, 3)
+renvoArmAsmEmit(a, 0xe4819004)
+renvoArmAsmAddRegImm(a, 2, 2, -4)
+renvoAsmJmpLabel(a, wordTail)
+renvoAsmMarkLabel(a, bytes)
+renvoArmAsmCmpRegImm(a, 2, 0)
+renvoArmAsmBCondLabel(a, done, 0)
+byteLoop := renvoAsmNewLabel(a)
+renvoAsmMarkLabel(a, byteLoop)
+renvoArmAsmEmit(a, 0xe4c19001)
+renvoArmAsmEmit(a, 0xe2522001)
+renvoArmAsmBCondLabel(a, byteLoop, 1)
+renvoAsmMarkLabel(a, done)
+renvoAsmRet(a)
+return true
 }
 g.asm.patchFailed = true
 return false
