@@ -109,29 +109,6 @@ accessed bits, trace traps and instruction budgets remain architectural. This
 is intentionally a partial lowering engine, not a claim that all guest code
 executes natively.
 
-## AArch64 user-mode extension
-
-`aarch64.rfe` and `linux-arm64-user.rfe` add an initial little-endian A64 integer
-CPU and static-ELF Linux user personality. A normalized decoder directly feeds
-the shared pure IR without relaxing the `.lower` decoder's 16-variable-bit
-limit. Hot pure blocks progress from interpretation to IR to native execution.
-Native mode also compiles guarded scalar memory blocks for a compatible
-single-threaded memory implementation. Terminal branches compute successors in
-compiled code; a bounded native dispatcher links already validated hot entries
-within one unchanged executable context. Misses, faults, executable stores,
-pairs/literals, division and traps still return to architectural dispatch.
-The shared builder now value-numbers immutable expressions while preserving
-architectural state versions, and supports modular multiplication through the
-existing native emitters. Extended integer operations and conditional
-select/compare lower into pure blocks. The Linux personality uses address-space
-identity and code-page generations for hot entry guards; custom unversioned
-memories retain byte-by-byte code revalidation.
-
-A pinned CoreMark port now passes both seed sets in every tier. Raw diagnostic
-timings expose a large remaining QEMU gap; no paired scoring win is established.
-This implements bounded loop traces, not the general optimizing CFG engine. See [the detailed design](aarch64-user.md) for implemented coverage,
-limits, the effect-aware optimizer plan, acceptance tests and benchmark rules.
-
 ## Device contracts and provenance
 
 `internal/rfe/runtime` defines byte/word bus access, execute/read/write intent,
@@ -210,73 +187,9 @@ limits its in-memory filesystem to 64 MiB, live processes to 64, descriptors to
 shell environment, with remaining compatibility limitations listed in the
 [emulator README](../emulators/README.md).
 
+## AArch64 user mode
 
-### Native emission and profiling
-
-Pure and effect-aware scalar blocks use bounded SSA register allocation with
-constant rematerialization and spill fallback. Variable shifts/rotates carry an
-explicit 32/64-bit width; counts are masked to that width. Conditional select
-uses a backward SSA reference for its third operand and lowers to a native
-conditional move without suppressing already-ordered memory effects. Guest
-architectural state is still committed at block boundaries.
-
-The native link dispatcher keeps its working state in preserved registers across
-leaf calls and retains all entry, budget, ownership and partial-progress guards.
-Legacy assembly calls retain a 64-instruction ceiling; supported Linux/amd64+cgo
-foreign sessions have an independently configured ceiling of up to 65,536. Linux emulator `-stats` additionally enables native
-perf-map symbols. Map files are exclusively created as `/tmp/perf-PID.map` with
-mode 0600 and retained after exit for report symbolization; failures are nonfatal
-and reported as `profile_errors`. Other hosts retain ordinary stats without this
-Linux profiling facility. See `aarch64-validation.md` for unchanged-guest timing
-results, validation scope and remaining limitations.
-
-
-Arithmetic/logical flags now have explicit width-aware IR operations, with
-separate direct condition predicates when their operands are available. Native
-entries calculate their own host flags rather than consuming ambient flags from
-an unrelated operation. Architectural NZCV remains reconstructible at every
-exit. Leaf entries retain the architectural state pointer in a reserved register.
-For effect blocks, ordered architectural checkpoints remain intact, while native
-retirement/fault-address bookkeeping is emitted on successful return and precise
-slow exits rather than every fast access. These changes do not increase the
-native dispatch quantum. Bounded loop regions are described below.
-
-
-AArch64 linked Run entries support real bounded native loops and cyclic traces
-through already-validated hot blocks. Loop phis keep forwarded guest values in
-registers/private spills; native cold exit maps restore architectural state.
-Internal branch exits can continue native dispatch without Go state-management
-callbacks. Cold blocks remain at most 16 instructions, while optimized regions
-can independently contain up to 256. Supported foreign sessions retire at most
-65,536 instructions; unsupported/aliasing cases retain <=64 calls. Step and short
-budgets retain original leaf entries,
-and dependency checks cover all constituent code pages.
-
-Rich high multiply, leading counts, reversals and explicit carry/NZCV records
-survive until host selection. Ordinary SSA operations use allocated registers
-directly. Native loops reuse call-local checked page translations. Proven
-invariant addresses keep an exact-access fact after successful range/permission
-guards, but memory data is always accessed afresh and every store checks clock
-overflow. Exit-only flags/selects are reconstructed natively with live operands.
-Private immutable arena keys move admission to cold publication, while each
-native selection still validates the public count and exact state shape.
-This remains bounded trace execution, not a general CFG optimizer or zero-Go
-runtime; cold compilation, mapping, traps and quantum scheduling remain in Go.
-Linked bodies borrow a bounded dispatcher frame and stable state/context bases;
-standalone APIs retain compatibility entries. See `rfe-native-abi.md` for the
-shared-frame contract, legacy interoperability and limits.
-Guarded region edges refine forwarded PC only after their precise checkpoint
-and successful target guard. Prepared dispatcher handles move immutable entry
-validation off the quantum path while retaining arena serialization and native
-leaf guards. See the batch 10 evidence in `aarch64-validation.md` for CRCs, tests, raw timings
-and the still-unmet QEMU performance gate.
-
-
-The Linux AArch64 process uses `RunQuanta` with independently configured
-optimized-region and foreign-session ceilings. `-region-instructions` defaults
-to 256 and `-native-instructions` to 65,536. The conservative path can still
-amortize serialization across sixteen separate <=64 native calls. Cold work and
-architectural slow paths stay outside the lock. Native exit predicates use directly produced flags and
-bounded cold SSA maps, and read/write page proofs are separate and call-local.
-The fixed 1000-iteration CoreMark diagnostic now has a controlled 0.97-second
-median; this does not satisfy CoreMark's score-duration requirement.
+The AArch64 RFE adds an integer CPU, static-ELF Linux personality and bounded
+IR/native tiers with versioned code guards and precise memory exits. See
+[aarch64-user.md](aarch64-user.md) for usage, scope and limits, and
+[rfe-native-abi.md](rfe-native-abi.md) for the native ownership contract.

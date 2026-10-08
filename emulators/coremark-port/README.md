@@ -35,5 +35,5 @@ Expected seed/list/matrix/state CRCs:
 The final CRC depends on the iteration count and is compared across engines.
 Run the identical ELF under all engines, without rebuilding between them.
 Compilation, loader startup, and output are outside each guest timed interval;
-`/usr/bin/time` includes them and both seed-set runs. Current measurements and
-limitations are recorded in `docs/aarch64-validation.md`.
+`/usr/bin/time` includes them and both seed-set runs. Local measurements are recorded in the PR; implementation limits are in
+`docs/aarch64-user.md`.
