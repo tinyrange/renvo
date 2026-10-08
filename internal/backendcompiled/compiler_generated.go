@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "b90b52febd0eb5ddc76d90cabe0be2a583c02e40b8a7a47b89ecae69e0d25836"
+const CompilerSourceDigest = "656f99760a7d189613457ecbe16f46b99bc4c6aa496a45fc087036d19ccf8e38"
 
 // source: backend/compiler_common_impl.go
 
@@ -28723,7 +28723,9 @@ saved := []int{3, 12, 13, 14, 15}
 if arm64 {
 arch, frameReg, iterations, budget = renvoArchAarch64, 29, 22, 23
 saved = []int{19, 20, 21, 22, 23}
-registers = []int{3, 4, 5, 6, 7, 8, 12, 13, 14, 15, 19, 20, 21}
+
+
+registers = []int{3, 4, 5, 6, 7, 8, 13, 14, 15, 19, 20, 21}
 }
 if oneShot {
 
@@ -36852,10 +36854,11 @@ return
 if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 a := &g.asm
 frame := renvoAlignTo8(g.stackPeak)
-if frame > 65528 {
-frame = 65528
+if frame < 0 || frame > 2147483647 {
+a.patchFailed = true
+return
 }
-renvoPut32At(a.code, framePatch, 0x000000c8|frame<<8)
+renvoPut32At(a.code, framePatch+5, frame)
 return
 
 }
@@ -36894,7 +36897,9 @@ if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 a := &g.asm
 renvoAsmMarkLabel(a, label)
 framePatch := len(a.code)
-renvoAsmEmit32(a, 0x000000c8)
+
+renvoAsmEmitText(a, "\x55\x89\xe5\x81\xec")
+renvoAsmEmit32(a, 0)
 return framePatch
 }
 if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
@@ -45465,7 +45470,9 @@ return framePatch
 if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 a := &g.asm
 framePatch := len(a.code)
-renvoAsmEmit32(a, 0x000000c8)
+
+renvoAsmEmitText(a, "\x55\x89\xe5\x81\xec")
+renvoAsmEmit32(a, 0)
 return framePatch
 }
 if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
@@ -45507,20 +45514,19 @@ g.asm.code[framePatch+7+i] = byte(frame >> uint(i*8))
 return
 
 }
-if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 renvoAsmLeave(&g.asm)
-}
 if framePatch < 0 {
 return
 }
 frame := renvoAlignValue(g.stackPeak, 16)
-if frame > 65520 {
-frame = 65520
-}
-g.asm.code[framePatch+1] = byte(frame & 255)
-g.asm.code[framePatch+2] = byte((frame >> 8) & 255)
+if frame < 0 || frame > 2147483647 {
+g.asm.patchFailed = true
 return
+}
+renvoPut32At(g.asm.code, framePatch+5, frame)
+return
+
 }
 if renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 {
 renvoAsmLeave(&g.asm)
@@ -45531,6 +45537,19 @@ return
 if renvoCompilerSelector.renvoTargetArch == renvoArchArm {
 renvoAsmLeave(&g.asm)
 renvoArmAsmPatchFrame(&g.asm, framePatch, g.stackPeak)
+return
+
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+if framePatch < 0 {
+return
+}
+frame := renvoAlignValue(g.stackPeak, 16)
+if frame > 65520 {
+frame = 65520
+}
+g.asm.code[framePatch+1] = byte(frame & 255)
+g.asm.code[framePatch+2] = byte((frame >> 8) & 255)
 return
 
 }

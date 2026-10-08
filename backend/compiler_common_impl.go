@@ -28716,7 +28716,9 @@ func renvoEmitLoopBlockABI(records []int, stateWords int, instructions int, arm6
 	if arm64 {
 		arch, frameReg, iterations, budget = renvoArchAarch64, 29, 22, 23
 		saved = []int{19, 20, 21, 22, 23}
-		registers = []int{3, 4, 5, 6, 7, 8, 12, 13, 14, 15, 19, 20, 21}
+		// X12 is the address scratch used by distant frame loads/stores.
+		// Shared-frame spills must not overwrite a live SSA value there.
+		registers = []int{3, 4, 5, 6, 7, 8, 13, 14, 15, 19, 20, 21}
 	}
 	if oneShot {
 		// An acyclic body has no loop-carried budget or iteration counter.
