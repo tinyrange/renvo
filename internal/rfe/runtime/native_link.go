@@ -1,5 +1,7 @@
 package runtime
 
+import "renvo.dev/internal/rfeabi"
+
 // NativeLinkSlot selects one of 256 four-way sets by mixing code-page identity
 // with the word offset. Full PC tags
 // remain authoritative; a hash match never grants execution admission.
@@ -9,14 +11,7 @@ func NativeLinkSlot(pc uint64) uint64 { return ((pc >> 2) ^ (pc >> 12)) & 255 }
 // is an arena offset, not an executable address. Instructions==0 means absent.
 // Prefix counts memory instructions in ordinary leaves (at most 16). Wider
 // loop regions account exact dynamic memory progress inside their checked body.
-type NativeLink struct {
-	PC           uint64
-	Entry        uint64
-	Instructions uint64
-	Reserved     uint64
-	Prefix       [17]uint8
-	Padding      [15]uint8
-}
+type NativeLink = rfeabi.Descriptor
 
 // ClaimLinks invalidates offsets when another native arena uses this context.
 func (m *MemoryContext) ClaimLinks(n *Native) bool {

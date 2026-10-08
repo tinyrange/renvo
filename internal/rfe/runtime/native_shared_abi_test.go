@@ -136,7 +136,7 @@ func TestNativeSharedABIMixedEntriesSpillsAndBudgets(t *testing.T) {
 				}
 				page := new([4096]byte)
 				clock, epoch := uint64(17), uint64(17)
-				m := &MemoryContext{Clock: &clock}
+				m := &MemoryContext{NativeContext: NativeContext{Clock: &clock}}
 				m.Fill(1, page, 3, &epoch)
 				m.ClaimLinks(n)
 				m.PublishLink(0, pure, 1, [17]uint8{})
@@ -164,7 +164,7 @@ func TestNativeSharedABIMixedEntriesSpillsAndBudgets(t *testing.T) {
 					direct[25], direct[26] = 3, 999
 					directPage := new([4096]byte)
 					directClock, directEpoch := uint64(17), uint64(17)
-					dm := &MemoryContext{Clock: &directClock}
+					dm := &MemoryContext{NativeContext: NativeContext{Clock: &directClock}}
 					dm.Fill(1, directPage, 3, &directEpoch)
 					dm.ClaimLinks(n)
 					dm.PublishLink(8, region, 2, [17]uint8{})

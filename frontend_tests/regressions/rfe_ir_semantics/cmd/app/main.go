@@ -14,6 +14,19 @@ func main() {
 		native.Close()
 	}
 
+	page := new([4096]byte)
+	epoch := uint64(7)
+	memory := emu.MemoryContext{NativeContext: emu.NativeContext{Clock: &epoch, Remaining: 9}}
+	memory.Fill(65, page, 3, &epoch)
+	if memory.Pages[1].Data != page || memory.Pages[1].Epoch != memory.Clock || memory.Remaining != 9 {
+		panic("shared native ABI prefix")
+	}
+	memory.NativeContext.Total = 4
+	memory.Forget(65)
+	if memory.Total != 4 || memory.Pages[1].Data != nil {
+		panic("shared native ABI mutation")
+	}
+
 	var b emu.Builder
 	x := b.Load(0)
 	r := b.Binary(emu.And, b.Binary(emu.Add, x, b.Constant(1)), b.Constant(65535))

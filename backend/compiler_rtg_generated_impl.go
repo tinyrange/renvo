@@ -2090,15 +2090,12 @@ renvoNonNil(renvoCompilerSelector)
 if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 a := &g.asm
 		frame := renvoAlignValue(g.stackPeak, 16)
-		if frame > 65520 {
-			frame = 65520
+		if frame < 0 || frame > 2147483647 {
+			a.patchFailed = true
+			return
 		}
-		if renvoFixedTarget == 0 && (a.c.optimizeRuntime || renvoIsSysVObject(a.c)) {
-			a.code[framePatch+7] = byte(frame)
-			a.code[framePatch+8] = byte(frame >> 8)
-		} else {
-			a.code[framePatch+1] = byte(frame)
-			a.code[framePatch+2] = byte(frame >> 8)
+		for i := 0; i < 4; i++ {
+			a.code[framePatch+7+i] = byte(frame >> uint(i*8))
 		}
 return
 
@@ -2139,11 +2136,9 @@ if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 a := &g.asm
 		renvoAsmMarkLabel(a, label)
 		framePatch := len(a.code)
-		if renvoFixedTarget == 0 && (a.c.optimizeRuntime || renvoIsSysVObject(a.c)) {
-			renvoAsmEmitText(a, "\x55\x48\x89\xe5\x48\x81\xec\x00\x00\x00\x00")
-		} else {
-			renvoAsmEmit32(a, 0x000000c8)
-		}
+		// Peak storage includes nested aggregate temporaries discovered during
+		// emission. ENTER's imm16 cannot reserve their complete frame.
+		renvoAsmEmitText(a, "\x55\x48\x89\xe5\x48\x81\xec\x00\x00\x00\x00")
 		return framePatch
 }
 if renvoCompilerSelector.renvoTargetArch == renvoArch386 {

@@ -37,10 +37,7 @@ func (n *Native) Compile(ops []Op, words int) (int, error) {
 	if err := Validate(ops, words); err != nil {
 		return 0, err
 	}
-	records := make([]int, 0, len(ops)*4)
-	for _, op := range ops {
-		records = append(records, op.Kind, int(op.A), int(op.B), int(op.Imm))
-	}
+	records := nativeRecords(ops)
 	code, body, ok := backendcompiled.RenvoEmitSharedBlock(records, words, false, runtime.GOARCH == "arm64")
 	if !ok {
 		return 0, fmt.Errorf("Renvo could not emit native RFE block")

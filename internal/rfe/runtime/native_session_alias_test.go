@@ -44,7 +44,7 @@ func TestNativeSessionStateAliasesUseCompatibility(t *testing.T) {
 			page := new([4096]byte)
 			state := []uint64{17, 99, 0}
 			clock, epoch := uint64(1), uint64(1)
-			m := &MemoryContext{Clock: &clock}
+			m := &MemoryContext{NativeContext: NativeContext{Clock: &clock}}
 			switch mode {
 			case "ram":
 				state = unsafe.Slice((*uint64)(unsafe.Pointer(page)), 3)

@@ -56,7 +56,7 @@ func TestNativeLoopColdValuesAndCachedOverflowWithSpills(t *testing.T) {
 		if overflow {
 			clock = ^uint64(0) - 1
 		}
-		m := &MemoryContext{Clock: &clock}
+		m := &MemoryContext{NativeContext: NativeContext{Clock: &clock}}
 		m.Fill(1, page, 3, &epoch)
 		m.ClaimLinks(n)
 		m.PublishLink(0, entry, 5, [17]uint8{})

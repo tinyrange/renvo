@@ -7,7 +7,7 @@ import "testing"
 // Aligned and unaligned bases execute the same scalar semantics. Exercise
 // boundary-crossing slow paths, wrapping addresses, store permissions and
 // exhausted generation clocks after precise committed prefixes.
-func TestNativeLoopAlignmentVersionsAgainstScalar(t *testing.T) {
+func TestNativeLoopAlignmentAgainstScalar(t *testing.T) {
 	n, err := NewNative(1 << 20)
 	if err != nil {
 		t.Fatal(err)
@@ -22,7 +22,7 @@ func TestNativeLoopAlignmentVersionsAgainstScalar(t *testing.T) {
 	}
 	page := new([4096]byte)
 	epoch, clock := uint64(0), uint64(0)
-	m := &MemoryContext{Clock: &clock}
+	m := &MemoryContext{NativeContext: NativeContext{Clock: &clock}}
 	m.ClaimLinks(n)
 	for shift := 1; shift <= 4; shift++ {
 		size := 1 << uint(shift)

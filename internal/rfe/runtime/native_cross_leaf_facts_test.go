@@ -63,7 +63,7 @@ func TestNativeCrossLeafFactsPermissionsWidthsAndCallBoundary(t *testing.T) {
 			var page [4096]byte
 			page[0], page[4095] = 17, 19
 			clock, epoch := uint64(1), uint64(1)
-			m := &MemoryContext{Clock: &clock}
+			m := &MemoryContext{NativeContext: NativeContext{Clock: &clock}}
 			m.Fill(1, &page, trial.permissions, &epoch)
 			m.ClaimLinks(n)
 			m.PublishLink(0, entries[0], 1, [17]uint8{0, 1})

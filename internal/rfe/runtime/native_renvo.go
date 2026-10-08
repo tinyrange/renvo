@@ -59,10 +59,6 @@ func (n *Native) CompileLoop(ops []Op, words, instructions int) (int, error) {
 	return 0, fmt.Errorf("native mapping unavailable")
 }
 
-func (n *Native) CompileLoopChained(ops []Op, words, instructions, pcSlot int, exits []uint64) (int, error) {
-	return 0, fmt.Errorf("native mapping unavailable")
-}
-
 const NativeSessionLimit = 65536
 
 func NativeSessionsAvailable() bool { return false }

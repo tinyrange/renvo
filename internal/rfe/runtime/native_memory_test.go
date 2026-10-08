@@ -46,7 +46,7 @@ func TestNativeMemoryAccessGuards(t *testing.T) {
 					}
 					want := data
 					clock, pageEpoch := uint64(100), uint64(90)
-					ctx := &MemoryContext{Clock: &clock, Retired: 999, Status: 999}
+					ctx := &MemoryContext{NativeContext: NativeContext{Clock: &clock, Retired: 999, Status: 999}}
 					ctx.Fill(1, &data, permissions, &pageEpoch)
 					state := []uint64{address, 0x88776655aabbccdd, 0x1234}
 					valid := address >= 4096 && address <= 8192-uint64(size)
@@ -95,7 +95,7 @@ func TestNativeMemoryAccessGuards(t *testing.T) {
 			if store {
 				var data [4096]byte
 				clock, epoch := ^uint64(0), uint64(3)
-				ctx := &MemoryContext{Clock: &clock}
+				ctx := &MemoryContext{NativeContext: NativeContext{Clock: &clock}}
 				ctx.Fill(1, &data, 3, &epoch)
 				if err := n.CallMemory(entry, []uint64{4096, 99, 88}, ctx); err != nil || ctx.Status != 1 || ctx.Retired != 0 || data[0] != 0 || clock != ^uint64(0) || epoch != 3 {
 					t.Fatal("wrapped/partial exhausted store", ctx, err)
@@ -134,7 +134,7 @@ func TestNativeMemoryCheckpointsAndNoLoadCSE(t *testing.T) {
 	var data [4096]byte
 	binary.LittleEndian.PutUint64(data[:], 41)
 	clock, epoch := uint64(10), uint64(1)
-	ctx := &MemoryContext{Clock: &clock}
+	ctx := &MemoryContext{NativeContext: NativeContext{Clock: &clock}}
 	ctx.Fill(1, &data, 3, &epoch)
 	state := []uint64{4096, 0, 0, 0}
 	if err := n.CallMemory(entry, state, ctx); err != nil {

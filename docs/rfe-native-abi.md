@@ -3,6 +3,11 @@
 Internal contract for trusted Go-hosted amd64/arm64 generated code, not the Go
 ABI or a sandbox. Layout assertions in the runtime reject incompatible hosts.
 
+`internal/rfeabi` owns the shared GC-visible page, descriptor and context types.
+Emitter offsets compose in `backend/compiler_common_impl.go` and are checked
+against those types before native admission. The foreign-call staging image
+derives its indices from the same typed layout; C treats the context as opaque.
+
 ## Entries and ownership
 
 An installed entry is a 16-byte-aligned arena offset, never a public executable
@@ -32,7 +37,7 @@ to separate dispatcher saves/facts from SSA spills. FP-144 holds the context;
 pure spills start at FP-152. Loop saves, phi temporaries, translation facts and
 inherited output captures have separate slots. Emission checks the full peak
 against the frame limit, including up to 2,048 IR records. Legacy nesting is
-bounded; optional direct continuation tail-jumps rather than recursing.
+bounded; linked transitions return through the checked dispatcher.
 
 Cold blocks contain at most 16 guest instructions; optimized regions at most
 256. Legacy calls retire at most 64 instructions. Linux/amd64+cgo foreign
@@ -72,5 +77,3 @@ through the supported foreign-call boundary.
 Misses, faults, traps, cold compilation and mapping work return to Go. Exact
 retired prefixes, remaining budget and memory counts are validated before host
 accounting. A slow-path instruction is not replayed after successful retirement.
-Optional direct chaining/one-value transfer remains separately admitted and
-shares the same frame, budget and memory invariants.

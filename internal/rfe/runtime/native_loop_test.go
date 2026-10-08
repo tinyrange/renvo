@@ -105,7 +105,7 @@ func TestNativeLoopFaultRestoresSpilledStateOnce(t *testing.T) {
 	}
 	var page [4096]byte
 	clock, epoch := uint64(1), uint64(1)
-	m := &MemoryContext{Clock: &clock}
+	m := &MemoryContext{NativeContext: NativeContext{Clock: &clock}}
 	m.Fill(1, &page, 3, &epoch)
 	m.ClaimLinks(n)
 	m.PublishLink(0, entry, 2, [17]uint8{0, 0, 1})

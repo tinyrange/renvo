@@ -45,7 +45,7 @@ func TestNativeColdExitKeepsOldSpilledAddress(t *testing.T) {
 		var page [4096]byte
 		page[0] = 7
 		var clock, epoch uint64 = 1, 1
-		context := &MemoryContext{Clock: &clock, Retired: 99, Status: 99}
+		context := &MemoryContext{NativeContext: NativeContext{Clock: &clock, Retired: 99, Status: 99}}
 		context.Fill(1, &page, 1, &epoch)
 		if err = n.CallMemory(entry, state, context); err != nil {
 			t.Fatal(err)

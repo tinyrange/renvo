@@ -8,6 +8,29 @@ import (
 	"unsafe"
 )
 
+// Borrowed addresses exist only under the arena lock. Keep lifetime plumbing
+// shared while each caller owns its distinct budget/scheduling boundary.
+func clearLinkedBorrow(view *[4]uint64, targets *uint64) {
+	if view != nil {
+		*view = [4]uint64{}
+	}
+	if targets != nil {
+		*targets = 0
+	}
+}
+func (a *CodeArena) borrowLinked(view *[4]uint64, targets *uint64) {
+	*view = a.linkedView
+	if targets != nil {
+		*targets = uint64(uintptr(unsafe.Pointer(&a.targets[0])))
+	}
+}
+func clearContextBorrow(m *LinkedContextABI) {
+	if m != nil {
+		clearLinkedBorrow(&m.CodeView, &m.PreparedTargets)
+		m.DescriptorBase, m.AdmissionEpoch = 0, 0
+	}
+}
+
 // Dispatcher entries are never admissible as leaf link targets.
 func (a *CodeArena) InstallLinkedDispatcher(code []byte, words int) (int, error) {
 	if words < 1 || words > 256 {
@@ -22,9 +45,7 @@ func (a *CodeArena) InstallLinkedDispatcher(code []byte, words int) (int, error)
 func (a *CodeArena) CallLinked(entry int, state []uint64, context unsafe.Pointer, view *[4]uint64) error {
 	a.mu.Lock()
 	defer func() {
-		if view != nil {
-			*view = [4]uint64{}
-		}
+		clearLinkedBorrow(view, nil)
 		a.mu.Unlock()
 	}()
 	if a.base == 0 || a.broken || context == nil || view == nil || entry < 0 || entry&15 != 0 || entry>>4 >= len(a.entries) || len(state) == 0 {
@@ -34,7 +55,7 @@ func (a *CodeArena) CallLinked(entry int, state []uint64, context unsafe.Pointer
 	if words&49152 != 49152 || words&8192 != 0 || words == 65535 || int(words&16383) != len(state) {
 		return fmt.Errorf("invalid native dispatcher entry")
 	}
-	*view = a.linkedView
+	a.borrowLinked(view, nil)
 	top := (uintptr(unsafe.Pointer(&a.stack[len(a.stack)-1])) + 1) &^ 15
 	(*LinkedContextABI)(context).AdmissionEpoch = 0
 	callContext(a.base+uintptr(entry), uintptr(unsafe.Pointer(&state[0])), uintptr(context), top)
@@ -111,33 +132,20 @@ func (c *LinkedCall) Call(state []uint64, context unsafe.Pointer, view *[4]uint6
 }
 
 func (c *LinkedCall) CallWithTargets(state []uint64, context unsafe.Pointer, view *[4]uint64, targets *uint64) error {
-	if targets != nil {
-		*targets = 0
-	}
+	clearLinkedBorrow(view, targets)
 	if c == nil || c.arena == nil {
-		if view != nil {
-			*view = [4]uint64{}
-		}
 		return fmt.Errorf("invalid prepared native dispatcher")
 	}
 	a := c.arena
 	a.mu.Lock()
 	defer func() {
-		if view != nil {
-			*view = [4]uint64{}
-		}
-		if targets != nil {
-			*targets = 0
-		}
+		clearLinkedBorrow(view, targets)
 		a.mu.Unlock()
 	}()
 	if a.base == 0 || a.broken || len(state) != c.words || context == nil || view == nil {
 		return fmt.Errorf("invalid prepared native dispatcher call")
 	}
-	*view = a.linkedView
-	if targets != nil {
-		*targets = uint64(uintptr(unsafe.Pointer(&a.targets[0])))
-	}
+	a.borrowLinked(view, targets)
 	(*LinkedContextABI)(context).AdmissionEpoch = 0
 	callContext(c.entry, uintptr(unsafe.Pointer(&state[0])), uintptr(context), c.top)
 	runtime.KeepAlive(context)
@@ -156,33 +164,20 @@ func (c *LinkedCall) CallBatch(state []uint64, context unsafe.Pointer, view *[4]
 }
 
 func (c *LinkedCall) CallBatchWithTargets(state []uint64, context unsafe.Pointer, view *[4]uint64, targets *uint64, limit int, next func(int) (bool, error)) (completed int, err error) {
-	if targets != nil {
-		*targets = 0
-	}
+	clearLinkedBorrow(view, targets)
 	if c == nil || c.arena == nil || limit < 1 || limit > 16 || next == nil {
-		if view != nil {
-			*view = [4]uint64{}
-		}
 		return 0, fmt.Errorf("invalid prepared dispatcher batch")
 	}
 	a := c.arena
 	a.mu.Lock()
 	defer func() {
-		if view != nil {
-			*view = [4]uint64{}
-		}
-		if targets != nil {
-			*targets = 0
-		}
+		clearLinkedBorrow(view, targets)
 		a.mu.Unlock()
 	}()
 	if a.base == 0 || a.broken || len(state) != c.words || context == nil || view == nil {
 		return 0, fmt.Errorf("invalid prepared dispatcher batch call")
 	}
-	*view = a.linkedView
-	if targets != nil {
-		*targets = uint64(uintptr(unsafe.Pointer(&a.targets[0])))
-	}
+	a.borrowLinked(view, targets)
 	for {
 		more, err := next(completed)
 		if err != nil || !more {
@@ -236,9 +231,6 @@ func (c *LinkedCall) PrepareTarget(pc uint64, entry, instructions int) error {
 		return fmt.Errorf("invalid prepared target body")
 	}
 	flags := uint64(r.Words & 40960)
-	if a.transfers[entry] {
-		flags |= 1
-	}
 	base, slot := ((pc>>2)^(pc>>12))&255, uint64(0)
 	found := false
 	for way := uint64(0); way < 4; way++ {

@@ -15,8 +15,7 @@ sandbox/linux-arm64-user -engine native -stats guest.elf [args...]
 to the lower tiers. `-steps` is an absolute retirement ceiling (default 100 million).
 `-region-instructions` bounds optimized regions (default/max 256);
 `-native-instructions` bounds supported native sessions (default/max 65,536).
-Cold discovery remains limited to 16 instructions. `-native-chains` enables
-experimental direct chaining and is off by default.
+Cold discovery remains limited to 16 instructions.
 
 ## Supported scope
 

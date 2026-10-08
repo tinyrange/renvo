@@ -13,18 +13,23 @@ import (
 func linkLayoutOK() bool {
 	var m MemoryContext
 	var b NativeLink
-	var q runimage.LinkedContextABI
-	if unsafe.Sizeof(q) != unsafe.Offsetof(m.linkOwner) ||
-		unsafe.Offsetof(q.Retired) != unsafe.Offsetof(m.Retired) || unsafe.Offsetof(q.Status) != unsafe.Offsetof(m.Status) || unsafe.Offsetof(q.Address) != unsafe.Offsetof(m.Address) ||
-		unsafe.Offsetof(q.Clock) != unsafe.Offsetof(m.Clock) || unsafe.Offsetof(q.Pages) != unsafe.Offsetof(m.Pages) || unsafe.Sizeof(q.Pages[0]) != unsafe.Sizeof(m.Pages[0]) ||
-		unsafe.Offsetof(q.Pages[0].Number) != unsafe.Offsetof(m.Pages[0].Number) || unsafe.Offsetof(q.Pages[0].Data) != unsafe.Offsetof(m.Pages[0].Data) || unsafe.Offsetof(q.Pages[0].Permissions) != unsafe.Offsetof(m.Pages[0].Permissions) || unsafe.Offsetof(q.Pages[0].Epoch) != unsafe.Offsetof(m.Pages[0].Epoch) ||
-		unsafe.Offsetof(q.Remaining) != unsafe.Offsetof(m.Remaining) || unsafe.Offsetof(q.Total) != unsafe.Offsetof(m.Total) || unsafe.Offsetof(q.MemoryTotal) != unsafe.Offsetof(m.MemoryTotal) ||
-		unsafe.Offsetof(q.CodeView) != unsafe.Offsetof(m.CodeView) || unsafe.Offsetof(q.Blocks) != unsafe.Offsetof(m.Blocks) || unsafe.Sizeof(q.Blocks[0]) != unsafe.Sizeof(b) || unsafe.Offsetof(q.Blocks[0].Prefix) != unsafe.Offsetof(b.Prefix) || unsafe.Offsetof(q.Blocks[0].PC) != unsafe.Offsetof(b.PC) || unsafe.Offsetof(q.Blocks[0].Entry) != unsafe.Offsetof(b.Entry) || unsafe.Offsetof(q.Blocks[0].Instructions) != unsafe.Offsetof(b.Instructions) || unsafe.Offsetof(q.Blocks[0].Reserved) != unsafe.Offsetof(b.Reserved) ||
-		unsafe.Offsetof(q.LoopExits) != unsafe.Offsetof(m.LoopExits) || unsafe.Offsetof(q.LoopIterations) != unsafe.Offsetof(m.LoopIterations) || unsafe.Offsetof(q.PreparedTargets) != unsafe.Offsetof(m.PreparedTargets) || unsafe.Offsetof(q.DescriptorBase) != unsafe.Offsetof(m.DescriptorBase) || unsafe.Offsetof(q.AdmissionEpoch) != unsafe.Offsetof(m.AdmissionEpoch) {
-		return false
-	}
-	return memoryLayoutOK() && unsafe.Sizeof(b) == 64 && unsafe.Offsetof(b.Prefix) == 32 &&
-		unsafe.Offsetof(m.Remaining) == 2080 && unsafe.Offsetof(m.Total) == 2088 && unsafe.Offsetof(m.MemoryTotal) == 2096 && unsafe.Offsetof(m.CodeView) == 2104 && unsafe.Offsetof(m.Blocks) == 2136 && unsafe.Offsetof(m.LoopExits) == 67672 && unsafe.Offsetof(m.LoopIterations) == 67680 && unsafe.Offsetof(m.PreparedTargets) == 67688 && unsafe.Offsetof(m.DescriptorBase) == 67696 && unsafe.Offsetof(m.AdmissionEpoch) == 67704
+	return memoryLayoutOK() && unsafe.Offsetof(m.NativeContext) == 0 &&
+		unsafe.Sizeof(m.NativeContext) == backendcompiled.RenvoRFEContextSize &&
+		unsafe.Offsetof(m.linkOwner) == backendcompiled.RenvoRFEContextSize &&
+		unsafe.Sizeof(b) == backendcompiled.RenvoRFEDescriptorSize &&
+		unsafe.Offsetof(b.PC) == 0 && unsafe.Offsetof(b.Entry) == 8 &&
+		unsafe.Offsetof(b.Instructions) == 16 && unsafe.Offsetof(b.Reserved) == 24 &&
+		unsafe.Offsetof(b.Prefix) == backendcompiled.RenvoRFEDescriptorPrefix &&
+		unsafe.Offsetof(m.Remaining) == backendcompiled.RenvoRFERemaining &&
+		unsafe.Offsetof(m.Total) == backendcompiled.RenvoRFETotal &&
+		unsafe.Offsetof(m.MemoryTotal) == backendcompiled.RenvoRFEMemoryTotal &&
+		unsafe.Offsetof(m.CodeView) == backendcompiled.RenvoRFECodeView &&
+		unsafe.Offsetof(m.Blocks) == backendcompiled.RenvoRFEBlocks &&
+		unsafe.Offsetof(m.LoopExits) == backendcompiled.RenvoRFELoopExits &&
+		unsafe.Offsetof(m.LoopIterations) == backendcompiled.RenvoRFELoopIterations &&
+		unsafe.Offsetof(m.PreparedTargets) == backendcompiled.RenvoRFEPreparedTargets &&
+		unsafe.Offsetof(m.DescriptorBase) == backendcompiled.RenvoRFEDescriptorBase &&
+		unsafe.Offsetof(m.AdmissionEpoch) == backendcompiled.RenvoRFEAdmissionEpoch
 }
 
 // PrepareLinks compiles the bounded dispatcher outside the arena call lock.

@@ -14,8 +14,9 @@ import (
 func memoryLayoutOK() bool {
 	var m MemoryContext
 	var p NativePage
-	return unsafe.Sizeof(p) == 32 && unsafe.Offsetof(p.Data) == 8 && unsafe.Offsetof(p.Permissions) == 16 && unsafe.Offsetof(p.Epoch) == 24 &&
-		unsafe.Offsetof(m.Retired) == 0 && unsafe.Offsetof(m.Status) == 8 && unsafe.Offsetof(m.Address) == 16 && unsafe.Offsetof(m.Clock) == 24 && unsafe.Offsetof(m.Pages) == 32
+	return unsafe.Sizeof(p) == backendcompiled.RenvoRFEPageSize && unsafe.Offsetof(p.Number) == 0 &&
+		unsafe.Offsetof(p.Data) == backendcompiled.RenvoRFEPageData && unsafe.Offsetof(p.Permissions) == backendcompiled.RenvoRFEPagePermissions && unsafe.Offsetof(p.Epoch) == backendcompiled.RenvoRFEPageEpoch &&
+		unsafe.Offsetof(m.Retired) == backendcompiled.RenvoRFERetired && unsafe.Offsetof(m.Status) == backendcompiled.RenvoRFEStatus && unsafe.Offsetof(m.Address) == backendcompiled.RenvoRFEAddress && unsafe.Offsetof(m.Clock) == backendcompiled.RenvoRFEClock && unsafe.Offsetof(m.Pages) == backendcompiled.RenvoRFEPages
 }
 func (n *Native) CompileMemory(ops []Op, words int) (int, error) {
 	if !memoryLayoutOK() {
@@ -24,10 +25,7 @@ func (n *Native) CompileMemory(ops []Op, words int) (int, error) {
 	if err := ValidateMemory(ops, words); err != nil {
 		return 0, err
 	}
-	records := make([]int, 0, len(ops)*4)
-	for _, op := range ops {
-		records = append(records, op.Kind, int(op.A), int(op.B), int(op.Imm))
-	}
+	records := nativeRecords(ops)
 	code, body, ok := backendcompiled.RenvoEmitSharedBlock(records, words, true, runtime.GOARCH == "arm64")
 	if !ok {
 		return 0, fmt.Errorf("Renvo could not emit checked memory block")

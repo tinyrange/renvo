@@ -1,6 +1,9 @@
 package runtime
 
-import "fmt"
+import (
+	"fmt"
+	"renvo.dev/internal/rfeabi"
+)
 
 // Effect records are accepted only by CompileMemory, never by the pure evaluator
 // or emitter. Memory values are not interned across loads/stores. All memory
@@ -157,12 +160,10 @@ func ValidateMemory(ops []Op, words int) error {
 // NativePage contains only host-owned, GC-visible pointers. Permissions mirror
 // the live mapping and must be invalidated on protect/unmap/remap. Epoch points
 // at the same generation queried by the architectural memory implementation.
-type NativePage struct {
-	Number      uint64
-	Data        *[4096]byte
-	Permissions uint64
-	Epoch       *uint64
-}
+type NativePage = rfeabi.Page
+
+// NativeContext is the shared ABI prefix, also used by the host dispatcher.
+type NativeContext = rfeabi.Context
 
 // MemoryContext is the checked native-memory ABI, owned by one single-threaded
 // address space and shared by its aliases. Native stores require non-executable
@@ -172,23 +173,9 @@ type NativePage struct {
 // 3 invalid linked progress (a host implementation error, not a guest trap);
 // 4 successful region side exit after a committed architectural checkpoint.
 type MemoryContext struct {
-	Retired         uint64
-	Status          uint64
-	Address         uint64
-	Clock           *uint64
-	Pages           [64]NativePage
-	Remaining       uint64
-	Total           uint64
-	MemoryTotal     uint64
-	CodeView        [4]uint64 // populated only while the arena lock is held
-	Blocks          [1024]NativeLink
-	LoopExits       uint64 // successful loop branches handled entirely in native dispatch
-	LoopIterations  uint64
-	PreparedTargets uint64 // borrowed arena-owned proof table, zero outside serialized calls
-	DescriptorBase  uint64 // zero on public contexts; session-private borrowed descriptor view
-	AdmissionEpoch  uint64 // always zero on public contexts; private session admission generation
-	linkOwner       *Native
-	linkVictim      uint64 // cold round-robin replacement; not part of the native ABI
+	NativeContext
+	linkOwner  *Native
+	linkVictim uint64 // cold round-robin replacement; not part of the native ABI
 }
 
 func (m *MemoryContext) Fill(number uint64, data *[4096]byte, permissions uint64, epoch *uint64) {

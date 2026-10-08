@@ -4,39 +4,15 @@ package runimage
 
 import (
 	"fmt"
+	"renvo.dev/internal/rfeabi"
 	"runtime"
 	"unsafe"
 )
 
-// LinkedContextABI is the typed host view of the existing checked dispatcher
-// context prefix. The runtime verifies every offset and element size against
-// its authoritative MemoryContext before preparing a dispatcher. Keeping typed
-// page pointers also preserves the allocation's GC roots. This view excludes
-// the runtime-private owner token and never assigns guest architectural state.
-type LinkedContextABI struct {
-	Retired, Status, Address                   uint64
-	Clock                                      *uint64
-	Pages                                      [64]LinkedPageABI
-	Remaining, Total, MemoryTotal              uint64
-	CodeView                                   [4]uint64
-	Blocks                                     [1024]LinkedDescriptorABI
-	LoopExits, LoopIterations, PreparedTargets uint64
-	DescriptorBase                             uint64 // session-private; zero selects inline Blocks
-	AdmissionEpoch                             uint64 // session-private; zero disables cached validation
-}
-
-type LinkedPageABI struct {
-	Number      uint64
-	Data        *[4096]byte
-	Permissions uint64
-	Epoch       *uint64
-}
-
-type LinkedDescriptorABI struct {
-	PC, Entry, Instructions, Reserved uint64
-	Prefix                            [17]uint8
-	Padding                           [15]uint8
-}
+// Host views share the runtime's authoritative typed ABI prefix.
+type LinkedContextABI = rfeabi.Context
+type LinkedPageABI = rfeabi.Page
+type LinkedDescriptorABI = rfeabi.Descriptor
 
 // CallQuanta schedules only separate <=64-instruction dispatcher calls. Unlike
 // CallBatch it inlines the fixed runtime selector/accounting protocol in Go.
@@ -44,11 +20,7 @@ type LinkedDescriptorABI struct {
 // validated before another budget is installed. The lock does not enlarge a
 // native call or permit code/mapping mutation between calls.
 func (c *LinkedCall) CallQuanta(state []uint64, m *LinkedContextABI, pcSlot, limit int, remaining, generation uint64) (completed int, err error) {
-	if m != nil {
-		m.CodeView = [4]uint64{}
-		m.PreparedTargets = 0
-		m.DescriptorBase, m.AdmissionEpoch = 0, 0
-	}
+	clearContextBorrow(m)
 	if c == nil || c.arena == nil || m == nil || len(state) != c.words || pcSlot < 0 || pcSlot >= len(state) || limit < 1 || limit > 16 || remaining == 0 {
 		return 0, fmt.Errorf("invalid prepared dispatcher quanta")
 	}
@@ -59,9 +31,7 @@ func (c *LinkedCall) CallQuanta(state []uint64, m *LinkedContextABI, pcSlot, lim
 	defer func() {
 		m.Total, m.MemoryTotal, m.LoopExits, m.LoopIterations = total, memory, exits, iterations
 		m.Remaining = initial - total
-		m.CodeView = [4]uint64{}
-		m.PreparedTargets = 0
-		m.DescriptorBase, m.AdmissionEpoch = 0, 0
+		clearContextBorrow(m)
 		a.mu.Unlock()
 		runtime.KeepAlive(m)
 		runtime.KeepAlive(state)
@@ -73,8 +43,7 @@ func (c *LinkedCall) CallQuanta(state []uint64, m *LinkedContextABI, pcSlot, lim
 	}
 	m.Total, m.MemoryTotal, m.Status, m.Retired = 0, 0, 0, 0
 	m.LoopExits, m.LoopIterations = 0, 0
-	m.CodeView = a.linkedView
-	m.PreparedTargets = uint64(uintptr(unsafe.Pointer(&a.targets[0])))
+	a.borrowLinked(&m.CodeView, &m.PreparedTargets)
 	for completed < limit {
 		budget := remaining
 		if budget > 64 {

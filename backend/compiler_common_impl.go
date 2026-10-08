@@ -24,6 +24,54 @@ func renvoEmitPureBlock(records []int, stateWords int, context *renvoCompileCont
 	return renvoEmitStateBlock(records, stateWords, context, false)
 }
 
+// Native context wire layout. These constants are also exported by the
+// generated host bundle; runtime assertions verify the GC-visible Go layout.
+// Offsets compose from the prefix and table shapes instead of magic indices.
+const (
+	RenvoRFEWordBytes        = 8
+	RenvoRFERetired          = 0
+	RenvoRFEStatus           = RenvoRFERetired + RenvoRFEWordBytes
+	RenvoRFEAddress          = RenvoRFEStatus + RenvoRFEWordBytes
+	RenvoRFEClock            = RenvoRFEAddress + RenvoRFEWordBytes
+	RenvoRFEPages            = RenvoRFEClock + RenvoRFEWordBytes
+	RenvoRFEPageSize         = 32
+	RenvoRFEPageCount        = 64
+	RenvoRFEPageData         = 8
+	RenvoRFEPagePermissions  = 16
+	RenvoRFEPageEpoch        = 24
+	RenvoRFERemaining        = RenvoRFEPages + RenvoRFEPageSize*RenvoRFEPageCount
+	RenvoRFETotal            = RenvoRFERemaining + RenvoRFEWordBytes
+	RenvoRFEMemoryTotal      = RenvoRFETotal + RenvoRFEWordBytes
+	RenvoRFECodeView         = RenvoRFEMemoryTotal + RenvoRFEWordBytes
+	RenvoRFEBlocks           = RenvoRFECodeView + 4*RenvoRFEWordBytes
+	RenvoRFEDescriptorSize   = 64
+	RenvoRFEDescriptorCount  = 1024
+	RenvoRFEDescriptorPrefix = 32
+	RenvoRFELoopExits        = RenvoRFEBlocks + RenvoRFEDescriptorSize*RenvoRFEDescriptorCount
+	RenvoRFELoopIterations   = RenvoRFELoopExits + RenvoRFEWordBytes
+	RenvoRFEPreparedTargets  = RenvoRFELoopIterations + RenvoRFEWordBytes
+	RenvoRFEDescriptorBase   = RenvoRFEPreparedTargets + RenvoRFEWordBytes
+	RenvoRFEAdmissionEpoch   = RenvoRFEDescriptorBase + RenvoRFEWordBytes
+	RenvoRFEContextSize      = RenvoRFEAdmissionEpoch + RenvoRFEWordBytes
+)
+
+// Record-shape queries are shared by validation and every liveness/folding
+// pass. Select has a plain third SSA operand; carry/pair stores pack it above
+// the low byte of immediate flags. LoopContinue has only a left operand.
+func renvoRFEHasLeft(op int) bool { return op >= 2 && op != 15 }
+func renvoRFEHasRight(op int) bool {
+	return op >= 3 && op != 8 && op != 9 && op != 13 && op != 36 && op != 15 && op != 16 && op != 26 && op != 35
+}
+func renvoRFEThirdOperand(op int, immediate int) int {
+	if op == 21 {
+		return immediate
+	}
+	if op == 33 || op == 34 || op == 37 {
+		return immediate >> 8
+	}
+	return -1
+}
+
 func renvoRFEValidateRecords(records []int, stateWords int, memory bool) bool {
 	if stateWords < 1 || stateWords > 256 || len(records) == 0 || len(records)%4 != 0 || len(records) > 8192 {
 		return false
@@ -38,10 +86,10 @@ func renvoRFEValidateRecords(records []int, stateWords int, memory bool) bool {
 		if op < 0 || op == 35 || op > maxOperation || !memory && (op >= 13 && op <= 16 || op == 26) || (op == 1 || op == 2) && (immediate < 0 || immediate >= stateWords) {
 			return false
 		}
-		if op >= 2 && op != 15 && (left < 0 || left >= i || renvoMemoryEffectOnly(records[left*4])) {
+		if renvoRFEHasLeft(op) && (left < 0 || left >= i || renvoMemoryEffectOnly(records[left*4])) {
 			return false
 		}
-		if op >= 3 && op != 8 && op != 9 && op != 13 && op != 36 && op != 15 && op != 16 && op != 26 && (right < 0 || right >= i || renvoMemoryEffectOnly(records[right*4])) {
+		if renvoRFEHasRight(op) && (right < 0 || right >= i || renvoMemoryEffectOnly(records[right*4])) {
 			return false
 		}
 		if (op == 13 || op == 14) && immediate != 1 && immediate != 2 && immediate != 4 && immediate != 8 && !(op == 13 && immediate == 16) {
@@ -491,7 +539,6 @@ type renvoAsm struct {
 	// RFE shared-frame bodies partition scratch below the dispatcher header.
 	rfeFrameBias     int
 	rfeNarrowSources []int
-	rfeTransferReg   int // nonzero: architectural slot zero is native-private until exit
 }
 
 // A backend object is an unpatched function fragment plus its local labels,
@@ -27409,10 +27456,6 @@ func renvoRFEMemoryOperand(a *renvoAsm, field int, base int, disp int) {
 	}
 }
 func renvoRFERegLoad(a *renvoAsm, dst int, base int, disp int, size int) {
-	if a.rfeTransferReg != 0 && base == 11 && disp == 0 && size == 8 {
-		renvoRFERegMove(a, dst, a.rfeTransferReg)
-		return
-	}
 	disp = renvoRFEFrameDisplacement(a, base, disp)
 	if renvoRFEArm(a) {
 		opcode := 0xf9400000
@@ -27447,10 +27490,6 @@ func renvoRFERegLoad(a *renvoAsm, dst int, base int, disp int, size int) {
 	renvoRFEMemoryOperand(a, dst, base, disp)
 }
 func renvoRFERegStore(a *renvoAsm, src int, base int, disp int, size int) {
-	if a.rfeTransferReg != 0 && base == 11 && disp == 0 && size == 8 {
-		renvoRFERegMove(a, a.rfeTransferReg, src)
-		return
-	}
 	disp = renvoRFEFrameDisplacement(a, base, disp)
 	if renvoRFEArm(a) {
 		renvoAarch64AsmStoreRegMem(a, src, base, disp, size)
@@ -27565,18 +27604,19 @@ func renvoRFEJumpMasked(a *renvoAsm, source int, scratch int, mask int, nonzero 
 // A foreign session borrows only the public integer descriptor field. Legacy
 // contexts keep the inline table. Neither view is an executable admission.
 func renvoRFEDescriptorBase(a *renvoAsm, destination int, context int) {
-	renvoRFERegLoad(a, destination, context, 67696, 8)
+	renvoRFERegLoad(a, destination, context, RenvoRFEDescriptorBase, 8)
 	ready := renvoAsmNewLabel(a)
 	renvoRFERegImmediate(a, 100, destination, 0)
 	renvoRFEJump(a, 1, ready)
 	renvoRFERegMove(a, destination, context)
-	renvoRFERegImmediate(a, 3, destination, 2136)
+	renvoRFERegImmediate(a, 3, destination, RenvoRFEBlocks)
 	renvoAsmMarkLabel(a, ready)
 }
 
 // Probe the four fixed ways of a full-PC-tagged table. Both public descriptors
 // and private proofs retain the same 1024-entry capacity and 64-byte stride.
-// The matching pointer is returned in place; a miss never executes a candidate.
+// The matching pointer is returned in place and scratch holds its nonzero
+// count. A miss never executes a candidate.
 func renvoRFEProbeLink(a *renvoAsm, pc int, pointer int, scratch int, miss int) {
 	found := renvoAsmNewLabel(a)
 	for way := 0; way < 4; way++ {
@@ -27626,15 +27666,15 @@ func renvoEmitRegisterDispatcher(pcSlot int, stateWords int, arm64 bool) ([]byte
 	renvoRFERegMove(a, context, secondary)
 	renvoRFERegStore(a, context, frameReg, -(renvoRFESharedPrefix + 16), 8)
 	renvoRFEInitSharedFacts(a)
-	renvoRFERegLoad(a, remaining, context, 2080, 8)
+	renvoRFERegLoad(a, remaining, context, RenvoRFERemaining, 8)
 	// Save the initial budget and total privately. Each validated leaf reduces
 	// remaining; reconstruct aggregate retirement only at the cold exit.
 	renvoRFERegStore(a, remaining, frameReg, -56, 8)
-	renvoRFERegLoad(a, secondary, context, 2088, 8)
+	renvoRFERegLoad(a, secondary, context, RenvoRFETotal, 8)
 	renvoRFERegStore(a, secondary, frameReg, -112, 8)
 	// Freeze authority before executing any guest operation. Compatibility
 	// contexts may alias guest RAM; later writes must not enable the cache.
-	renvoRFERegLoad(a, temporary, context, 67704, 8)
+	renvoRFERegLoad(a, temporary, context, RenvoRFEAdmissionEpoch, 8)
 	renvoRFERegStore(a, temporary, frameReg, -120, 8)
 	loop, exit, bad, pure, account, slow := renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a)
 	ordinary, loopResult, loopSlow := renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a)
@@ -27651,7 +27691,7 @@ func renvoEmitRegisterDispatcher(pcSlot int, stateWords int, arm64 bool) ([]byte
 	// Opaque arena-owned proofs bind full PC, public entry and exact count.
 	// Their offset/family/state shape was checked under the same arena lock.
 	// This borrowed view is refreshed and cleared on every host call.
-	renvoRFERegLoad(a, target, context, 67688, 8)
+	renvoRFERegLoad(a, target, context, RenvoRFEPreparedTargets, 8)
 	renvoRFEJumpZero(a, target, genericSelect)
 	renvoRFERegLoad(a, primary, state, pcSlot*8, 8)
 	renvoRFERegMove(a, descriptor, primary)
@@ -27662,12 +27702,10 @@ func renvoEmitRegisterDispatcher(pcSlot int, stateWords int, arm64 bool) ([]byte
 	renvoRFERegImmediate(a, 5, descriptor, 255)
 	renvoRFERegShift(a, descriptor, 8, 6)
 	renvoRFERegBinary(a, 3, target, descriptor)
-	renvoRFEProbeLink(a, primary, target, temporary, genericSelect)
+	renvoRFEProbeLink(a, primary, target, count, genericSelect)
 	// Repeated admissions may reuse a check only inside a proven non-aliasing
 	// foreign session. The epoch is private, nonzero and fresh per invocation.
 	// Full PC and remaining budget are checked on EVERY dispatch, cached or not.
-	renvoRFERegLoad(a, count, target, 16, 8)
-	renvoRFEJumpZero(a, count, genericSelect)
 	renvoRFERegLoad(a, temporary, frameReg, -120, 8)
 	renvoRFEJumpZero(a, temporary, validatePrepared)
 	renvoRFECompareMemory(a, temporary, target, 32, secondary)
@@ -27720,9 +27758,7 @@ func renvoEmitRegisterDispatcher(pcSlot int, stateWords int, arm64 bool) ([]byte
 	renvoRFERegShift(a, descriptor, 8, 6)
 	renvoRFEDescriptorBase(a, temporary, context)
 	renvoRFERegBinary(a, 3, descriptor, temporary)
-	renvoRFEProbeLink(a, primary, descriptor, temporary, exit)
-	renvoRFERegLoad(a, count, descriptor, 16, 8)
-	renvoRFEJumpZero(a, count, exit)
+	renvoRFEProbeLink(a, primary, descriptor, count, exit)
 	renvoRFERegImmediate(a, 100, count, 256)
 	renvoRFEJump(a, 4, exit)
 	renvoRFERegBinary(a, 100, count, remaining)
@@ -27731,9 +27767,9 @@ func renvoEmitRegisterDispatcher(pcSlot int, stateWords int, arm64 bool) ([]byte
 	renvoRFEJumpMasked(a, primary, temporary, 15, true, exit)
 	renvoRFERegMove(a, secondary, primary)
 	renvoRFERegShift(a, secondary, 9, 4)
-	renvoRFECompareMemory(a, secondary, context, 2128, temporary)
+	renvoRFECompareMemory(a, secondary, context, RenvoRFECodeView+3*RenvoRFEWordBytes, temporary)
 	renvoRFEJump(a, 3, exit)
-	renvoRFERegLoad(a, temporary, context, 2120, 8)
+	renvoRFERegLoad(a, temporary, context, RenvoRFECodeView+2*RenvoRFEWordBytes, 8)
 	renvoRFEJumpZero(a, temporary, exit)
 	renvoRFERegShift(a, secondary, 8, 4)
 	renvoRFERegBinary(a, 3, secondary, temporary)
@@ -27750,7 +27786,7 @@ func renvoEmitRegisterDispatcher(pcSlot int, stateWords int, arm64 bool) ([]byte
 	renvoRFEJump(a, 1, exit)
 	renvoAsmJmpLabel(a, admitted)
 	renvoAsmMarkLabel(a, genericAdmission)
-	renvoRFERegLoad(a, temporary, context, 2112, 8)
+	renvoRFERegLoad(a, temporary, context, RenvoRFECodeView+RenvoRFEWordBytes, 8)
 	renvoRFERegBinary(a, 100, primary, temporary)
 	renvoRFEJump(a, 3, exit)
 	renvoRFERegLoad(a, target, secondary, 0, 2)
@@ -27783,7 +27819,7 @@ func renvoEmitRegisterDispatcher(pcSlot int, stateWords int, arm64 bool) ([]byte
 	// or a loop-only shared body. Public descriptors never select this offset.
 	renvoRFERegLoad(a, temporary, secondary, 4, 4)
 	renvoRFERegBinary(a, 3, primary, temporary)
-	renvoRFERegLoad(a, target, context, 2104, 8)
+	renvoRFERegLoad(a, target, context, RenvoRFECodeView, 8)
 	renvoRFEJumpZero(a, target, exit)
 	renvoRFERegBinary(a, 3, target, primary)
 	renvoAsmMarkLabel(a, callTarget)
@@ -27802,7 +27838,7 @@ func renvoEmitRegisterDispatcher(pcSlot int, stateWords int, arm64 bool) ([]byte
 	renvoRFEJumpMasked(a, primary, temporary, 32768, false, pure)
 	renvoAsmJmpLabel(a, memoryResult)
 	renvoAsmMarkLabel(a, preparedMemory)
-	renvoRFERegLoad(a, target, context, 2104, 8)
+	renvoRFERegLoad(a, target, context, RenvoRFECodeView, 8)
 	renvoRFEJumpZero(a, target, exit)
 	renvoRFERegBinary(a, 3, target, primary)
 	renvoRFERegMove(a, primary, state)
@@ -27824,7 +27860,7 @@ func renvoEmitRegisterDispatcher(pcSlot int, stateWords int, arm64 bool) ([]byte
 	renvoRFEJump(a, 1, bad)
 	renvoAsmJmpLabel(a, account)
 	renvoAsmMarkLabel(a, preparedPure)
-	renvoRFERegLoad(a, target, context, 2104, 8)
+	renvoRFERegLoad(a, target, context, RenvoRFECodeView, 8)
 	renvoRFEJumpZero(a, target, exit)
 	renvoRFERegBinary(a, 3, target, primary)
 	renvoRFERegMove(a, primary, state)
@@ -27843,9 +27879,9 @@ func renvoEmitRegisterDispatcher(pcSlot int, stateWords int, arm64 bool) ([]byte
 	renvoRFERegMove(a, temporary, descriptor)
 	renvoRFERegBinary(a, 3, temporary, primary)
 	renvoRFERegLoad(a, temporary, temporary, 32, 1)
-	renvoRFERegLoad(a, secondary, context, 2096, 8)
+	renvoRFERegLoad(a, secondary, context, RenvoRFEMemoryTotal, 8)
 	renvoRFERegBinary(a, 3, secondary, temporary)
-	renvoRFERegStore(a, secondary, context, 2096, 8)
+	renvoRFERegStore(a, secondary, context, RenvoRFEMemoryTotal, 8)
 	renvoRFERegBinary(a, 4, remaining, primary)
 	if arm64 {
 		renvoAsmJmpLabel(a, loop)
@@ -27865,12 +27901,12 @@ func renvoEmitRegisterDispatcher(pcSlot int, stateWords int, arm64 bool) ([]byte
 	renvoRFERegMove(a, temporary, descriptor)
 	renvoRFERegBinary(a, 3, temporary, primary)
 	renvoRFERegLoad(a, temporary, temporary, 32, 1)
-	renvoRFERegLoad(a, secondary, context, 2096, 8)
+	renvoRFERegLoad(a, secondary, context, RenvoRFEMemoryTotal, 8)
 	renvoRFERegBinary(a, 3, secondary, temporary)
-	renvoRFERegStore(a, secondary, context, 2096, 8)
+	renvoRFERegStore(a, secondary, context, RenvoRFEMemoryTotal, 8)
 	renvoAsmJmpLabel(a, exit)
 	renvoAsmMarkLabel(a, preparedLoop)
-	renvoRFERegLoad(a, target, context, 2104, 8)
+	renvoRFERegLoad(a, target, context, RenvoRFECodeView, 8)
 	renvoRFEJumpZero(a, target, exit)
 	renvoRFERegBinary(a, 3, target, primary)
 	renvoRFERegMove(a, primary, state)
@@ -27929,8 +27965,8 @@ func renvoEmitRegisterDispatcher(pcSlot int, stateWords int, arm64 bool) ([]byte
 	renvoRFERegBinary(a, 4, primary, remaining)
 	renvoRFERegLoad(a, secondary, frameReg, -112, 8)
 	renvoRFERegBinary(a, 3, secondary, primary)
-	renvoRFERegStore(a, secondary, context, 2088, 8)
-	renvoRFERegStore(a, remaining, context, 2080, 8)
+	renvoRFERegStore(a, secondary, context, RenvoRFETotal, 8)
+	renvoRFERegStore(a, remaining, context, RenvoRFERemaining, 8)
 	for i, reg := range saved {
 		renvoRFERegLoad(a, reg, frameReg, -(i+1)*8, 8)
 	}
@@ -27954,16 +27990,13 @@ func renvoRFEAllocate(records []int, memory bool, arm64 bool, shared bool) ([]in
 	}
 	for i := 0; i < count; i++ {
 		op := records[i*4]
-		if op >= 2 && op != 15 {
+		if renvoRFEHasLeft(op) {
 			last[records[i*4+1]] = i
 		}
-		if op == 21 {
-			last[records[i*4+3]] = i
+		if third := renvoRFEThirdOperand(op, records[i*4+3]); third >= 0 {
+			last[third] = i
 		}
-		if op == 33 || op == 34 || op == 37 {
-			last[records[i*4+3]>>8] = i
-		}
-		if op >= 3 && op != 8 && op != 9 && op != 13 && op != 36 && op != 15 && op != 16 && op != 26 {
+		if renvoRFEHasRight(op) {
 			last[records[i*4+2]] = i
 		}
 	}
@@ -28103,10 +28136,10 @@ func renvoEmitRegisterMemoryAccess(a *renvoAsm, op int, size int, failure int, r
 	renvoRFERegShift(a, descriptor, 8, 5)
 	renvoRFERegLoad(a, primary, frame, -16, 8)
 	renvoRFERegBinary(a, 3, descriptor, primary)
-	renvoRFERegImmediate(a, 3, descriptor, 32)
+	renvoRFERegImmediate(a, 3, descriptor, RenvoRFEPages)
 	renvoRFECompareMemory(a, host, descriptor, 0, primary)
 	renvoRFEJump(a, 1, failure)
-	renvoRFERegLoad(a, primary, descriptor, 8, 8)
+	renvoRFERegLoad(a, primary, descriptor, RenvoRFEPageData, 8)
 	renvoRFEJumpZero(a, primary, failure)
 	renvoRFERegMove(a, host, primary)
 	renvoRFERegBinary(a, 3, host, temp) // bounded host address
@@ -28114,7 +28147,7 @@ func renvoEmitRegisterMemoryAccess(a *renvoAsm, op int, size int, failure int, r
 	if op == 14 {
 		permission, relevant = 2, 6
 	}
-	renvoRFERegLoad(a, primary, descriptor, 16, 8)
+	renvoRFERegLoad(a, primary, descriptor, RenvoRFEPagePermissions, 8)
 	renvoRFERegImmediate(a, 5, primary, relevant)
 	renvoRFERegImmediate(a, 100, primary, permission)
 	renvoRFEJump(a, 1, failure)
@@ -28126,10 +28159,10 @@ func renvoEmitRegisterMemoryAccess(a *renvoAsm, op int, size int, failure int, r
 		renvoRFERegLoad(a, primary, host, 0, size)
 		return
 	}
-	renvoRFERegLoad(a, primary, descriptor, 24, 8)
+	renvoRFERegLoad(a, primary, descriptor, RenvoRFEPageEpoch, 8)
 	renvoRFEJumpZero(a, primary, failure) // page epoch pointer
 	renvoRFERegLoad(a, temp, frame, -16, 8)
-	renvoRFERegLoad(a, temp, temp, 24, 8)
+	renvoRFERegLoad(a, temp, temp, RenvoRFEClock, 8)
 	renvoRFEJumpZero(a, temp, failure)
 	renvoRFERegMove(a, descriptor, temp) // clock pointer, descriptor no longer needed
 	renvoRFERegLoad(a, temp, descriptor, 0, 8)
@@ -28546,179 +28579,7 @@ func RenvoEmitSharedLoopBlock(records []int, stateWords int, instructions int, a
 	return renvoEmitLoopBlockABI(records, stateWords, instructions, arm64, true)
 }
 
-// A guarded invariant base plus naturally aligned variable offsets cannot cross
-// a page boundary for a power-of-two access width. Select one complete body at
-// entry; unaligned inputs retain the original precise per-access checks.
-func renvoRFELoopAlignment(records []int, stateWords int) ([]bool, []int) {
-	count := len(records) / 4
-	final := make([]int, stateWords)
-	for i := range final {
-		final[i] = -1
-	}
-	for i := 0; i < count; i++ {
-		if records[i*4] == 1 {
-			final[records[i*4+3]] = i
-		}
-		if records[i*4] == 2 {
-			final[records[i*4+3]] = records[i*4+1]
-		}
-	}
-	invariant := renvoRFELoopInvariants(records, final)
-	proof := make([]bool, count)
-	guards := make([]int, stateWords)
-	for i := 0; i < count; i++ {
-		op, size := records[i*4], records[i*4+3]
-		if op == 37 {
-			size = 16
-		}
-		if op != 13 && op != 14 && op != 37 || size <= 1 {
-			continue
-		}
-		address := records[i*4+1]
-		if invariant[address] {
-			continue
-		} // already has an exact-address cache
-		roots := make([]int, stateWords)
-		if renvoRFEAlignmentRoots(records, invariant, address, size-1, roots, make([]bool, count), 0) {
-			proof[i] = true
-			for slot, mask := range roots {
-				guards[slot] |= mask
-			}
-		}
-	}
-	return proof, guards
-}
-func renvoRFEAlignmentRoots(records []int, invariant []bool, value int, mask int, roots []int, seen []bool, depth int) bool {
-	if seen[value] {
-		return true
-	}
-	if depth > 32 {
-		return false
-	}
-	op, left, right, imm := records[value*4], records[value*4+1], records[value*4+2], records[value*4+3]
-	if op == 0 {
-		return imm&mask == 0
-	}
-	if op == 1 && invariant[value] {
-		roots[imm] |= mask
-		return true
-	}
-	if op == 8 && imm >= 0 && imm < 64 && ((1<<uint(imm))-1)&mask == mask {
-		return true
-	}
-	if op == 5 && records[right*4] == 0 && records[right*4+3]&mask == 0 {
-		return true
-	}
-	if op == 3 || op == 4 {
-		ok := renvoRFEAlignmentRoots(records, invariant, left, mask, roots, seen, depth+1) && renvoRFEAlignmentRoots(records, invariant, right, mask, roots, seen, depth+1)
-		seen[value] = ok
-		return ok
-	}
-	return false
-}
 func renvoEmitLoopBlockABI(records []int, stateWords int, instructions int, arm64 bool, shared bool) ([]byte, bool) {
-	return renvoEmitLoopBlockABIChained(records, stateWords, instructions, arm64, shared, -1, nil, false)
-}
-
-// The continuation specializes only cold-known direct successor PCs. It still
-// consumes this call's original budget and borrows the same checked proof table.
-func RenvoEmitChainedLoopBlock(records []int, stateWords int, instructions int, arm64 bool, pcSlot int, exits []int) ([]byte, bool) {
-	if pcSlot < 0 || pcSlot >= stateWords || len(exits) < 1 || len(exits) > 8 {
-		return nil, false
-	}
-	for _, pc := range exits {
-		if pc&3 != 0 {
-			return nil, false
-		}
-	}
-	return renvoEmitLoopBlockABIChained(records, stateWords, instructions, arm64, true, pcSlot, exits, false)
-}
-
-// Transfer bodies keep one architectural word live across checked pure edges.
-// Memory operations are excluded: backing RAM may alias architectural state.
-// The ordinary entry initializes R10; only a private prepared proof may skip it.
-func RenvoEmitTransferLoopBlock(records []int, stateWords int, instructions int, pcSlot int, exits []int) ([]byte, bool) {
-	if pcSlot <= 0 || pcSlot >= stateWords || len(exits) < 1 || len(exits) > 8 {
-		return nil, false
-	}
-	for _, pc := range exits {
-		if pc&3 != 0 {
-			return nil, false
-		}
-	}
-	for i := 0; i < len(records)/4; i++ {
-		op := records[i*4]
-		if op == 13 || op == 14 || op == 36 || op == 37 {
-			return nil, false
-		}
-	}
-	code, ok := renvoEmitLoopBlockABIChained(records, stateWords, instructions, false, true, pcSlot, exits, true)
-	if !ok {
-		return nil, false
-	}
-	// MOV R10,[R11]. Kept separate from the transferred-entry body.
-	return append([]byte{0x4d, 0x8b, 0x13}, code...), true
-}
-
-func renvoRFEFlushTransfer(a *renvoAsm) {
-	reg := a.rfeTransferReg
-	if reg != 0 {
-		a.rfeTransferReg = 0
-		renvoRFERegStore(a, reg, 11, 0, 8)
-		a.rfeTransferReg = reg
-	}
-}
-
-func renvoEmitLoopBlockABIChained(records []int, stateWords int, instructions int, arm64 bool, shared bool, pcSlot int, exits []int, transfer bool) ([]byte, bool) {
-	slow, ok := renvoEmitLoopBlockABIAligned(records, stateWords, instructions, arm64, shared, nil, pcSlot, exits, transfer)
-	if !ok || !shared {
-		return slow, ok
-	}
-	condition := records[(len(records)/4-1)*4+1]
-	if records[condition*4] == 0 && records[condition*4+3] == 0 {
-		// One-shot bodies load inputs at their actual definition positions.
-		// An earlier guest store may alias that input before it is captured.
-		return slow, true
-	}
-	proof, guards := renvoRFELoopAlignment(records, stateWords)
-	useful := false
-	for _, aligned := range proof {
-		if aligned {
-			useful = true
-		}
-	}
-	if !useful {
-		return slow, true
-	}
-	fast, ok := renvoEmitLoopBlockABIAligned(records, stateWords, instructions, arm64, shared, proof, pcSlot, exits, transfer)
-	if !ok {
-		return nil, false
-	}
-	arch, temp, scratch := renvoArchAmd64, 1, 0
-	if arm64 {
-		arch, temp = renvoArchAarch64, 2
-	}
-	cc := &renvoCompileContext{renvoTargetArch: arch, renvoTargetOS: renvoOSLinux, renvoNativeIntSize: 8, stripSymbols: true}
-	a := renvoAsm{c: cc}
-	if transfer {
-		a.rfeTransferReg = 10
-	}
-	fallback := renvoAsmNewLabel(&a)
-	for slot, mask := range guards {
-		if mask == 0 {
-			continue
-		}
-		renvoRFERegLoad(&a, temp, 11, slot*8, 8)
-		renvoRFEJumpMasked(&a, temp, scratch, mask, true, fallback)
-	}
-	a.code = append(a.code, fast...)
-	renvoAsmMarkLabel(&a, fallback)
-	a.code = append(a.code, slow...)
-	renvoAsmPatch(&a)
-	return a.code, !a.patchFailed
-}
-
-func renvoEmitLoopBlockABIAligned(records []int, stateWords int, instructions int, arm64 bool, shared bool, aligned []bool, pcSlot int, exits []int, transfer bool) ([]byte, bool) {
 	if instructions < 1 || instructions > 256 || len(records) < 8 || len(records)%4 != 0 || len(records) > 8192 {
 		return nil, false
 	}
@@ -28754,16 +28615,13 @@ func renvoEmitLoopBlockABIAligned(records []int, stateWords int, instructions in
 	storesMemory := false
 	for i := 0; i < count; i++ {
 		op, left, right, immediate := records[i*4], records[i*4+1], records[i*4+2], records[i*4+3]
-		if op >= 2 && op != 15 {
+		if renvoRFEHasLeft(op) {
 			last[left] = i
 		}
-		if op == 21 {
-			last[immediate] = i
+		if third := renvoRFEThirdOperand(op, immediate); third >= 0 {
+			last[third] = i
 		}
-		if op == 33 || op == 34 || op == 37 {
-			last[immediate>>8] = i
-		}
-		if op >= 3 && op != 8 && op != 9 && op != 13 && op != 36 && op != 15 && op != 16 && op != 26 && op != 35 {
+		if renvoRFEHasRight(op) {
 			last[right] = i
 		}
 		if op == 2 {
@@ -28823,15 +28681,6 @@ func renvoEmitLoopBlockABIAligned(records []int, stateWords int, instructions in
 		arch, frameReg, iterations, budget = renvoArchAarch64, 29, 22, 23
 		saved = []int{19, 20, 21, 22, 23}
 		registers = []int{3, 4, 5, 6, 7, 8, 12, 13, 14, 15, 19, 20, 21}
-	}
-	if transfer {
-		filtered := []int{}
-		for _, reg := range registers {
-			if reg != 10 {
-				filtered = append(filtered, reg)
-			}
-		}
-		registers = filtered
 	}
 	if oneShot {
 		// An acyclic body has no loop-carried budget or iteration counter.
@@ -28962,9 +28811,6 @@ func renvoEmitLoopBlockABIAligned(records []int, stateWords int, instructions in
 	g.asm.c = cc
 	a := &g.asm
 	a.rfeNarrowSources = narrow
-	if transfer {
-		a.rfeTransferReg = 10
-	}
 	frame := -1
 	if shared {
 		if g.stackPeak+renvoRFESharedPrefix > renvoRFESharedFrameSize {
@@ -29016,11 +28862,6 @@ func renvoEmitLoopBlockABIAligned(records []int, stateWords int, instructions in
 	}
 	loop, finish, branchExit, restore := renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a)
 	restoreCondition := renvoAsmNewLabel(a)
-	restoreSuccess, restoreSide := restore, restore
-	if shared && len(exits) != 0 {
-		restoreSuccess = renvoAsmNewLabel(a)
-		restoreSide = restoreSuccess
-	}
 	renvoAsmMarkLabel(a, loop)
 	exitIndex := 0
 	memorySlow := []renvoRFELoopMemorySlow{}
@@ -29049,7 +28890,7 @@ func renvoEmitLoopBlockABIAligned(records []int, stateWords int, instructions in
 			}
 			miss, publish := renvoAsmNewLabel(a), renvoAsmNewLabel(a)
 			memorySlow = append(memorySlow, renvoRFELoopMemorySlow{op: op, failure: failure, miss: miss, publish: publish})
-			renvoEmitLoopMemoryAccessAligned(a, op, immediate, failure, cacheOffsets[i], signedWidths[i], records, locations, miss, publish, aligned != nil && aligned[i])
+			renvoEmitLoopMemoryAccessDeferred(a, op, immediate, failure, cacheOffsets[i], signedWidths[i], records, locations, miss, publish)
 			if op == 13 {
 				if immediate == 16 {
 					renvoRFESavePairHigh(a, locations, i+1)
@@ -29113,47 +28954,27 @@ func renvoEmitLoopBlockABIAligned(records []int, stateWords int, instructions in
 	}
 	renvoAsmMarkLabel(a, branchExit)
 	renvoRFERegLoad(a, contextReg, frameReg, -16, 8)
-	renvoRFERegLoad(a, 0, contextReg, 67672, 8)
+	renvoRFERegLoad(a, 0, contextReg, RenvoRFELoopExits, 8)
 	renvoRFERegImmediate(a, 3, 0, 1)
-	renvoRFERegStore(a, 0, contextReg, 67672, 8)
+	renvoRFERegStore(a, 0, contextReg, RenvoRFELoopExits, 8)
 	restoreFinal := stateMap
 	if oneShot {
 		restoreFinal = inputs
 	}
-	if len(exits) == 0 {
-		if knownCondition >= 0 {
-			renvoRFELoopRestoreState(a, records, locations, stateMap, inputs, restoreFinal, deferred, knownCondition, 0)
-			renvoAsmJmpLabel(a, restoreCondition)
-		}
-		renvoAsmMarkLabel(a, finish)
-		renvoRFELoopRestoreState(a, records, locations, stateMap, inputs, restoreFinal, deferred, knownCondition, 1)
-		renvoAsmMarkLabel(a, restoreCondition)
-		if oneShot {
-			renvoRFEAcyclicProgress(a, frameReg, contextReg, instructions, memory, 0, 1)
-		} else {
-			renvoRFELoopProgress(a, frameReg, contextReg, iterations, instructions, memory, 0, 0, 0)
-		}
-		renvoAsmJmpLabel(a, restoreSuccess)
-	} else {
+	if knownCondition >= 0 {
 		renvoRFELoopRestoreState(a, records, locations, stateMap, inputs, restoreFinal, deferred, knownCondition, 0)
-		if oneShot {
-			renvoRFEAcyclicProgress(a, frameReg, contextReg, instructions, memory, 0, 1)
-		} else {
-			renvoRFELoopProgress(a, frameReg, contextReg, iterations, instructions, memory, 0, 0, 0)
-		}
-		renvoAsmJmpLabel(a, restoreSuccess)
-		renvoAsmMarkLabel(a, finish)
-		renvoRFELoopRestoreState(a, records, locations, stateMap, inputs, restoreFinal, deferred, knownCondition, 1)
-		if oneShot {
-			renvoRFEAcyclicProgress(a, frameReg, contextReg, instructions, memory, 0, 1)
-		} else {
-			renvoRFELoopProgress(a, frameReg, contextReg, iterations, instructions, memory, 0, 0, 0)
-		}
-		// A true cyclic terminator reaches here only when the remaining budget
-		// cannot admit this same body. It cannot take a direct external edge, so
-		// do not run edge probes before the unchanged dispatcher continuation.
-		renvoAsmJmpLabel(a, restore)
+		renvoAsmJmpLabel(a, restoreCondition)
 	}
+	renvoAsmMarkLabel(a, finish)
+	renvoRFELoopRestoreState(a, records, locations, stateMap, inputs, restoreFinal, deferred, knownCondition, 1)
+	renvoAsmMarkLabel(a, restoreCondition)
+	if oneShot {
+		renvoRFEAcyclicProgress(a, frameReg, contextReg, instructions, memory, 0, 1)
+	} else {
+		renvoRFELoopProgress(a, frameReg, contextReg, iterations, instructions, memory, 0, 0, 0)
+	}
+	renvoAsmJmpLabel(a, restore)
+
 	for _, snapshot := range snapshots {
 		renvoAsmMarkLabel(a, snapshot.label)
 		// Read the old address before restoration can overwrite any architectural
@@ -29165,9 +28986,9 @@ func renvoEmitLoopBlockABIAligned(records []int, stateWords int, instructions in
 		}
 		if snapshot.status == 4 {
 			renvoRFERegLoad(a, contextReg, frameReg, -16, 8)
-			renvoRFERegLoad(a, 0, contextReg, 67672, 8)
+			renvoRFERegLoad(a, 0, contextReg, RenvoRFELoopExits, 8)
 			renvoRFERegImmediate(a, 3, 0, 1)
-			renvoRFERegStore(a, 0, contextReg, 67672, 8)
+			renvoRFERegStore(a, 0, contextReg, RenvoRFELoopExits, 8)
 		}
 		renvoRFELoopRestoreInherited(a, records, capturedLocations, deferred, inherited, snapshot.values, stateMap, iterations)
 		renvoRFELoopRestoreState(a, records, locations, snapshot.values, inputs, restoreFinal, deferred, -1, 0)
@@ -29176,11 +28997,7 @@ func renvoEmitLoopBlockABIAligned(records []int, stateWords int, instructions in
 		} else {
 			renvoRFELoopProgress(a, frameReg, contextReg, iterations, instructions, memory, snapshot.progress, snapshot.memory, snapshot.status)
 		}
-		if snapshot.status == 4 {
-			renvoAsmJmpLabel(a, restoreSide)
-		} else {
-			renvoAsmJmpLabel(a, restore)
-		}
+		renvoAsmJmpLabel(a, restore)
 	}
 	for _, slow := range memorySlow {
 		renvoAsmMarkLabel(a, slow.miss)
@@ -29188,7 +29005,6 @@ func renvoEmitLoopBlockABIAligned(records []int, stateWords int, instructions in
 		renvoAsmJmpLabel(a, slow.publish)
 	}
 	renvoAsmMarkLabel(a, restore)
-	renvoRFEFlushTransfer(a)
 	for i, reg := range saved {
 		renvoRFERegLoad(a, reg, frameReg, -(56 + i*8), 8)
 	}
@@ -29196,117 +29012,8 @@ func renvoEmitLoopBlockABIAligned(records []int, stateWords int, instructions in
 		renvoEmitGlobalInitFrameEnd(&g, frame)
 	}
 	renvoAsmRet(a)
-	if shared && len(exits) != 0 {
-		// Both proven branch exits share one continuation. Faults never join it.
-		// A single status distinction is cheaper than duplicating every edge.
-		renvoAsmMarkLabel(a, restoreSuccess)
-		for i, reg := range saved {
-			renvoRFERegLoad(a, reg, frameReg, -(56 + i*8), 8)
-		}
-		renvoRFEDirectLoopContinuation(a, pcSlot, exits)
-		renvoAsmRet(a)
-	}
 	renvoAsmPatch(a)
 	return a.code, !a.patchFailed
-}
-
-// Successful shared-loop transitions tail-jump with the original return
-// address still on the stack. Every successor restores the CURRENT descriptor,
-// count and remaining budget, so the ordinary dispatcher continuation can
-// validate the final leaf on a miss/fault without replaying earlier progress.
-// No native stack growth, code patch, persistent target pointer or larger trace.
-func renvoRFEDirectLoopContinuation(a *renvoAsm, pcSlot int, exits []int) {
-	state, context, descriptor, count, remaining := 12, 13, 14, 15, 3
-	primary, secondary, temporary, target, candidate, progress := 0, 2, 1, 8, 9, 6
-	if renvoRFEArm(a) {
-		state, context, descriptor, count, remaining = 19, 20, 21, 22, 23
-		secondary, temporary, target, candidate, progress = 1, 2, 9, 10, 12
-	}
-	done := renvoAsmNewLabel(a)
-	renvoRFERegLoad(a, progress, context, 0, 8)
-	renvoRFERegBinary(a, 100, progress, remaining)
-	renvoRFEJump(a, 4, done)
-	renvoRFEJumpZero(a, progress, done)
-	side := renvoAsmNewLabel(a)
-	renvoRFERegLoad(a, secondary, context, 8, 8)
-	renvoRFERegImmediate(a, 100, secondary, 4)
-	renvoRFEJump(a, 0, side)
-	renvoRFERegBinary(a, 100, progress, count)
-	renvoRFEJump(a, 2, done)
-	renvoAsmMarkLabel(a, side)
-	renvoRFERegLoad(a, primary, state, pcSlot*8, 8)
-	labels := make([]int, len(exits))
-	for i, pc := range exits {
-		labels[i] = renvoAsmNewLabel(a)
-		renvoRFERegImm(a, secondary, pc)
-		renvoRFERegBinary(a, 100, primary, secondary)
-		if len(exits) == 1 {
-			renvoRFEJump(a, 1, done)
-		} else {
-			renvoRFEJump(a, 0, labels[i])
-		}
-	}
-	if len(exits) != 1 {
-		renvoAsmJmpLabel(a, done)
-	}
-	for i, pc := range exits {
-		renvoAsmMarkLabel(a, labels[i])
-		slot := ((pc >> 2) ^ (pc >> 12)) & 255
-		renvoRFERegLoad(a, target, context, 67688, 8)
-		renvoRFEJumpZero(a, target, done)
-		renvoRFERegImmediate(a, 3, target, slot*64)
-		renvoRFEProbeLink(a, primary, target, secondary, done)
-		renvoRFEDescriptorBase(a, temporary, context)
-		renvoRFERegImmediate(a, 3, temporary, slot*64)
-		renvoRFEProbeLink(a, primary, temporary, secondary, done)
-		renvoRFERegLoad(a, candidate, target, 16, 8)
-		renvoRFEJumpZero(a, candidate, done)
-		renvoRFECompareMemory(a, candidate, temporary, 16, secondary)
-		renvoRFEJump(a, 1, done)
-		// Admission uses the fresh remainder AFTER this leaf, not the entry budget.
-		renvoRFERegMove(a, secondary, remaining)
-		renvoRFERegBinary(a, 4, secondary, progress)
-		renvoRFERegBinary(a, 100, candidate, secondary)
-		renvoRFEJump(a, 4, done)
-		renvoRFERegLoad(a, secondary, target, 8, 8)
-		renvoRFECompareMemory(a, secondary, temporary, 8, primary)
-		renvoRFEJump(a, 1, done)
-		// All chained targets use the dispatcher-only shared-loop return family.
-		// Other families take the original continuation; no mixed-family return ABI.
-		renvoRFERegLoad(a, secondary, target, 28, 4)
-		renvoRFEJumpMasked(a, secondary, primary, 8192, false, done)
-		if a.rfeTransferReg != 0 {
-			ordinary, admitted := renvoAsmNewLabel(a), renvoAsmNewLabel(a)
-			renvoRFEJumpMasked(a, secondary, primary, 1, false, ordinary)
-			renvoRFERegLoad(a, primary, target, 24, 4)
-			renvoRFERegImmediate(a, 3, primary, 3)
-			renvoAsmJmpLabel(a, admitted)
-			renvoAsmMarkLabel(a, ordinary)
-			renvoRFEFlushTransfer(a)
-			renvoRFERegLoad(a, primary, target, 24, 4)
-			renvoAsmMarkLabel(a, admitted)
-		} else {
-			renvoRFERegLoad(a, primary, target, 24, 4)
-		}
-		renvoRFERegLoad(a, secondary, context, 2104, 8)
-		renvoRFEJumpZero(a, secondary, done)
-		renvoRFERegBinary(a, 3, secondary, primary)
-		// Only now commit admission and charge the source's validated progress.
-		renvoRFERegBinary(a, 4, remaining, progress)
-		renvoRFERegMove(a, descriptor, temporary)
-		renvoRFERegMove(a, count, candidate)
-		renvoRFERegMove(a, target, secondary)
-		renvoRFERegMove(a, primary, state)
-		renvoRFERegMove(a, 11, state)
-		renvoRFERegMove(a, secondary, context)
-		if renvoRFEArm(a) {
-			renvoAsmEmit32(a, 0xd61f0120) // BR X9, never BLR
-		} else {
-			renvoAsmEmit3(a, 0x41, 0xff, 0xe0) // JMP R8, never CALL
-		}
-	}
-	renvoAsmMarkLabel(a, done)
-	renvoRFEFlushTransfer(a)
 }
 
 // Fold single-use scaled address expressions without changing their 64-bit
@@ -29318,17 +29025,14 @@ func renvoRFELoopAddressSources(records []int, last []int, narrow []int, skipped
 	for i := 0; i < count; i++ {
 		folded[i] = -1
 		op := records[i*4]
-		if op >= 2 && op != 15 {
+		if renvoRFEHasLeft(op) {
 			uses[records[i*4+1]]++
 		}
-		if op >= 3 && op != 8 && op != 9 && op != 13 && op != 36 && op != 15 && op != 16 && op != 26 && op != 35 {
+		if renvoRFEHasRight(op) {
 			uses[records[i*4+2]]++
 		}
-		if op == 21 {
-			uses[records[i*4+3]]++
-		}
-		if op == 33 || op == 34 || op == 37 {
-			uses[records[i*4+3]>>8]++
+		if third := renvoRFEThirdOperand(op, records[i*4+3]); third >= 0 {
+			uses[third]++
 		}
 	}
 	for i := 0; i < count; i++ {
@@ -29656,14 +29360,14 @@ func renvoRFEAcyclicProgress(a *renvoAsm, frameReg int, contextReg int, retired 
 	renvoRFERegImm(a, 0, retired)
 	renvoRFERegStore(a, 0, contextReg, 0, 8)
 	if memory != 0 {
-		renvoRFERegLoad(a, 0, contextReg, 2096, 8)
+		renvoRFERegLoad(a, 0, contextReg, RenvoRFEMemoryTotal, 8)
 		renvoRFERegImmediate(a, 3, 0, memory)
-		renvoRFERegStore(a, 0, contextReg, 2096, 8)
+		renvoRFERegStore(a, 0, contextReg, RenvoRFEMemoryTotal, 8)
 	}
 	if completed != 0 {
-		renvoRFERegLoad(a, 0, contextReg, 67680, 8)
+		renvoRFERegLoad(a, 0, contextReg, RenvoRFELoopIterations, 8)
 		renvoRFERegImmediate(a, 3, 0, completed)
-		renvoRFERegStore(a, 0, contextReg, 67680, 8)
+		renvoRFERegStore(a, 0, contextReg, RenvoRFELoopIterations, 8)
 	}
 	renvoRFERegImm(a, 0, status)
 	renvoRFERegStore(a, 0, contextReg, 8, 8)
@@ -29693,13 +29397,13 @@ func renvoRFELoopProgress(a *renvoAsm, frameReg int, contextReg int, iterations 
 		if renvoRFEArm(a) {
 			temp = 2
 		}
-		renvoRFERegLoad(a, temp, contextReg, 2096, 8)
+		renvoRFERegLoad(a, temp, contextReg, RenvoRFEMemoryTotal, 8)
 		renvoRFERegBinary(a, 3, 0, temp)
-		renvoRFERegStore(a, 0, contextReg, 2096, 8)
+		renvoRFERegStore(a, 0, contextReg, RenvoRFEMemoryTotal, 8)
 	}
-	renvoRFERegLoad(a, 0, contextReg, 67680, 8)
+	renvoRFERegLoad(a, 0, contextReg, RenvoRFELoopIterations, 8)
 	renvoRFERegBinary(a, 3, 0, iterations)
-	renvoRFERegStore(a, 0, contextReg, 67680, 8)
+	renvoRFERegStore(a, 0, contextReg, RenvoRFELoopIterations, 8)
 	renvoRFERegImm(a, 0, status)
 	renvoRFERegStore(a, 0, contextReg, 8, 8)
 }
@@ -29819,9 +29523,6 @@ func renvoEmitLoopMemoryAccess(a *renvoAsm, op int, size int, failure int, cache
 }
 
 func renvoEmitLoopMemoryAccessDeferred(a *renvoAsm, op int, size int, failure int, cache int, signedWidth int, records []int, locations []int, coldMiss int, coldPublish int) {
-	renvoEmitLoopMemoryAccessAligned(a, op, size, failure, cache, signedWidth, records, locations, coldMiss, coldPublish, false)
-}
-func renvoEmitLoopMemoryAccessAligned(a *renvoAsm, op int, size int, failure int, cache int, signedWidth int, records []int, locations []int, coldMiss int, coldPublish int, aligned bool) {
 	pairHigh := -1
 	if op == 37 {
 		pairHigh = size >> 8
@@ -29850,7 +29551,7 @@ func renvoEmitLoopMemoryAccessAligned(a *renvoAsm, op int, size int, failure int
 	// reuse the canonical-address and permission proof from this same call.
 	renvoRFERegMove(a, temp, primary)
 	renvoRFERegImmediate(a, 5, temp, 4095)
-	if size != 1 && !aligned {
+	if size != 1 {
 		renvoRFERegImmediate(a, 100, temp, 4096-size)
 		renvoRFEJump(a, 4, failure)
 	}
@@ -29968,16 +29669,16 @@ func renvoEmitLoopMemoryMiss(a *renvoAsm, op int, failure int) {
 	renvoRFERegShift(a, descriptor, 8, 5)
 	renvoRFERegLoad(a, primary, frame, -16, 8)
 	renvoRFERegBinary(a, 3, descriptor, primary)
-	renvoRFERegImmediate(a, 3, descriptor, 32)
+	renvoRFERegImmediate(a, 3, descriptor, RenvoRFEPages)
 	renvoRFECompareMemory(a, host, descriptor, 0, primary)
 	renvoRFEJump(a, 1, failure)
-	renvoRFERegLoad(a, primary, descriptor, 8, 8)
+	renvoRFERegLoad(a, primary, descriptor, RenvoRFEPageData, 8)
 	renvoRFEJumpZero(a, primary, failure)
 	renvoRFEMemoryFactStore(a, host, tag)
 	renvoRFEMemoryFactStore(a, primary, data)
 	renvoRFERegMove(a, host, primary)
 	renvoRFERegBinary(a, 3, host, temp)
-	renvoRFERegLoad(a, primary, descriptor, 16, 8)
+	renvoRFERegLoad(a, primary, descriptor, RenvoRFEPagePermissions, 8)
 	permission, relevant := 1, 1
 	if op == 14 {
 		permission, relevant = 2, 6
@@ -29986,11 +29687,11 @@ func renvoEmitLoopMemoryMiss(a *renvoAsm, op int, failure int) {
 	renvoRFERegImmediate(a, 100, primary, permission)
 	renvoRFEJump(a, 1, failure)
 	if op == 14 {
-		renvoRFERegLoad(a, primary, descriptor, 24, 8)
+		renvoRFERegLoad(a, primary, descriptor, RenvoRFEPageEpoch, 8)
 		renvoRFEJumpZero(a, primary, failure)
 		renvoRFEMemoryFactStore(a, primary, -128)
 		renvoRFERegLoad(a, temp, frame, -16, 8)
-		renvoRFERegLoad(a, temp, temp, 24, 8)
+		renvoRFERegLoad(a, temp, temp, RenvoRFEClock, 8)
 		renvoRFEJumpZero(a, temp, failure)
 		renvoRFEMemoryFactStore(a, temp, -136)
 	}
@@ -30187,14 +29888,11 @@ func renvoRFELoopInvariants(records []int, stateMap []int) []bool {
 			continue
 		}
 		stable := invariant[left]
-		if op != 8 && op != 9 {
+		if renvoRFEHasRight(op) {
 			stable = stable && invariant[right]
 		}
-		if op == 21 {
-			stable = stable && invariant[imm]
-		}
-		if op == 33 || op == 34 || op == 37 {
-			stable = stable && invariant[imm>>8]
+		if third := renvoRFEThirdOperand(op, imm); third >= 0 {
+			stable = stable && invariant[third]
 		}
 		invariant[i] = stable
 	}
@@ -30229,14 +29927,11 @@ func renvoRFELoopDeferredValues(records []int, inputs []int, final []int) []bool
 			continue
 		}
 		cold[left] = false
-		if op != 8 && op != 9 && op != 13 {
+		if renvoRFEHasRight(op) {
 			cold[right] = false
 		}
-		if op == 21 {
-			cold[imm] = false
-		}
-		if op == 33 || op == 34 || op == 37 {
-			cold[imm>>8] = false
+		if third := renvoRFEThirdOperand(op, imm); third >= 0 {
+			cold[third] = false
 		}
 	}
 	return cold
@@ -30512,17 +30207,14 @@ func renvoRFESignedLoadSources(records []int) ([]int, []int, []bool) {
 	for i := 0; i < count; i++ {
 		aliases[i] = -1
 		op := records[i*4]
-		if op >= 2 && op != 15 {
+		if renvoRFEHasLeft(op) {
 			uses[records[i*4+1]]++
 		}
-		if op >= 3 && op != 8 && op != 9 && op != 13 && op != 36 && op != 15 && op != 16 && op != 26 && op != 35 {
+		if renvoRFEHasRight(op) {
 			uses[records[i*4+2]]++
 		}
-		if op == 21 {
-			uses[records[i*4+3]]++
-		}
-		if op == 33 || op == 34 || op == 37 {
-			uses[records[i*4+3]>>8]++
+		if third := renvoRFEThirdOperand(op, records[i*4+3]); third >= 0 {
+			uses[third]++
 		}
 	}
 	for i := 0; i < count; i++ {
@@ -30564,17 +30256,14 @@ func renvoRFENarrowSources(records []int) []int {
 	for i := 0; i < count; i++ {
 		sources[i] = -1
 		op := records[i*4]
-		if op >= 2 && op != 15 {
+		if renvoRFEHasLeft(op) {
 			uses[records[i*4+1]]++
 		}
-		if op >= 3 && op != 8 && op != 9 && op != 13 && op != 36 && op != 15 && op != 16 && op != 26 && op != 35 {
+		if renvoRFEHasRight(op) {
 			uses[records[i*4+2]]++
 		}
-		if op == 21 {
-			uses[records[i*4+3]]++
-		}
-		if op == 33 || op == 34 || op == 37 {
-			uses[records[i*4+3]>>8]++
+		if third := renvoRFEThirdOperand(op, records[i*4+3]); third >= 0 {
+			uses[third]++
 		}
 	}
 	for i := 0; i < count; i++ {

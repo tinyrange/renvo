@@ -1746,7 +1746,6 @@ type EngineConfig struct {
 	MaxNativeInstructions int // bounded uninterrupted scheduling slice
 	NativeBytes           int
 	ProfileNative         bool // emit Linux perf-map symbols; enabled by CLI -stats
-	DirectChaining        bool // experimental checked edges and pure-register transfer; opt-in
 }
 
 func DefaultEngineConfig() EngineConfig {
@@ -3635,42 +3634,7 @@ func (e *Engine) prepareRegion(c *CPU, block *compiledBlock) {
 	} else {
 		b.LoopContinue(b.Binary(emu.Equal, b.Load(PC), b.Constant(pc)))
 	}
-	exits := []uint64{}
-	// Final successors first, then untaken internal guard edges. Every edge
-	// remains independently admitted; excess edges use normal dispatch.
-	for index := len(parts) - 1; index >= 0; index-- {
-		part := parts[index]
-		word := part.block.words[len(part.block.words)-1]
-		if branchKind(word) == 5 || branchKind(word) == 1 && word>>31 != 0 {
-			continue
-		}
-		edge, other, conditional := directTargets(part.pc, part.block.words)
-		candidates := []uint64{edge}
-		if conditional {
-			candidates = append(candidates, other)
-		}
-		for _, target := range candidates {
-			if target == pc || index+1 < len(parts) && target == parts[index+1].pc {
-				continue
-			}
-			seen := false
-			for _, old := range exits {
-				if old == target {
-					seen = true
-				}
-			}
-			if !seen && len(exits) < 8 {
-				exits = append(exits, target)
-			}
-		}
-	}
-	entry, err := 0, error(nil)
-	ops := b.FinishMemory(StateWords)
-	if e.config.DirectChaining && len(exits) != 0 {
-		entry, err = e.native.CompileLoopChained(ops, StateWords, count, PC, exits)
-	} else {
-		entry, err = e.native.CompileLoop(ops, StateWords, count)
-	}
+	entry, err := e.native.CompileLoop(b.FinishMemory(StateWords), StateWords, count)
 	if err != nil {
 		e.Stats.CompileFailures++
 		return

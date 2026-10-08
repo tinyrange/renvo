@@ -84,7 +84,7 @@ func TestNativeQuantaFaultAfterCompletedQuantum(t *testing.T) {
 	}
 	clock, epoch := uint64(1), uint64(1)
 	page := new([4096]byte)
-	m := &MemoryContext{Clock: &clock}
+	m := &MemoryContext{NativeContext: NativeContext{Clock: &clock}}
 	m.Fill(1, page, 3, &epoch)
 	m.ClaimLinks(n)
 	m.PublishLink(0, entry, 2, [17]uint8{})

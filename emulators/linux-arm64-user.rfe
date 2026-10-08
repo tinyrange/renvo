@@ -1417,7 +1417,6 @@ import (
 func nativeMemoryEngine(t *testing.T) *aarch64.Engine {
 	t.Helper()
 	config := aarch64.DefaultEngineConfig()
-	config.DirectChaining = true // exercise opt-in paths, including invalidation and faults
 	config.IRThreshold, config.NativeThreshold = 1, 1
 	e, err := aarch64.NewEngine(config)
 	if err != nil {
@@ -2020,7 +2019,6 @@ func Main(args []string) int {
 	mode := flags.String("engine", "native", "interpreter, ir, or native")
 	steps := flags.Uint64("steps", 100000000, "maximum retired guest instructions")
 	statistics := flags.Bool("stats", false, "print tier and cache statistics")
-	chains := flags.Bool("native-chains", false, "experimental checked native edges and pure-register transfer")
 	regionInstructions := flags.Int("region-instructions", config.MaxRegionInstructions, "maximum optimized region width (1..256)")
 	nativeInstructions := flags.Int("native-instructions", config.MaxNativeInstructions, "maximum instructions per supported native session (1..65536)")
 	if err := flags.Parse(args); err != nil {
@@ -2031,7 +2029,7 @@ func Main(args []string) int {
 		return 2
 	}
 	if flags.NArg() == 0 {
-		fmt.Fprintln(os.Stderr, "usage: linux-arm64-user [-engine mode] [-steps n] [-stats] [-native-chains] [-region-instructions n] [-native-instructions n] static-aarch64-elf [args...]")
+		fmt.Fprintln(os.Stderr, "usage: linux-arm64-user [-engine mode] [-steps n] [-stats] [-region-instructions n] [-native-instructions n] static-aarch64-elf [args...]")
 		return 2
 	}
 	file, err := os.Open(flags.Arg(0))
@@ -2055,7 +2053,6 @@ func Main(args []string) int {
 	}
 	config.Mode = *mode
 	config.ProfileNative = *statistics
-	config.DirectChaining = *chains
 	config.MaxRegionInstructions = *regionInstructions
 	config.MaxNativeInstructions = *nativeInstructions
 	code, stats, err := p.Run(config, *steps, os.Stdout, os.Stderr)

@@ -15,6 +15,20 @@ import (
 // never use the old goroutine-stack assembly boundary.
 const SessionInstructionLimit = 65536
 
+const (
+	sessionImageWords      = unsafe.Sizeof(LinkedContextABI{}) / 8
+	sessionPrefixWords     = unsafe.Offsetof(LinkedContextABI{}.Blocks) / 8
+	sessionCodeViewWord    = unsafe.Offsetof(LinkedContextABI{}.CodeView) / 8
+	sessionEpochWord       = unsafe.Offsetof(LinkedContextABI{}.AdmissionEpoch) / 8
+	sessionExitsWord       = unsafe.Offsetof(LinkedContextABI{}.LoopExits) / 8
+	sessionIterationsWord  = unsafe.Offsetof(LinkedContextABI{}.LoopIterations) / 8
+	sessionTargetsWord     = unsafe.Offsetof(LinkedContextABI{}.PreparedTargets) / 8
+	sessionDescriptorsWord = unsafe.Offsetof(LinkedContextABI{}.DescriptorBase) / 8
+	sessionRemainingWord   = unsafe.Offsetof(LinkedContextABI{}.Remaining) / 8
+	sessionTotalWord       = unsafe.Offsetof(LinkedContextABI{}.Total) / 8
+	sessionMemoryWord      = unsafe.Offsetof(LinkedContextABI{}.MemoryTotal) / 8
+)
+
 func ForeignSessionsAvailable() bool { return rfenativebridge.Available }
 
 // CallSession executes one exact-budget slice through a cgo boundary. The
@@ -23,16 +37,14 @@ func ForeignSessionsAvailable() bool { return rfenativebridge.Available }
 // Native effects that could change the context's pointer graph mid-call use
 // the conservative original <=64-instruction boundary instead.
 func (c *LinkedCall) CallSession(state []uint64, m *LinkedContextABI, budget uint64) (err error) {
-	if m != nil {
-		m.CodeView, m.PreparedTargets, m.DescriptorBase, m.AdmissionEpoch = [4]uint64{}, 0, 0, 0
-	}
+	clearContextBorrow(m)
 	if c == nil || c.arena == nil || m == nil || len(state) != c.words || budget == 0 || budget > SessionInstructionLimit {
 		return fmt.Errorf("invalid native execution session")
 	}
 	a := c.arena
 	a.mu.Lock()
 	defer func() {
-		m.CodeView, m.PreparedTargets, m.DescriptorBase, m.AdmissionEpoch = [4]uint64{}, 0, 0, 0
+		clearContextBorrow(m)
 		a.mu.Unlock()
 		runtime.KeepAlive(m)
 		runtime.KeepAlive(state)
@@ -48,14 +60,13 @@ func (c *LinkedCall) CallSession(state []uint64, m *LinkedContextABI, budget uin
 			actual = 64
 		}
 		m.Remaining = actual
-		m.CodeView = a.linkedView
-		m.PreparedTargets = uint64(uintptr(unsafe.Pointer(&a.targets[0])))
+		a.borrowLinked(&m.CodeView, &m.PreparedTargets)
 		callContext(c.entry, uintptr(unsafe.Pointer(&state[0])), uintptr(unsafe.Pointer(m)), c.top)
 	} else {
 		var pins runtime.Pinner
 		defer pins.Unpin()
 		if a.sessionImage == nil {
-			a.sessionImage, a.sessionState = new([8464]uint64), new([256]uint64)
+			a.sessionImage, a.sessionState = new([sessionImageWords]uint64), new([256]uint64)
 		}
 		// The public descriptors cannot change through guest RAM on this path.
 		// Each invocation has a unique token, including across different contexts.
@@ -67,16 +78,16 @@ func (c *LinkedCall) CallSession(state []uint64, m *LinkedContextABI, budget uin
 			a.sessionEpoch = 1
 		}
 		image := a.sessionImage
-		image[8463] = a.sessionEpoch
+		image[sessionEpochWord] = a.sessionEpoch
 		nativeState := a.sessionState[:len(state)]
 		copy(nativeState, state)
 		// Only the small memory/budget prefix is copied. Descriptors remain
 		// observable in their authoritative public table on every selection.
-		copy(image[:267], unsafe.Slice((*uint64)(unsafe.Pointer(m)), 267))
-		image[8459], image[8460] = 0, 0
+		copy(image[:sessionPrefixWords], unsafe.Slice((*uint64)(unsafe.Pointer(m)), sessionPrefixWords))
+		image[sessionExitsWord], image[sessionIterationsWord] = 0, 0
 		defer func() {
-			clear(image[:267])
-			image[8461], image[8462], image[8463] = 0, 0, 0
+			clear(image[:sessionPrefixWords])
+			image[sessionTargetsWord], image[sessionDescriptorsWord], image[sessionEpochWord] = 0, 0, 0
 		}() // integer addresses must not outlive their pins
 		pins.Pin(m) // native reads only its pointer-free Blocks field
 		pins.Pin(image)
@@ -95,14 +106,14 @@ func (c *LinkedCall) CallSession(state []uint64, m *LinkedContextABI, budget uin
 				pins.Pin(page.Epoch)
 			}
 		}
-		copy(image[263:267], a.linkedView[:])
-		image[8461] = uint64(uintptr(unsafe.Pointer(&a.targets[0])))
-		image[8462] = uint64(uintptr(unsafe.Pointer(&m.Blocks[0])))
+		copy(image[sessionCodeViewWord:sessionPrefixWords], a.linkedView[:])
+		image[sessionTargetsWord] = uint64(uintptr(unsafe.Pointer(&a.targets[0])))
+		image[sessionDescriptorsWord] = uint64(uintptr(unsafe.Pointer(&m.Blocks[0])))
 		rfenativebridge.Call(c.entry, unsafe.Pointer(&nativeState[0]), unsafe.Pointer(image), c.top)
 		copy(state, nativeState)
 		m.Retired, m.Status, m.Address = image[0], image[1], image[2]
-		m.Remaining, m.Total, m.MemoryTotal = image[260], image[261], image[262]
-		m.LoopExits, m.LoopIterations = image[8459], image[8460]
+		m.Remaining, m.Total, m.MemoryTotal = image[sessionRemainingWord], image[sessionTotalWord], image[sessionMemoryWord]
+		m.LoopExits, m.LoopIterations = image[sessionExitsWord], image[sessionIterationsWord]
 	}
 	if (m.Status > 2 && m.Status != 4) || m.Total > actual || m.Remaining != actual-m.Total || m.MemoryTotal > m.Total {
 		return fmt.Errorf("invalid native execution session progress")

@@ -20,18 +20,19 @@ type CodeArena struct {
 	size, used   int
 	symbols      io.Writer
 	jitSymbols   JITCodeWriter
-	lengths      []uint32     // exact installed lengths for profiling records
+	extents      []codeExtent // sorted exact extents, one per installed image
 	entries      []arenaEntry // one private admission record per 16-byte code offset
 	stack        []byte
 	broken       bool
-	linkedView   [4]uint64    // refreshed under mu after every successful installation
-	transfers    map[int]bool // cold-owned transfer entries, never public admission
+	linkedView   [4]uint64 // refreshed under mu after every successful installation
 	targetVictim uint64
-	targets      [1024]linkedTarget // opaque prepared proofs; no executable pointers
-	sessionEpoch uint64             // arena-serialized generation, never reused without clearing proofs
-	sessionImage *[8464]uint64      // dedicated pointer-free foreign ABI storage
-	sessionState *[256]uint64       // independent of enclosing Go owner allocations
+	targets      [1024]linkedTarget         // opaque prepared proofs; no executable pointers
+	sessionEpoch uint64                     // arena-serialized generation, never reused without clearing proofs
+	sessionImage *[sessionImageWords]uint64 // dedicated pointer-free foreign ABI storage
+	sessionState *[256]uint64               // independent of enclosing Go owner allocations
 }
+
+type codeExtent struct{ offset, length uint32 }
 
 // arenaEntry is read only during a serialized native call. Linked is an
 // immutable admission key, never a caller-controlled host pointer.
@@ -81,29 +82,6 @@ func (a *CodeArena) InstallLoopBlock(code []byte, words, instructions int) (int,
 	return a.installLoop(code, uint16(words)|32768|8192, instructions)
 }
 
-// InstallTransferLoopBlock records the checked internal entry after its fixed
-// initializing prefix. It shares the ordinary loop family; generic dispatch
-// always enters the initializing start, never the transfer-only interior.
-func (a *CodeArena) InstallTransferLoopBlock(code []byte, words, instructions int) (int, error) {
-	if runtime.GOARCH != "amd64" || len(code) <= 3 || code[0] != 0x4d || code[1] != 0x8b || code[2] != 0x13 {
-		return 0, fmt.Errorf("invalid transfer entry prefix")
-	}
-	entry, err := a.InstallLoopBlock(code, words, instructions)
-	if err != nil {
-		return 0, err
-	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.base == 0 || a.broken {
-		return 0, fmt.Errorf("closed transfer entry owner")
-	}
-	if a.transfers == nil {
-		a.transfers = make(map[int]bool)
-	}
-	a.transfers[entry] = true
-	return entry, nil
-}
-
 // InstallContextBlock requires a non-nil trusted host context on every call.
 func (a *CodeArena) InstallContextBlock(code []byte, words int) (int, error) {
 	if words < 1 || words > 256 {
@@ -145,10 +123,9 @@ func (a *CodeArena) installRecord(code []byte, words uint16, body, instructions 
 	slot := at >> 4
 	if slot >= len(a.entries) {
 		a.entries = append(a.entries, make([]arenaEntry, slot+1-len(a.entries))...)
-		a.lengths = append(a.lengths, make([]uint32, slot+1-len(a.lengths))...)
 	}
 	a.entries[slot] = arenaEntry{Words: words, Body: uint32(body), Instructions: uint32(instructions)}
-	a.lengths[slot] = uint32(len(code))
+	a.extents = append(a.extents, codeExtent{uint32(at), uint32(len(code))})
 	a.linkedView = [4]uint64{uint64(a.base), uint64(a.used), uint64(uintptr(unsafe.Pointer(&a.entries[0]))), uint64(len(a.entries))}
 	return at, nil
 }
@@ -194,8 +171,7 @@ func (a *CodeArena) Close() error {
 	if err == nil {
 		a.base = 0
 		a.entries = nil
-		a.transfers = nil
-		a.lengths = nil
+		a.extents = nil
 		a.linkedView = [4]uint64{}
 		a.symbols = nil
 		a.jitSymbols = nil

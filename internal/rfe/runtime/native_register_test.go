@@ -88,7 +88,7 @@ func TestNativeMemoryLiveRegistersAndPreciseSpilledFault(t *testing.T) {
 		}
 		var page [4096]byte
 		clock, epoch := uint64(1), uint64(1)
-		m := &MemoryContext{Clock: &clock}
+		m := &MemoryContext{NativeContext: NativeContext{Clock: &clock}}
 		m.Fill(1, &page, 3, &epoch)
 		state := make([]uint64, 26)
 		want := uint64(0xaabbccdd)

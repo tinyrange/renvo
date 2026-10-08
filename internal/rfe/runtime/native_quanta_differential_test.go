@@ -41,7 +41,7 @@ func TestNativeQuantaMatchesSeparateCalls(t *testing.T) {
 				states[i] = []uint64{0, start, 0}
 				pages[i] = new([4096]byte)
 				clocks[i], epochs[i] = 1, 1
-				contexts[i] = &MemoryContext{Clock: &clocks[i]}
+				contexts[i] = &MemoryContext{NativeContext: NativeContext{Clock: &clocks[i]}}
 				contexts[i].Fill(1, pages[i], 3, &epochs[i])
 				contexts[i].ClaimLinks(n)
 				contexts[i].PublishLink(0, entry, 2, [17]uint8{})

@@ -129,7 +129,7 @@ func TestNativeSessionGCAndScheduling(t *testing.T) {
 			defer wg.Done()
 			state := []uint64{1, 0, 0}
 			page, clock, epoch := new([4096]byte), uint64(1), uint64(1)
-			m := &MemoryContext{Clock: &clock}
+			m := &MemoryContext{NativeContext: NativeContext{Clock: &clock}}
 			m.Fill(1, page, 3, &epoch)
 			m.ClaimLinks(n)
 			m.PublishLink(0, entry, 2, [17]uint8{0, 1, 2})

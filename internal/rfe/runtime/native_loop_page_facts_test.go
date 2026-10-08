@@ -26,7 +26,7 @@ func TestNativeLoopReadWritePageFactsDoNotAuthorizeEachOther(t *testing.T) {
 	}
 	page := new([4096]byte)
 	clock, epoch := uint64(1), uint64(1)
-	m := &MemoryContext{Clock: &clock}
+	m := &MemoryContext{NativeContext: NativeContext{Clock: &clock}}
 	m.Fill(1, page, 2, &epoch) // writable, not readable
 	m.ClaimLinks(n)
 	m.PublishLink(0, entry, 2, [17]uint8{})
