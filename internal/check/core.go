@@ -1086,14 +1086,9 @@ func lookupScopeTokenNameCore(scope *CoreScope, file *syntax.File, tok int) int 
 			i = next
 			continue
 		}
-		matches := true
-		for j := 1; j < size; j++ {
-			if file.Src[tokenStart+j] != file.Src[nameStart+j] {
-				matches = false
-				break
-			}
-		}
-		if matches {
+		// Use the same bounded byte-string equality as coreTokensEqual rather
+		// than redoing two indexed source loads for every identifier byte.
+		if string(file.Src[tokenStart:tokenStart+size]) == string(file.Src[nameStart:nameStart+size]) {
 			if scope.Names[i].End > 0 && tok >= scope.Names[i].End {
 				i = next
 				continue
