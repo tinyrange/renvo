@@ -1,0 +1,67 @@
+{
+  "caveats": "Single-context scalar -O2 generic x86-64, no vectorization. Unpinned local trials, not maximum tuned host throughput or whole-chip throughput. Same unchanged benchmark algorithms, different architecture/compiler target and iteration count. Final CRC depends on iteration count; algorithm CRCs match guest and both upstream seed validations pass. AArch64 ELF unchanged. Emulator/QEMU figures from prior confirmed runs.",
+  "compiler": "GCC 16.2.1 20260819 (Red Hat 16.2.1-2)",
+  "cpu": "Intel Core i7-13620H",
+  "date": "2026-10-08",
+  "emulator_performance_mean": 5354.995126559056,
+  "guest_iterations": 100000,
+  "host_iterations": 1000000,
+  "host_performance_mean": 33730.348937141665,
+  "host_run_1": {
+    "crcs": [
+      "0xe9f5",
+      "0xe714",
+      "0x1fd7",
+      "0x8e3a",
+      "0x988c",
+      "0x18f2",
+      "0xe3c1",
+      "0x0747",
+      "0x8d84",
+      "0xc506"
+    ],
+    "exit_code": 0,
+    "iterations_per_second": [
+      33734.053406943734,
+      33858.3315941437
+    ],
+    "stderr": "real 59.17\nuser 59.09\nsys 0.00\n",
+    "stderr_truncated": false,
+    "stdout": "2K performance run parameters for coremark.\nCoreMark Size    : 666\nTotal ticks      : 29643636\nTotal time (secs): 29\nIterations/Sec   : 34482\nIterations       : 1000000\nCompiler version : GCC 16.2.1 20260819 (Red Hat 16.2.1-2)\nCompiler flags   : -O2 -static -nostdlib -fno-builtin -fno-stack-protector -fno-pie -no-pie -march=x86-64 -mtune=generic -mgeneral-regs-only -fno-tree-vectorize -I. -Ihost-port -DITERATIONS=1000000 -DPERFORMANCE_RUN=1 -Wl,-e,_start -Wl,--build-id=none\nMemory location  : Stack; 2000 bytes; single context; freestanding Linux x86-64\nseedcrc          : 0xe9f5\n[0]crclist       : 0xe714\n[0]crcmatrix     : 0x1fd7\n[0]crcstate      : 0x8e3a\n[0]crcfinal      : 0x988c\nCorrect operation validated. See README.md for run and reporting rules.\n2K validation run parameters for coremark.\nCoreMark Size    : 666\nTotal ticks      : 29534828\nTotal time (secs): 29\nIterations/Sec   : 34482\nIterations       : 1000000\nCompiler version : GCC 16.2.1 20260819 (Red Hat 16.2.1-2)\nCompiler flags   : -O2 -static -nostdlib -fno-builtin -fno-stack-protector -fno-pie -no-pie -march=x86-64 -mtune=generic -mgeneral-regs-only -fno-tree-vectorize -I. -Ihost-port -DITERATIONS=1000000 -DPERFORMANCE_RUN=1 -Wl,-e,_start -Wl,--build-id=none\nMemory location  : Stack; 2000 bytes; single context; freestanding Linux x86-64\nseedcrc          : 0x18f2\n[0]crclist       : 0xe3c1\n[0]crcmatrix     : 0x0747\n[0]crcstate      : 0x8d84\n[0]crcfinal      : 0xc506\nCorrect operation validated. See README.md for run and reporting rules.\n",
+    "stdout_truncated": false,
+    "ticks_us": [
+      29643636,
+      29534828
+    ],
+    "timed_out": false
+  },
+  "host_run_2": {
+    "crcs": [
+      "0xe9f5",
+      "0xe714",
+      "0x1fd7",
+      "0x8e3a",
+      "0x988c",
+      "0x18f2",
+      "0xe3c1",
+      "0x0747",
+      "0x8d84",
+      "0xc506"
+    ],
+    "exit_code": 0,
+    "iterations_per_second": [
+      33726.64446733959,
+      33808.582836166854
+    ],
+    "stderr": "real 59.22\nuser 59.14\nsys 0.00\n",
+    "stderr_truncated": false,
+    "stdout": "2K performance run parameters for coremark.\nCoreMark Size    : 666\nTotal ticks      : 29650148\nTotal time (secs): 29\nIterations/Sec   : 34482\nIterations       : 1000000\nCompiler version : GCC 16.2.1 20260819 (Red Hat 16.2.1-2)\nCompiler flags   : -O2 -static -nostdlib -fno-builtin -fno-stack-protector -fno-pie -no-pie -march=x86-64 -mtune=generic -mgeneral-regs-only -fno-tree-vectorize -I. -Ihost-port -DITERATIONS=1000000 -DPERFORMANCE_RUN=1 -Wl,-e,_start -Wl,--build-id=none\nMemory location  : Stack; 2000 bytes; single context; freestanding Linux x86-64\nseedcrc          : 0xe9f5\n[0]crclist       : 0xe714\n[0]crcmatrix     : 0x1fd7\n[0]crcstate      : 0x8e3a\n[0]crcfinal      : 0x988c\nCorrect operation validated. See README.md for run and reporting rules.\n2K validation run parameters for coremark.\nCoreMark Size    : 666\nTotal ticks      : 29578288\nTotal time (secs): 29\nIterations/Sec   : 34482\nIterations       : 1000000\nCompiler version : GCC 16.2.1 20260819 (Red Hat 16.2.1-2)\nCompiler flags   : -O2 -static -nostdlib -fno-builtin -fno-stack-protector -fno-pie -no-pie -march=x86-64 -mtune=generic -mgeneral-regs-only -fno-tree-vectorize -I. -Ihost-port -DITERATIONS=1000000 -DPERFORMANCE_RUN=1 -Wl,-e,_start -Wl,--build-id=none\nMemory location  : Stack; 2000 bytes; single context; freestanding Linux x86-64\nseedcrc          : 0x18f2\n[0]crclist       : 0xe3c1\n[0]crcmatrix     : 0x0747\n[0]crcstate      : 0x8d84\n[0]crcfinal      : 0xc506\nCorrect operation validated. See README.md for run and reporting rules.\n",
+    "stdout_truncated": false,
+    "ticks_us": [
+      29650148,
+      29578288
+    ],
+    "timed_out": false
+  },
+  "qemu_performance": 7546.539319318756
+}

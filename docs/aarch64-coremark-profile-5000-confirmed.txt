@@ -1,0 +1,1255 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 43  of event 'cpu_atom/cycles/Pu'
+# Event count (approx.): 316193567
+#
+# Overhead  Symbol                                 IPC   [IPC Coverage]
+# ........  .....................................  ....................
+#
+     9.05%  [.] rfe_native_dispatcher              -      -            
+            |
+            ---renvo_rfe_enter
+               runtime.cgocall
+               renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+               renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+               renvo.dev/internal/rfenativebridge.Call
+               renvo.dev/internal/runimage.(*LinkedCall).CallSession
+               renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+               main.main
+               internal/runtime/atomic.(*Uint32).Load (inlined)
+               runtime.main
+               runtime.goexit (inlined)
+
+     6.23%  [.] a64_401dd8_region_17_instructions  -      -            
+            |
+            ---renvo_rfe_enter
+               runtime.cgocall
+               renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+               renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+               renvo.dev/internal/rfenativebridge.Call
+               renvo.dev/internal/runimage.(*LinkedCall).CallSession
+               renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+               main.main
+               internal/runtime/atomic.(*Uint32).Load (inlined)
+               runtime.main
+               runtime.goexit (inlined)
+
+     5.56%  [.] a64_4015e8_region_31_instructions  -      -            
+            |
+            ---renvo_rfe_enter
+               runtime.cgocall
+               renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+               renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+               renvo.dev/internal/rfenativebridge.Call
+               renvo.dev/internal/runimage.(*LinkedCall).CallSession
+               renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+               main.main
+               internal/runtime/atomic.(*Uint32).Load (inlined)
+               runtime.main
+               runtime.goexit (inlined)
+
+     4.98%  [.] a64_401c8c_memory_12_ops           -      -            
+            |
+            ---renvo_rfe_enter
+               runtime.cgocall
+               renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+               renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+               renvo.dev/internal/rfenativebridge.Call
+               renvo.dev/internal/runimage.(*LinkedCall).CallSession
+               renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+               main.main
+               internal/runtime/atomic.(*Uint32).Load (inlined)
+               runtime.main
+               runtime.goexit (inlined)
+
+     4.62%  [.] a64_4017e8_region_19_instructions  -      -            
+            |
+            ---renvo_rfe_enter
+               runtime.cgocall
+               renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+               renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+               renvo.dev/internal/rfenativebridge.Call
+               renvo.dev/internal/runimage.(*LinkedCall).CallSession
+               renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+               main.main
+               internal/runtime/atomic.(*Uint32).Load (inlined)
+               runtime.main
+               runtime.goexit (inlined)
+
+     4.29%  [.] a64_400bf4_region_25_instructions  -      -            
+            |
+            ---renvo_rfe_enter
+               runtime.cgocall
+               renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+               renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+               renvo.dev/internal/rfenativebridge.Call
+               renvo.dev/internal/runimage.(*LinkedCall).CallSession
+               renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+               main.main
+               internal/runtime/atomic.(*Uint32).Load (inlined)
+               runtime.main
+               runtime.goexit (inlined)
+
+     3.91%  [.] a64_400c64_region_15_instructions  -      -            
+            |
+            ---renvo_rfe_enter
+               runtime.cgocall
+               renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+               renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+               renvo.dev/internal/rfenativebridge.Call
+               renvo.dev/internal/runimage.(*LinkedCall).CallSession
+               renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+               main.main
+               internal/runtime/atomic.(*Uint32).Load (inlined)
+               runtime.main
+               runtime.goexit (inlined)
+
+     3.86%  [.] a64_4015c0_region_10_instructions  -      -            
+            |
+            ---renvo_rfe_enter
+               runtime.cgocall
+               renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+               renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+               renvo.dev/internal/rfenativebridge.Call
+               renvo.dev/internal/runimage.(*LinkedCall).CallSession
+               renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+               main.main
+               internal/runtime/atomic.(*Uint32).Load (inlined)
+               runtime.main
+               runtime.goexit (inlined)
+
+     3.47%  [.] a64_401944_region_8_instructions   -      -            
+            |
+            ---renvo_rfe_enter
+               runtime.cgocall
+               renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+               renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+               renvo.dev/internal/rfenativebridge.Call
+               renvo.dev/internal/runimage.(*LinkedCall).CallSession
+               renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+               main.main
+               internal/runtime/atomic.(*Uint32).Load (inlined)
+               runtime.main
+               runtime.goexit (inlined)
+
+     3.47%  [.] runtime.(*scavengeIndex).free      -      -            
+            |
+            ---runtime.(*pageAlloc).free
+               runtime.(*mheap).freeSpanLocked
+               runtime.(*sweepLocked).sweep.(*mheap).freeSpan.func2
+               runtime.systemstack (inlined)
+               runtime.(*mheap).freeSpan (inlined)
+               runtime.(*sweepLocked).sweep
+               runtime.sweepone
+               runtime.bgsweep
+               runtime.gcenable.gowrap1
+               runtime.goexit (inlined)
+
+     3.47%  [.] runtime.findObject                 -      -            
+            |
+            ---runtime.scanobject
+               runtime.gcDrain
+               runtime.gcBgMarkWorker.func2
+               runtime.systemstack (inlined)
+               runtime.gcBgMarkWorker
+               runtime.gcBgMarkStartWorkers.gowrap1
+               runtime.goexit (inlined)
+
+     3.19%  [.] a64_400c5c_region_19_instructions  -      -            
+            |
+            ---renvo_rfe_enter
+               runtime.cgocall
+               renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+               renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+               renvo.dev/internal/rfenativebridge.Call
+               renvo.dev/internal/runimage.(*LinkedCall).CallSession
+               renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+               main.main
+               internal/runtime/atomic.(*Uint32).Load (inlined)
+               runtime.main
+               runtime.goexit (inlined)
+
+     3.19%  [.] runtime.scanobject                 -      -            
+            |
+            ---runtime.gcDrain
+               runtime.gcBgMarkWorker.func2
+               runtime.systemstack (inlined)
+               runtime.gcBgMarkWorker
+               runtime.gcBgMarkStartWorkers.gowrap1
+               runtime.goexit (inlined)
+
+     3.15%  [.] runtime.scanblock                  -      -            
+            |          
+            |--1.60%--runtime.scanblock
+            |          runtime.markrootBlock
+            |          runtime.markroot
+            |          runtime.gcDrain
+            |          runtime.gcBgMarkWorker.func2
+            |          runtime.systemstack (inlined)
+            |          runtime.gcBgMarkWorker
+            |          runtime.gcBgMarkStartWorkers.gowrap1
+            |          runtime.goexit (inlined)
+            |          
+             --1.56%--runtime.findObject
+                       runtime.markrootBlock
+                       runtime.markroot
+                       runtime.gcDrain
+                       runtime.gcBgMarkWorker.func2
+                       runtime.systemstack (inlined)
+                       runtime.gcBgMarkWorker
+                       runtime.gcBgMarkStartWorkers.gowrap1
+                       runtime.goexit (inlined)
+
+     3.15%  [.] runtime.stealWork                  -      -            
+            |
+            ---runtime.findRunnable
+               runtime.schedule
+               runtime.park_m
+               runtime.mcall
+
+     3.12%  [.] a64_4014cc_region_6_instructions   -      -            
+            |
+            ---renvo_rfe_enter
+               runtime.cgocall
+               renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+               renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+               renvo.dev/internal/rfenativebridge.Call
+               renvo.dev/internal/runimage.(*LinkedCall).CallSession
+               renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+               main.main
+               internal/runtime/atomic.(*Uint32).Load (inlined)
+               runtime.main
+               runtime.goexit (inlined)
+
+     2.60%  [.] runtime.getempty                   -      -            
+            |
+            ---runtime.handoff
+               runtime.(*gcWork).balance
+               runtime.(*gcWork).tryGetObjFast (inlined)
+               runtime.gcDrain
+               runtime.gcBgMarkWorker.func2
+               runtime.systemstack (inlined)
+               runtime.gcBgMarkWorker
+               runtime.gcBgMarkStartWorkers.gowrap1
+               runtime.goexit (inlined)
+
+     2.38%  [.] a64_40155c_region_27_instructions  -      -            
+            |
+            ---renvo_rfe_enter
+               runtime.cgocall
+               renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+               renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+               renvo.dev/internal/rfenativebridge.Call
+               renvo.dev/internal/runimage.(*LinkedCall).CallSession
+               renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+               main.main
+               internal/runtime/atomic.(*Uint32).Load (inlined)
+               runtime.main
+               runtime.goexit (inlined)
+
+     2.21%  [.] a64_401d28_region_32_instructions  -      -            
+            |
+            ---renvo_rfe_enter
+               runtime.cgocall
+               renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+               renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+               renvo.dev/internal/rfenativebridge.Call
+               renvo.dev/internal/runimage.(*LinkedCall).CallSession
+               renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+               main.main
+               internal/runtime/atomic.(*Uint32).Load (inlined)
+               runtime.main
+               runtime.goexit (inlined)
+
+     2.05%  [.] runtime.pcvalue                    -      -            
+            |
+            ---runtime.pcdatavalue
+               runtime.(*stkframe).getStackMap
+               runtime.adjustframe
+               runtime.copystack
+               runtime.newstack
+               runtime.morestack (inlined)
+
+     1.81%  [.] runtime.(*sweepLocked).sweep       -      -            
+            |
+            ---runtime.sweepone
+               runtime.bgsweep
+               runtime.gcenable.gowrap1
+               runtime.goexit (inlined)
+
+     1.68%  [.] runtime.sysmon                     -      -            
+            |
+            ---runtime.sysmon
+               runtime.mstart1
+               runtime.mstart0
+               runtime.mstart (inlined)
+               0x7fe19b49eda0
+
+     1.60%  [.] a64_400db0_region_6_instructions   -      -            
+            |
+            ---renvo_rfe_enter
+               runtime.cgocall
+               renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+               renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+               renvo.dev/internal/rfenativebridge.Call
+               renvo.dev/internal/runimage.(*LinkedCall).CallSession
+               renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+               main.main
+               internal/runtime/atomic.(*Uint32).Load (inlined)
+               runtime.main
+               runtime.goexit (inlined)
+
+     1.60%  [.] a64_400dc8_region_5_instructions   -      -            
+            |
+            ---renvo_rfe_enter
+               runtime.cgocall
+               renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+               renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+               renvo.dev/internal/rfenativebridge.Call
+               renvo.dev/internal/runimage.(*LinkedCall).CallSession
+               renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+               main.main
+               internal/runtime/atomic.(*Uint32).Load (inlined)
+               runtime.main
+               runtime.goexit (inlined)
+
+     1.60%  [.] a64_402620_region_48_instructions  -      -            
+            |
+            ---renvo_rfe_enter
+               runtime.cgocall
+               renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+               renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+               renvo.dev/internal/rfenativebridge.Call
+               renvo.dev/internal/runimage.(*LinkedCall).CallSession
+               renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+               main.main
+               internal/runtime/atomic.(*Uint32).Load (inlined)
+               runtime.main
+               runtime.goexit (inlined)
+
+     1.60%  [.] fmt.(*pp).fmtInteger               -      -            
+            |
+            ---fmt.(*pp).printArg
+               fmt.(*pp).doPrintf
+               fmt.Sprintf
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).prepareRegion
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+               main.main
+               internal/runtime/atomic.(*Uint32).Load (inlined)
+               runtime.main
+               runtime.goexit (inlined)
+
+     1.60%  [.] runtime.futex.abi0                 -      -            
+            |
+            ---runtime.notesleep
+               runtime.mPark (inlined)
+               runtime.stopm
+               runtime.findRunnable
+               runtime.schedule
+               runtime.park_m
+               runtime.mcall
+
+     1.60%  [.] runtime.greyobject                 -      -            
+            |
+            ---runtime.(*mspan).markBitsForIndex (inlined)
+               runtime.greyobject
+               runtime.scanobject
+               runtime.gcDrain
+               runtime.gcBgMarkWorker.func2
+               runtime.systemstack (inlined)
+               runtime.gcBgMarkWorker
+               runtime.gcBgMarkStartWorkers.gowrap1
+               runtime.goexit (inlined)
+
+     1.60%  [.] runtime.handoffp                   -      -            
+            |
+            ---runtime.retake
+               runtime.sysmon
+               runtime.mstart1
+               runtime.mstart0
+               runtime.mstart (inlined)
+               0x7fe19b49eda0
+
+     1.60%  [.] runtime.notesleep                  -      -            
+            |
+            ---runtime.mPark (inlined)
+               runtime.stopm
+               runtime.findRunnable
+               runtime.schedule
+               runtime.goschedImpl
+               runtime.newstack
+               runtime.morestack (inlined)
+
+     1.60%  [.] runtime.retake                     -      -            
+            |
+            ---runtime.sysmon
+               runtime.mstart1
+               runtime.mstart0
+               runtime.mstart (inlined)
+               0x7fe19b49eda0
+
+     1.56%  [.] runtime.lock2                      -      -            
+            |
+            ---runtime.retake
+               runtime.sysmon
+               runtime.mstart1
+               runtime.mstart0
+               runtime.mstart (inlined)
+               0x7fe19b49eda0
+
+     1.36%  [.] 0x0000000000000ac5                 -      -            
+            |
+            ---runtime.nanotime1 (inlined)
+               runtime.nanotime (inlined)
+               runtime.sysmon
+               runtime.mstart1
+               runtime.mstart0
+               runtime.mstart (inlined)
+               0x7fe19b49eda0
+
+     1.27%  [.] a64_400c34_region_25_instructions  -      -            
+            |
+            ---renvo_rfe_enter
+               runtime.cgocall
+               renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+               renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+               renvo.dev/internal/rfenativebridge.Call
+               renvo.dev/internal/runimage.(*LinkedCall).CallSession
+               renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+               main.main
+               internal/runtime/atomic.(*Uint32).Load (inlined)
+               runtime.main
+               runtime.goexit (inlined)
+
+
+
+# Samples: 3K of event 'cpu_core/cycles/Pu'
+# Event count (approx.): 140584655064
+#
+# Overhead  Symbol                                                                IPC   [IPC Coverage]
+# ........  ....................................................................  ....................
+#
+    25.14%  [.] rfe_native_dispatcher                                             -      -            
+            |          
+             --23.21%--rfe_native_dispatcher
+                       renvo_rfe_enter
+                       runtime.cgocall
+                       renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+                       renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+                       renvo.dev/internal/rfenativebridge.Call
+                       renvo.dev/internal/runimage.(*LinkedCall).CallSession
+                       renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+                       main.main
+                       internal/runtime/atomic.(*Uint32).Load (inlined)
+                       runtime.main
+                       runtime.goexit (inlined)
+
+     5.90%  [.] a64_400dc8_region_5_instructions                                  -      -            
+            |          
+             --5.88%--a64_400dc8_region_5_instructions
+                       renvo_rfe_enter
+                       runtime.cgocall
+                       renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+                       renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+                       renvo.dev/internal/rfenativebridge.Call
+                       renvo.dev/internal/runimage.(*LinkedCall).CallSession
+                       renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+                       main.main
+                       internal/runtime/atomic.(*Uint32).Load (inlined)
+                       runtime.main
+                       runtime.goexit (inlined)
+
+     4.20%  [.] a64_400db0_region_6_instructions                                  -      -            
+            |
+            ---renvo_rfe_enter
+               runtime.cgocall
+               renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+               renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+               renvo.dev/internal/rfenativebridge.Call
+               renvo.dev/internal/runimage.(*LinkedCall).CallSession
+               renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+               main.main
+               internal/runtime/atomic.(*Uint32).Load (inlined)
+               runtime.main
+               runtime.goexit (inlined)
+
+     3.64%  [.] a64_4015c0_region_10_instructions                                 -      -            
+            |          
+             --3.63%--a64_4015c0_region_10_instructions
+                       renvo_rfe_enter
+                       runtime.cgocall
+                       renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+                       renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+                       renvo.dev/internal/rfenativebridge.Call
+                       renvo.dev/internal/runimage.(*LinkedCall).CallSession
+                       renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+                       main.main
+                       internal/runtime/atomic.(*Uint32).Load (inlined)
+                       runtime.main
+                       runtime.goexit (inlined)
+
+     3.26%  [.] a64_401540_region_7_instructions                                  -      -            
+            |          
+             --3.23%--a64_401540_region_7_instructions
+                       renvo_rfe_enter
+                       runtime.cgocall
+                       renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+                       renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+                       renvo.dev/internal/rfenativebridge.Call
+                       renvo.dev/internal/runimage.(*LinkedCall).CallSession
+                       renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+                       main.main
+                       internal/runtime/atomic.(*Uint32).Load (inlined)
+                       runtime.main
+                       runtime.goexit (inlined)
+
+     3.07%  [.] a64_400e70_region_6_instructions                                  -      -            
+            |          
+             --3.05%--a64_400e70_region_6_instructions
+                       renvo_rfe_enter
+                       runtime.cgocall
+                       renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+                       renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+                       renvo.dev/internal/rfenativebridge.Call
+                       renvo.dev/internal/runimage.(*LinkedCall).CallSession
+                       renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+                       main.main
+                       internal/runtime/atomic.(*Uint32).Load (inlined)
+                       runtime.main
+                       runtime.goexit (inlined)
+
+     2.28%  [.] a64_401b64_region_22_instructions                                 -      -            
+            |          
+             --2.17%--a64_401b64_region_22_instructions
+                       renvo_rfe_enter
+                       runtime.cgocall
+                       renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+                       renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+                       renvo.dev/internal/rfenativebridge.Call
+                       renvo.dev/internal/runimage.(*LinkedCall).CallSession
+                       renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+                       main.main
+                       internal/runtime/atomic.(*Uint32).Load (inlined)
+                       runtime.main
+                       runtime.goexit (inlined)
+
+     1.85%  [.] a64_4015e8_region_31_instructions                                 -      -            
+            |
+            ---renvo_rfe_enter
+               runtime.cgocall
+               renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+               renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+               renvo.dev/internal/rfenativebridge.Call
+               renvo.dev/internal/runimage.(*LinkedCall).CallSession
+               renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+               main.main
+               internal/runtime/atomic.(*Uint32).Load (inlined)
+               runtime.main
+               runtime.goexit (inlined)
+
+     1.71%  [.] a64_40155c_region_27_instructions                                 -      -            
+            |          
+             --1.65%--a64_40155c_region_27_instructions
+                       renvo_rfe_enter
+                       runtime.cgocall
+                       renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+                       renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+                       renvo.dev/internal/rfenativebridge.Call
+                       renvo.dev/internal/runimage.(*LinkedCall).CallSession
+                       renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+                       main.main
+                       internal/runtime/atomic.(*Uint32).Load (inlined)
+                       runtime.main
+                       runtime.goexit (inlined)
+
+     1.53%  [.] a64_401eb4_region_10_instructions                                 -      -            
+            |          
+             --1.42%--a64_401eb4_region_10_instructions
+                       renvo_rfe_enter
+                       runtime.cgocall
+                       renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+                       renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+                       renvo.dev/internal/rfenativebridge.Call
+                       renvo.dev/internal/runimage.(*LinkedCall).CallSession
+                       renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+                       main.main
+                       internal/runtime/atomic.(*Uint32).Load (inlined)
+                       runtime.main
+                       runtime.goexit (inlined)
+
+     1.43%  [.] a64_401d68_region_24_instructions                                 -      -            
+            |          
+             --1.32%--a64_401d68_region_24_instructions
+                       renvo_rfe_enter
+                       runtime.cgocall
+                       renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+                       renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+                       renvo.dev/internal/rfenativebridge.Call
+                       renvo.dev/internal/runimage.(*LinkedCall).CallSession
+                       renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+                       main.main
+                       internal/runtime/atomic.(*Uint32).Load (inlined)
+                       runtime.main
+                       runtime.goexit (inlined)
+
+     1.41%  [.] a64_401ba4_region_56_instructions                                 -      -            
+            |          
+             --1.35%--a64_401ba4_region_56_instructions
+                       renvo_rfe_enter
+                       runtime.cgocall
+                       renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+                       renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+                       renvo.dev/internal/rfenativebridge.Call
+                       renvo.dev/internal/runimage.(*LinkedCall).CallSession
+                       renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+                       main.main
+                       internal/runtime/atomic.(*Uint32).Load (inlined)
+                       runtime.main
+                       runtime.goexit (inlined)
+
+     1.34%  [.] a64_400e8c_region_39_instructions                                 -      -            
+            |
+            ---renvo_rfe_enter
+               runtime.cgocall
+               renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+               renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+               renvo.dev/internal/rfenativebridge.Call
+               renvo.dev/internal/runimage.(*LinkedCall).CallSession
+               renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+               main.main
+               internal/runtime/atomic.(*Uint32).Load (inlined)
+               runtime.main
+               runtime.goexit (inlined)
+
+     1.32%  [.] a64_401b8c_region_4_instructions                                  -      -            
+            |          
+             --1.20%--a64_401b8c_region_4_instructions
+                       renvo_rfe_enter
+                       runtime.cgocall
+                       renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+                       renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+                       renvo.dev/internal/rfenativebridge.Call
+                       renvo.dev/internal/runimage.(*LinkedCall).CallSession
+                       renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+                       main.main
+                       internal/runtime/atomic.(*Uint32).Load (inlined)
+                       runtime.main
+                       runtime.goexit (inlined)
+
+     1.32%  [.] a64_401dd8_region_17_instructions                                 -      -            
+            |
+            ---renvo_rfe_enter
+               runtime.cgocall
+               renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+               renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+               renvo.dev/internal/rfenativebridge.Call
+               renvo.dev/internal/runimage.(*LinkedCall).CallSession
+               renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+               main.main
+               internal/runtime/atomic.(*Uint32).Load (inlined)
+               runtime.main
+               runtime.goexit (inlined)
+
+     1.18%  [.] a64_401d28_region_32_instructions                                 -      -            
+            |          
+             --1.15%--a64_401d28_region_32_instructions
+                       renvo_rfe_enter
+                       runtime.cgocall
+                       renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+                       renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+                       renvo.dev/internal/rfenativebridge.Call
+                       renvo.dev/internal/runimage.(*LinkedCall).CallSession
+                       renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+                       main.main
+                       internal/runtime/atomic.(*Uint32).Load (inlined)
+                       runtime.main
+                       runtime.goexit (inlined)
+
+     1.12%  [.] a64_401cfc_region_23_instructions                                 -      -            
+            |          
+             --1.09%--a64_401cfc_region_23_instructions
+                       renvo_rfe_enter
+                       runtime.cgocall
+                       renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+                       renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+                       renvo.dev/internal/rfenativebridge.Call
+                       renvo.dev/internal/runimage.(*LinkedCall).CallSession
+                       renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+                       main.main
+                       internal/runtime/atomic.(*Uint32).Load (inlined)
+                       runtime.main
+                       runtime.goexit (inlined)
+
+     1.11%  [.] a64_400c5c_region_19_instructions                                 -      -            
+            |          
+             --1.06%--a64_400c5c_region_19_instructions
+                       renvo_rfe_enter
+                       runtime.cgocall
+                       renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+                       renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+                       renvo.dev/internal/rfenativebridge.Call
+                       renvo.dev/internal/runimage.(*LinkedCall).CallSession
+                       renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+                       main.main
+                       internal/runtime/atomic.(*Uint32).Load (inlined)
+                       runtime.main
+                       runtime.goexit (inlined)
+
+     1.10%  [.] a64_401cf0_pure_12_ops                                            -      -            
+            |          
+             --0.95%--a64_401cf0_pure_12_ops
+                       renvo_rfe_enter
+                       runtime.cgocall
+                       renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+                       renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+                       renvo.dev/internal/rfenativebridge.Call
+                       renvo.dev/internal/runimage.(*LinkedCall).CallSession
+                       renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+                       main.main
+                       internal/runtime/atomic.(*Uint32).Load (inlined)
+                       runtime.main
+                       runtime.goexit (inlined)
+
+     1.09%  [.] a64_401bd8_region_12_instructions                                 -      -            
+            |          
+             --1.06%--a64_401bd8_region_12_instructions
+                       renvo_rfe_enter
+                       runtime.cgocall
+                       renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+                       renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+                       renvo.dev/internal/rfenativebridge.Call
+                       renvo.dev/internal/runimage.(*LinkedCall).CallSession
+                       renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+                       main.main
+                       internal/runtime/atomic.(*Uint32).Load (inlined)
+                       runtime.main
+                       runtime.goexit (inlined)
+
+     1.04%  [.] a64_401c7c_region_14_instructions                                 -      -            
+            |          
+             --0.98%--a64_401c7c_region_14_instructions
+                       renvo_rfe_enter
+                       runtime.cgocall
+                       renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+                       renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+                       renvo.dev/internal/rfenativebridge.Call
+                       renvo.dev/internal/runimage.(*LinkedCall).CallSession
+                       renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+                       main.main
+                       internal/runtime/atomic.(*Uint32).Load (inlined)
+                       runtime.main
+                       runtime.goexit (inlined)
+
+     0.95%  [.] runtime.setPinned                                                 -      -            
+     0.94%  [.] a64_401f2c_region_10_instructions                                 -      -            
+            |          
+             --0.92%--a64_401f2c_region_10_instructions
+                       renvo_rfe_enter
+                       runtime.cgocall
+                       renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+                       renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+                       renvo.dev/internal/rfenativebridge.Call
+                       renvo.dev/internal/runimage.(*LinkedCall).CallSession
+                       renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+                       main.main
+                       internal/runtime/atomic.(*Uint32).Load (inlined)
+                       runtime.main
+                       runtime.goexit (inlined)
+
+     0.90%  [.] a64_400860_region_12_instructions                                 -      -            
+            |          
+             --0.85%--a64_400860_region_12_instructions
+                       renvo_rfe_enter
+                       runtime.cgocall
+                       renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+                       renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+                       renvo.dev/internal/rfenativebridge.Call
+                       renvo.dev/internal/runimage.(*LinkedCall).CallSession
+                       renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+                       main.main
+                       internal/runtime/atomic.(*Uint32).Load (inlined)
+                       runtime.main
+                       runtime.goexit (inlined)
+
+     0.90%  [.] a64_4026e0_region_58_instructions                                 -      -            
+            |          
+             --0.87%--a64_4026e0_region_58_instructions
+                       renvo_rfe_enter
+                       runtime.cgocall
+                       renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+                       renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+                       renvo.dev/internal/rfenativebridge.Call
+                       renvo.dev/internal/runimage.(*LinkedCall).CallSession
+                       renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+                       main.main
+                       internal/runtime/atomic.(*Uint32).Load (inlined)
+                       runtime.main
+                       runtime.goexit (inlined)
+
+     0.89%  [.] a64_400ddc_region_45_instructions                                 -      -            
+            |          
+             --0.81%--a64_400ddc_region_45_instructions
+                       renvo_rfe_enter
+                       runtime.cgocall
+                       renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+                       renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+                       renvo.dev/internal/rfenativebridge.Call
+                       renvo.dev/internal/runimage.(*LinkedCall).CallSession
+                       renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+                       main.main
+                       internal/runtime/atomic.(*Uint32).Load (inlined)
+                       runtime.main
+                       runtime.goexit (inlined)
+
+     0.89%  [.] a64_401c08_region_15_instructions                                 -      -            
+            |
+            ---renvo_rfe_enter
+               runtime.cgocall
+               renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+               renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+               renvo.dev/internal/rfenativebridge.Call
+               renvo.dev/internal/runimage.(*LinkedCall).CallSession
+               renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+               main.main
+               internal/runtime/atomic.(*Uint32).Load (inlined)
+               runtime.main
+               runtime.goexit (inlined)
+
+     0.85%  [.] a64_401b9c_pure_12_ops                                            -      -            
+            |          
+             --0.75%--a64_401b9c_pure_12_ops
+                       renvo_rfe_enter
+                       runtime.cgocall
+                       renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+                       renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+                       renvo.dev/internal/rfenativebridge.Call
+                       renvo.dev/internal/runimage.(*LinkedCall).CallSession
+                       renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+                       main.main
+                       internal/runtime/atomic.(*Uint32).Load (inlined)
+                       runtime.main
+                       runtime.goexit (inlined)
+
+     0.84%  [.] a64_402620_region_48_instructions                                 -      -            
+            |          
+             --0.81%--a64_402620_region_48_instructions
+                       renvo_rfe_enter
+                       runtime.cgocall
+                       renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+                       renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+                       renvo.dev/internal/rfenativebridge.Call
+                       renvo.dev/internal/runimage.(*LinkedCall).CallSession
+                       renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+                       main.main
+                       internal/runtime/atomic.(*Uint32).Load (inlined)
+                       runtime.main
+                       runtime.goexit (inlined)
+
+     0.82%  [.] runtime.lock2                                                     -      -            
+            |          
+             --0.71%--runtime.lock2
+                       |          
+                        --0.53%--runtime.setPinned
+
+     0.77%  [.] a64_4023c0_region_151_instructions                                -      -            
+            |
+            ---renvo_rfe_enter
+               runtime.cgocall
+               renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+               renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+               renvo.dev/internal/rfenativebridge.Call
+               renvo.dev/internal/runimage.(*LinkedCall).CallSession
+               renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+               main.main
+               internal/runtime/atomic.(*Uint32).Load (inlined)
+               runtime.main
+               runtime.goexit (inlined)
+
+     0.75%  [.] a64_401bf0_region_6_instructions                                  -      -            
+            |          
+             --0.72%--a64_401bf0_region_6_instructions
+                       renvo_rfe_enter
+                       runtime.cgocall
+                       renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+                       renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+                       renvo.dev/internal/rfenativebridge.Call
+                       renvo.dev/internal/runimage.(*LinkedCall).CallSession
+                       renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+                       main.main
+                       internal/runtime/atomic.(*Uint32).Load (inlined)
+                       runtime.main
+                       runtime.goexit (inlined)
+
+     0.73%  [.] a64_401944_region_8_instructions                                  -      -            
+            |
+            ---renvo_rfe_enter
+               runtime.cgocall
+               renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+               renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+               renvo.dev/internal/rfenativebridge.Call
+               renvo.dev/internal/runimage.(*LinkedCall).CallSession
+               renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+               main.main
+               internal/runtime/atomic.(*Uint32).Load (inlined)
+               runtime.main
+               runtime.goexit (inlined)
+
+     0.71%  [.] a64_401c98_memory_27_ops                                          -      -            
+            |
+            ---renvo_rfe_enter
+               runtime.cgocall
+               renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+               renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+               renvo.dev/internal/rfenativebridge.Call
+               renvo.dev/internal/runimage.(*LinkedCall).CallSession
+               renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+               main.main
+               internal/runtime/atomic.(*Uint32).Load (inlined)
+               runtime.main
+               runtime.goexit (inlined)
+
+     0.69%  [.] runtime.unlock2                                                   -      -            
+            |          
+             --0.63%--runtime.unlock2
+
+     0.66%  [.] a64_400c64_region_15_instructions                                 -      -            
+            |          
+             --0.58%--a64_400c64_region_15_instructions
+                       renvo_rfe_enter
+                       runtime.cgocall
+                       renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+                       renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+                       renvo.dev/internal/rfenativebridge.Call
+                       renvo.dev/internal/runimage.(*LinkedCall).CallSession
+                       renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+                       main.main
+                       internal/runtime/atomic.(*Uint32).Load (inlined)
+                       runtime.main
+                       runtime.goexit (inlined)
+
+     0.61%  [.] a64_401c64_region_6_instructions                                  -      -            
+            |          
+             --0.59%--a64_401c64_region_6_instructions
+                       renvo_rfe_enter
+                       runtime.cgocall
+                       renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+                       renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+                       renvo.dev/internal/rfenativebridge.Call
+                       renvo.dev/internal/runimage.(*LinkedCall).CallSession
+                       renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+                       main.main
+                       internal/runtime/atomic.(*Uint32).Load (inlined)
+                       runtime.main
+                       runtime.goexit (inlined)
+
+     0.60%  [.] a64_400a04_memory_49_ops                                          -      -            
+            |          
+             --0.57%--a64_400a04_memory_49_ops
+                       renvo_rfe_enter
+                       runtime.cgocall
+                       renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+                       renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+                       renvo.dev/internal/rfenativebridge.Call
+                       renvo.dev/internal/runimage.(*LinkedCall).CallSession
+                       renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+                       main.main
+                       internal/runtime/atomic.(*Uint32).Load (inlined)
+                       runtime.main
+                       runtime.goexit (inlined)
+
+     0.57%  [.] a64_400e4c_region_13_instructions                                 -      -            
+            |          
+             --0.54%--a64_400e4c_region_13_instructions
+                       renvo_rfe_enter
+                       runtime.cgocall
+                       renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+                       renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+                       renvo.dev/internal/rfenativebridge.Call
+                       renvo.dev/internal/runimage.(*LinkedCall).CallSession
+                       renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+                       main.main
+                       internal/runtime/atomic.(*Uint32).Load (inlined)
+                       runtime.main
+                       runtime.goexit (inlined)
+
+     0.55%  [.] a64_4008a0_region_5_instructions                                  -      -            
+            |          
+             --0.52%--a64_4008a0_region_5_instructions
+                       renvo_rfe_enter
+                       runtime.cgocall
+                       renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+                       renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+                       renvo.dev/internal/rfenativebridge.Call
+                       renvo.dev/internal/runimage.(*LinkedCall).CallSession
+                       renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+                       renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+                       renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+                       main.main
+                       internal/runtime/atomic.(*Uint32).Load (inlined)
+                       runtime.main
+                       runtime.goexit (inlined)
+
+     0.53%  [.] a64_4016ac_region_6_instructions                                  -      -            
+            |
+            ---renvo_rfe_enter
+               runtime.cgocall
+               renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+               renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+               renvo.dev/internal/rfenativebridge.Call
+               renvo.dev/internal/runimage.(*LinkedCall).CallSession
+               renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+               main.main
+               internal/runtime/atomic.(*Uint32).Load (inlined)
+               runtime.main
+               runtime.goexit (inlined)
+
+     0.52%  [.] a64_400bf4_region_25_instructions                                 -      -            
+     0.52%  [.] a64_401e04_region_5_instructions                                  -      -            
+     0.51%  [.] a64_401bf8_region_12_instructions                                 -      -            
+            |
+            ---renvo_rfe_enter
+               runtime.cgocall
+               renvo.dev/internal/rfenativebridge._Cfunc_renvo_rfe_enter (inlined)
+               renvo.dev/internal/rfenativebridge.Call.func1 (inlined)
+               renvo.dev/internal/rfenativebridge.Call
+               renvo.dev/internal/runimage.(*LinkedCall).CallSession
+               renvo.dev/internal/rfe/runtime.(*Native).RunLinkedSession
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).runLinked
+               renvo.dev/rfe/workspace/packages/aarch64.(*Engine).run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.(*Process).Run
+               renvo.dev/rfe/workspace/packages/linux-arm64-user.Main
+               main.main
+               internal/runtime/atomic.(*Uint32).Load (inlined)
+               runtime.main
+               runtime.goexit (inlined)
+
+     0.50%  [.] a64_401cb0_region_5_instructions                                  -      -            
+
+
+#
+# (Tip: To group events which need to be collected together for accuracy use {}: perf record -e {cycles,branches}' ...)
+#
