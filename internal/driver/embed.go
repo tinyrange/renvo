@@ -887,15 +887,20 @@ func compressSourceEmbedArchive(data []byte) []byte {
 			// Both encodings consume a consecutive range. Register it here so
 			// each byte does not require a separate dictionary-update call.
 			end := pos + length
-			for pos < end {
-				if pos+2 < len(data) {
-					hash := (int(data[pos])*251+int(data[pos+1]))*251 + int(data[pos+2])
-					bucket := hash & (bucketCount - 1)
-					previous[pos&4095] = buckets[bucket]
-					buckets[bucket] = int32(pos + 1)
-				}
+			insertEnd := end
+			if insertEnd > len(data)-2 {
+				insertEnd = len(data) - 2
+			}
+			// The final two bytes cannot start a dictionary entry. Hoist that
+			// bound out of the update loop while retaining every reachable entry.
+			for pos < insertEnd {
+				hash := (int(data[pos])*251+int(data[pos+1]))*251 + int(data[pos+2])
+				bucket := hash & (bucketCount - 1)
+				previous[pos&4095] = buckets[bucket]
+				buckets[bucket] = int32(pos + 1)
 				pos++
 			}
+			pos = end
 		}
 		out[flagPos] = flags
 	}
