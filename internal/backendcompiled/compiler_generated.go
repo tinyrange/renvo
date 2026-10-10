@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "c5d51e4fc00ca2b26d18d59befc3c81422f072f3b8454f7bda68a3ea38581a7b"
+const CompilerSourceDigest = "1b7a9995a1a5ebde965954be7b4032afd8e57560827d3fae9448c72785b89589"
 
 // source: backend/compiler_common_impl.go
 
@@ -40805,7 +40805,10 @@ return r
 }
 r := renvoAsmReserves{code: 2097152, labels: 24576, relocs: 81920, absRelocs: 12288, data: 65536}
 if a.c.optimizeRuntime {
-r.data = 131072
+
+
+
+r.data = 1048576
 r.code = 3670016
 r.labels, r.relocs, r.absRelocs = 40960, 163840, 32768
 }

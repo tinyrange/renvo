@@ -5205,7 +5205,10 @@ if renvoFixedTarget != 0 {
 		}
 		r := renvoAsmReserves{code: 2097152, labels: 24576, relocs: 81920, absRelocs: 12288, data: 65536}
 		if a.c.optimizeRuntime {
-			r.data = 131072
+			// Large inputs commonly include substantial static byte data. Reserve
+			// it before function scratch marks to avoid pinning parser scratch
+			// each time the persistent data buffer grows during literal emission.
+			r.data = 1048576
 			r.code = 3670016
 			r.labels, r.relocs, r.absRelocs = 40960, 163840, 32768
 		}
