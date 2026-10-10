@@ -1,0 +1,55 @@
+{
+  "conclusion": "No demonstrated AArch64 guest throughput improvement from the latest two optimizations. Restored run is 0.054%/0.261% slower than control; limited samples cannot establish a small regression. Both optimized runs and control pass both seed CRC sets and exceed 10 seconds per seed.",
+  "control_without_latest_two": {
+    "exit_code": 0,
+    "iterations_per_second": [
+      6820.176564823016,
+      6836.783618738284
+    ],
+    "stderr": "retired=59156887738 interpreted=48557 ir=64424 native=59156774757 blocks=2320 promotions=295 invalidations=0 compile_failures=0 native_bytes=900304 native_memory=13687594350 memory_exits=0 linked=59156773058 code_reads=14398 version_checks=2322 context_checks=973866 profile_errors=0 regions=223 region_exits=2089269212 loop_iterations=4563672324\nnative_sessions=908904 link_miss_stops=6129 budget_stops=846557 other_stops=0\nreal 29.30\nuser 29.47\nsys 0.10\n",
+    "stderr_truncated": false,
+    "stdout": "2K performance run parameters for coremark.\nCoreMark Size    : 666\nTotal ticks      : 14662377\nTotal time (secs): 14\nIterations/Sec   : 7142\nIterations       : 100000\nCompiler version : GCC 16.2.1 20260819 (Red Hat Cross 16.2.1-1)\nCompiler flags   : -O2 -static -nostdlib -fno-builtin -fno-stack-protector -fno-pie -no-pie -mgeneral-regs-only -fno-tree-vectorize -I. -Iport -DITERATIONS=100000 -DPERFORMANCE_RUN=1 -Wl,-e,_start -Wl,--build-id=none\nMemory location  : Stack; 2000 bytes; single context; freestanding Linux AArch64\nseedcrc          : 0xe9f5\n[0]crclist       : 0xe714\n[0]crcmatrix     : 0x1fd7\n[0]crcstate      : 0x8e3a\n[0]crcfinal      : 0xd340\nCorrect operation validated. See README.md for run and reporting rules.\n2K validation run parameters for coremark.\nCoreMark Size    : 666\nTotal ticks      : 14626761\nTotal time (secs): 14\nIterations/Sec   : 7142\nIterations       : 100000\nCompiler version : GCC 16.2.1 20260819 (Red Hat Cross 16.2.1-1)\nCompiler flags   : -O2 -static -nostdlib -fno-builtin -fno-stack-protector -fno-pie -no-pie -mgeneral-regs-only -fno-tree-vectorize -I. -Iport -DITERATIONS=100000 -DPERFORMANCE_RUN=1 -Wl,-e,_start -Wl,--build-id=none\nMemory location  : Stack; 2000 bytes; single context; freestanding Linux AArch64\nseedcrc          : 0x18f2\n[0]crclist       : 0xe3c1\n[0]crcmatrix     : 0x0747\n[0]crcstate      : 0x8d84\n[0]crcfinal      : 0x5c66\nCorrect operation validated. See README.md for run and reporting rules.\n",
+    "stdout_truncated": false,
+    "ticks_us": [
+      14662377,
+      14626761
+    ],
+    "timed_out": false
+  },
+  "native_bytes_control": 900304,
+  "native_bytes_optimized": 896447,
+  "optimized_first": {
+    "exit_code": 0,
+    "iterations_per_second": [
+      6812.787793446357,
+      6812.646233451401
+    ],
+    "stderr": "retired=59156887738 interpreted=48557 ir=64424 native=59156774757 blocks=2320 promotions=295 invalidations=0 compile_failures=0 native_bytes=896447 native_memory=13687594350 memory_exits=0 linked=59156773058 code_reads=14398 version_checks=2322 context_checks=973866 profile_errors=0 regions=223 region_exits=2089269212 loop_iterations=4563672324\nnative_sessions=908904 link_miss_stops=6129 budget_stops=846557 other_stops=0\nreal 29.36\nuser 29.52\nsys 0.11\n",
+    "stderr_truncated": false,
+    "stdout": "2K performance run parameters for coremark.\nCoreMark Size    : 666\nTotal ticks      : 14678279\nTotal time (secs): 14\nIterations/Sec   : 7142\nIterations       : 100000\nCompiler version : GCC 16.2.1 20260819 (Red Hat Cross 16.2.1-1)\nCompiler flags   : -O2 -static -nostdlib -fno-builtin -fno-stack-protector -fno-pie -no-pie -mgeneral-regs-only -fno-tree-vectorize -I. -Iport -DITERATIONS=100000 -DPERFORMANCE_RUN=1 -Wl,-e,_start -Wl,--build-id=none\nMemory location  : Stack; 2000 bytes; single context; freestanding Linux AArch64\nseedcrc          : 0xe9f5\n[0]crclist       : 0xe714\n[0]crcmatrix     : 0x1fd7\n[0]crcstate      : 0x8e3a\n[0]crcfinal      : 0xd340\nCorrect operation validated. See README.md for run and reporting rules.\n2K validation run parameters for coremark.\nCoreMark Size    : 666\nTotal ticks      : 14678584\nTotal time (secs): 14\nIterations/Sec   : 7142\nIterations       : 100000\nCompiler version : GCC 16.2.1 20260819 (Red Hat Cross 16.2.1-1)\nCompiler flags   : -O2 -static -nostdlib -fno-builtin -fno-stack-protector -fno-pie -no-pie -mgeneral-regs-only -fno-tree-vectorize -I. -Iport -DITERATIONS=100000 -DPERFORMANCE_RUN=1 -Wl,-e,_start -Wl,--build-id=none\nMemory location  : Stack; 2000 bytes; single context; freestanding Linux AArch64\nseedcrc          : 0x18f2\n[0]crclist       : 0xe3c1\n[0]crcmatrix     : 0x0747\n[0]crcstate      : 0x8d84\n[0]crcfinal      : 0x5c66\nCorrect operation validated. See README.md for run and reporting rules.\n",
+    "stdout_truncated": false,
+    "ticks_us": [
+      14678279,
+      14678584
+    ],
+    "timed_out": false
+  },
+  "optimized_restored": {
+    "exit_code": 0,
+    "iterations_per_second": [
+      6816.510378852786,
+      6818.956699624958
+    ],
+    "stderr": "retired=59156887738 interpreted=48557 ir=64424 native=59156774757 blocks=2320 promotions=295 invalidations=0 compile_failures=0 native_bytes=896447 native_memory=13687594350 memory_exits=0 linked=59156773058 code_reads=14398 version_checks=2322 context_checks=973866 profile_errors=0 regions=223 region_exits=2089269212 loop_iterations=4563672324\nnative_sessions=908904 link_miss_stops=6129 budget_stops=846557 other_stops=0\nreal 29.34\nuser 29.51\nsys 0.10\n",
+    "stderr_truncated": false,
+    "stdout": "2K performance run parameters for coremark.\nCoreMark Size    : 666\nTotal ticks      : 14670263\nTotal time (secs): 14\nIterations/Sec   : 7142\nIterations       : 100000\nCompiler version : GCC 16.2.1 20260819 (Red Hat Cross 16.2.1-1)\nCompiler flags   : -O2 -static -nostdlib -fno-builtin -fno-stack-protector -fno-pie -no-pie -mgeneral-regs-only -fno-tree-vectorize -I. -Iport -DITERATIONS=100000 -DPERFORMANCE_RUN=1 -Wl,-e,_start -Wl,--build-id=none\nMemory location  : Stack; 2000 bytes; single context; freestanding Linux AArch64\nseedcrc          : 0xe9f5\n[0]crclist       : 0xe714\n[0]crcmatrix     : 0x1fd7\n[0]crcstate      : 0x8e3a\n[0]crcfinal      : 0xd340\nCorrect operation validated. See README.md for run and reporting rules.\n2K validation run parameters for coremark.\nCoreMark Size    : 666\nTotal ticks      : 14665000\nTotal time (secs): 14\nIterations/Sec   : 7142\nIterations       : 100000\nCompiler version : GCC 16.2.1 20260819 (Red Hat Cross 16.2.1-1)\nCompiler flags   : -O2 -static -nostdlib -fno-builtin -fno-stack-protector -fno-pie -no-pie -mgeneral-regs-only -fno-tree-vectorize -I. -Iport -DITERATIONS=100000 -DPERFORMANCE_RUN=1 -Wl,-e,_start -Wl,--build-id=none\nMemory location  : Stack; 2000 bytes; single context; freestanding Linux AArch64\nseedcrc          : 0x18f2\n[0]crclist       : 0xe3c1\n[0]crcmatrix     : 0x0747\n[0]crcstate      : 0x8d84\n[0]crcfinal      : 0x5c66\nCorrect operation validated. See README.md for run and reporting rules.\n",
+    "stdout_truncated": false,
+    "ticks_us": [
+      14670263,
+      14665000
+    ],
+    "timed_out": false
+  },
+  "scope": "AArch64 guest on Linux/amd64 RFE native engine; same existing 100000-iteration ELF; optimized/control/optimized sequence; control removes only latest cold-input and low-word-copy optimizations",
+  "source_restored": true
+}

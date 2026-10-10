@@ -66,5 +66,6 @@ func (e *Engine) accountMemory(c CPU, block *compiledBlock, memory NativeMemory,
 		}
 		return e.interpret(c)
 	}
+	e.observeEdge(block.instructions[len(block.instructions)-1], c.Registers()[e.arch.PC])
 	return nil
 }

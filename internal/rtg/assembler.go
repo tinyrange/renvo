@@ -164,9 +164,12 @@ func assemblerLines(source []byte, filename string) ([]assemblerLine, []Diagnost
 	if err.Message != "" {
 		return nil, assemblerDiagnostic(filename, sourceSpan(source, err.Offset, err.Offset), err.Message)
 	}
-	lines := []assemblerLine{}
+	lines := make([]assemblerLine, 0, len(scanned))
+	cursor := Position{Line: 1, Column: 1}
 	for _, line := range scanned {
-		lines = append(lines, assemblerLine{text: line.Text, span: sourceSpan(source, line.Start, line.End)})
+		start := advancePosition(source, cursor, line.Start)
+		cursor = advancePosition(source, start, line.End)
+		lines = append(lines, assemblerLine{text: line.Text, span: Span{Start: start, End: cursor}})
 	}
 	return lines, nil
 }

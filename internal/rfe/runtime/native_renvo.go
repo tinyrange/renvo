@@ -65,3 +65,13 @@ func NativeSessionsAvailable() bool { return false }
 func (n *Native) RunLinkedSession(state []uint64, memory *MemoryContext, budget uint64) error {
 	return fmt.Errorf("native mapping unavailable")
 }
+
+func (n *Native) CompileLoopMode(ops []Op, words, instructions int, direct bool) (int, error) {
+	return n.CompileLoop(ops, words, instructions)
+}
+
+func (n *Native) CompileCodeVersionedLoop(ops []Op, words, instructions int, memory *MemoryContext) (int, error) {
+	return n.CompileLoop(ops, words, instructions)
+}
+
+func (n *Native) CanLinkMemory(memory *MemoryContext) bool { return false }

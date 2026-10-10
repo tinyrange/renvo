@@ -10,6 +10,8 @@ files and do not require separately maintained emulator Go packages.
 | `v7-user.rfe` | V7 a.out loader and syscall personality; requires `pdp11` |
 | `aarch64.rfe` | A64 integer CPU with interpreter, IR and native tiers |
 | `linux-arm64-user.rfe` | Static-ELF Linux AArch64 personality; requires `aarch64` |
+| `amd64.rfe` | Scalar x86-64 integer CPU with interpreter, IR and native tiers |
+| `linux-amd64-user.rfe` | Static-ELF Linux x86-64 personality; requires `amd64` |
 | `pdp11-machine.rfe` | PDP-11 machine, console, clock and RK05 disks; requires `pdp11` |
 
 From the Renvo checkout, with the Go toolchain installed:
@@ -105,3 +107,9 @@ See [the RFE format and runtime](../docs/rfe.md) for authoring and extension.
 See [usage and supported scope](../docs/aarch64-user.md). This is an incomplete
 integer/static-ELF implementation, not a security sandbox or a demonstrated
 QEMU performance win.
+
+## x86-64 user mode
+
+See [usage, supported scope and performance notes](../docs/x86-64-user.md).
+Checked memory is the default; fault-assisted direct memory is experimental
+and off by default. This is an incomplete scalar implementation, not a sandbox.

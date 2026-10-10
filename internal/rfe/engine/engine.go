@@ -67,7 +67,8 @@ type Engine struct {
 	native      *emu.Native
 	Stats       Stats
 	linkContext CodeStamp
-	linkReady   bool // immutable state ABI, prepared once for this native engine
+	edgeCounts  map[uint64][2]uint64 // bounded by discovered conditional instructions
+	linkReady   bool                 // immutable state ABI, prepared once for this native engine
 }
 
 func New(config EngineConfig, arch Architecture) (*Engine, error) {
@@ -166,7 +167,7 @@ func (e *Engine) discoverBlock(c CPU, pc uint64, cache *dispatchEntry) *compiled
 	for i := 0; i < e.config.MaxInstructions; i++ {
 		ins, err := e.arch.Fetch(c.MemoryBus(), addr)
 		e.Stats.CodeReads++
-		if err != nil || ins.PC != addr || ins.Length == 0 || ins.Length > 8 || uint64(ins.Length) > ^uint64(0)-addr || uint64(ins.Length)%e.arch.Alignment != 0 {
+		if err != nil || ins.PC != addr || ins.Length == 0 || ins.Length > 15 || uint64(ins.Length) > ^uint64(0)-addr || uint64(ins.Length)%e.arch.Alignment != 0 {
 			break
 		}
 		if ins.InterpretOnly || ins.Memory && !allowMemory {
@@ -281,6 +282,7 @@ func (e *Engine) stepBlock(c CPU, remaining uint64, block *compiledBlock) error 
 	if err != nil {
 		return err
 	}
+	e.observeEdge(block.instructions[len(block.instructions)-1], c.Registers()[e.arch.PC])
 	retired := uint64(len(block.instructions))
 	*c.Retirement() += retired
 	if block.native && e.native != nil {
@@ -292,8 +294,12 @@ func (e *Engine) stepBlock(c CPU, remaining uint64, block *compiledBlock) error 
 }
 func (e *Engine) interpret(c CPU) error {
 	before := *c.Retirement()
+	block := e.blocks[c.Registers()[e.arch.PC]]
 	err := c.Step()
 	e.Stats.Interpreted += *c.Retirement() - before
+	if err == nil && *c.Retirement() == before+1 && block != nil && len(block.instructions) != 0 {
+		e.observeEdge(block.instructions[0], c.Registers()[e.arch.PC])
+	}
 	return err
 }
 

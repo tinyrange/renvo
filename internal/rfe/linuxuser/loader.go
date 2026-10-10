@@ -18,6 +18,9 @@ type ELFABI struct {
 	AllowedFlags   uint32
 	EntryAlignment uint64
 	EntryBytes     int
+	// DirectMemory requests the optional host-mapped backend; unsupported
+	// hosts retain checked pages without changing guest addresses or limits.
+	DirectMemory bool
 }
 
 type Process struct {
@@ -80,6 +83,17 @@ func Load(image []byte, args []string, abi ELFABI, entropy func([]byte) error) (
 		}
 	}
 	m := NewMemory()
+	if abi.DirectMemory {
+		if direct, err := NewDirectMemory(); err == nil {
+			m = direct
+		}
+	}
+	loaded := false
+	defer func() {
+		if !loaded {
+			_ = m.Close()
+		}
+	}()
 	var high, phdr uint64
 	type interval struct{ start, end uint64 }
 	var segments []interval
@@ -181,5 +195,6 @@ func Load(image []byte, args []string, abi ELFABI, entropy func([]byte) error) (
 	end := pageUp(high)
 	p := &Process{Memory: m, Break: end, breakBase: end, mmapNext: 0x100000000}
 	p.Entry, p.StackPointer = entry, cursor
+	loaded = true
 	return p, nil
 }

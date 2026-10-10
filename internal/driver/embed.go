@@ -46,6 +46,7 @@ func expandSourceEmbeds(fs SourceFS, path string, moduleRoot string, src []byte)
 	if !embedSourceContainsDirective(src) {
 		return src, true, 0, ""
 	}
+	scratchStart := arena.Mark()
 	directives, directivesOK, directiveError := parseSourceEmbedDirectives(src)
 	if !directivesOK {
 		return src, false, directiveError, "go:embed"
@@ -118,6 +119,18 @@ func expandSourceEmbeds(fs SourceFS, path string, moduleRoot string, src []byte)
 		last = edits[i].at
 	}
 	out = append(out, src[last:]...)
+	// Only the expanded source escapes a successful expansion. Embedded file
+	// contents, parsed declarations and initializer fragments are scratch.
+	// Retain the result across a reset so those buffers do not accumulate
+	// through the later parse, check and link phases in the fixed arena.
+	if scratchStart != 0 {
+		persistStart := arena.PersistMark()
+		retained := arena.PersistBytes(out)
+		arena.Reset(scratchStart)
+		out = make([]byte, len(retained))
+		copy(out, retained)
+		arena.PersistReset(persistStart)
+	}
 	return out, true, 0, ""
 }
 
@@ -792,7 +805,9 @@ func quoteSourceEmbedExpression(data []byte) []byte {
 	if len(data) <= chunkSize {
 		return quoteSourceEmbedBytes(data)
 	}
-	out := make([]byte, 0, len(data)+len(data)/chunkSize*4)
+	// Include every escape, quote pair, separator, and outer parenthesis.
+	chunks := (len(data) + chunkSize - 1) / chunkSize
+	out := make([]byte, 0, sourceEmbedQuotedSize(data)+5*(chunks-1)+2)
 	out = append(out, '(')
 	for start := 0; start < len(data); start += chunkSize {
 		end := start + chunkSize
@@ -802,7 +817,7 @@ func quoteSourceEmbedExpression(data []byte) []byte {
 		if start > 0 {
 			out = append(out, " + "...)
 		}
-		out = append(out, quoteSourceEmbedBytes(data[start:end])...)
+		out = appendSourceEmbedQuoted(out, data[start:end])
 	}
 	out = append(out, ')')
 	return out
@@ -887,15 +902,20 @@ func compressSourceEmbedArchive(data []byte) []byte {
 			// Both encodings consume a consecutive range. Register it here so
 			// each byte does not require a separate dictionary-update call.
 			end := pos + length
-			for pos < end {
-				if pos+2 < len(data) {
-					hash := (int(data[pos])*251+int(data[pos+1]))*251 + int(data[pos+2])
-					bucket := hash & (bucketCount - 1)
-					previous[pos&4095] = buckets[bucket]
-					buckets[bucket] = int32(pos + 1)
-				}
+			insertEnd := end
+			if insertEnd > len(data)-2 {
+				insertEnd = len(data) - 2
+			}
+			// The final two bytes cannot start a dictionary entry. Hoist that
+			// bound out of the update loop while retaining every reachable entry.
+			for pos < insertEnd {
+				hash := (int(data[pos])*251+int(data[pos+1]))*251 + int(data[pos+2])
+				bucket := hash & (bucketCount - 1)
+				previous[pos&4095] = buckets[bucket]
+				buckets[bucket] = int32(pos + 1)
 				pos++
 			}
+			pos = end
 		}
 		out[flagPos] = flags
 	}
@@ -969,8 +989,23 @@ func sourceEmbedArchiveBucket(data []byte, pos int, bucketCount int) int {
 	return hash & (bucketCount - 1)
 }
 
+func sourceEmbedQuotedSize(data []byte) int {
+	size := len(data) + 2
+	for _, c := range data {
+		if c == '\\' || c == '"' {
+			size++
+		} else if c < 32 || c > 126 {
+			size += 3
+		}
+	}
+	return size
+}
+
 func quoteSourceEmbedBytes(data []byte) []byte {
-	out := make([]byte, 0, len(data)+2)
+	return appendSourceEmbedQuoted(make([]byte, 0, sourceEmbedQuotedSize(data)), data)
+}
+
+func appendSourceEmbedQuoted(out []byte, data []byte) []byte {
 	out = append(out, '"')
 	const hex = "0123456789abcdef"
 	for i := 0; i < len(data); i++ {

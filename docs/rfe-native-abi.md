@@ -61,9 +61,13 @@ Close invalidates owner-bound prepared handles under the arena lock.
 Memory accesses check canonical address, width, page tag and permissions.
 Read and write facts are distinct. Facts may cross leaf transitions only within
 one serialized call and reset at the next host boundary. Exact invariant-address
-facts reuse translation, never loaded data. Stores check generation overflow
-before changing the clock, page epoch or guest bytes. Executable stores take the
-architectural slow path. Mapping/code mutations invalidate engine links.
+facts reuse translation, never loaded data. Generic stores check generation
+overflow before changing the clock, page epoch or guest bytes. Code-versioned
+loops may omit ordinary data-store generation updates only for an explicitly
+registered memory context. All linked host boundaries check that registration;
+a generic context cannot inherit this specialization. Executable stores take
+the architectural slow path. Mapping/protection transitions establish fresh code
+generations and invalidate engine links before admitting executable bytes.
 
 ## Foreign sessions and exits
 
@@ -77,3 +81,19 @@ through the supported foreign-call boundary.
 Misses, faults, traps, cold compilation and mapping work return to Go. Exact
 retired prefixes, remaining budget and memory counts are validated before host
 accounting. A slow-path instruction is not replayed after successful retirement.
+
+## Optional fault-assisted memory
+
+Linux/amd64 with cgo can opt into a reserved guest window through DirectGuest,
+DirectHost and DirectSize context fields. Admission checks the fixed window
+size; emitted code checks the full unsigned guest offset, never masks an address
+into RAM. Only naturally aligned scalar stores use the direct path; other
+accesses retain checked fallbacks. Holes are inaccessible, and executable guest
+pages are not directly writable. Mapping ownership is serialized with native
+calls; engines must stop before guest mappings close.
+
+The arena validates, sorts and pins exact access-PC/recovery-PC/width records.
+A thread-local C scope admits recovery only at those sites and within the scalar
+access's effective address range. Other faults chain to the previous signal
+handler. No Go callback runs in the handler. The direct fields are staged and
+cleared with other borrowed addresses. This experimental mode is off by default.

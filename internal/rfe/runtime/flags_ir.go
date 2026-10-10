@@ -9,6 +9,12 @@ const (
 )
 
 func validFlags(o Op) bool {
+	if o.Kind == ArithmeticStatus {
+		return o.Imm == 8 || o.Imm == 16 || o.Imm == 32 || o.Imm == 64 || o.Imm == 136 || o.Imm == 144 || o.Imm == 160 || o.Imm == 192
+	}
+	if o.Kind == StatusBits {
+		return o.Imm == 8 || o.Imm == 16 || o.Imm == 32 || o.Imm == 64
+	}
 	if o.Kind == ArithmeticCondition || o.Kind == LogicalCondition {
 		if o.Imm>>8 > 15 {
 			return false

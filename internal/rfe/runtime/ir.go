@@ -53,7 +53,11 @@ func (b *Builder) emit(op Op) Value {
 		if op.Imm == 1 || op.Imm == 2 || op.Imm == 4 {
 			mask = (uint64(1) << (op.Imm * 8)) - 1
 		}
-	case ArithmeticCondition, LogicalCondition:
+	case ArithmeticStatus:
+		mask = 0x8d5
+	case StatusBits:
+		mask = 0xc4
+	case ArithmeticCondition, LogicalCondition, ByteParity:
 		mask = 1
 	case UnsignedDivide, SignedDivide, UnsignedRemainder, SignedRemainder:
 		if op.Imm == 32 {
@@ -76,6 +80,14 @@ func (b *Builder) emit(op Op) Value {
 	case VariableShl, VariableShr, ArithmeticShr, RotateRight:
 		if op.Imm == 32 {
 			mask = 0xffffffff
+		}
+	case Mul:
+		// A boolean multiplicand selects either zero or the other operand.
+		// Its possible bits cannot spread as they do in a general product.
+		if b.masks[op.A] <= 1 {
+			mask = b.masks[op.B]
+		} else if b.masks[op.B] <= 1 {
+			mask = b.masks[op.A]
 		}
 	case And:
 		mask = b.masks[op.A] & b.masks[op.B]
@@ -122,6 +134,8 @@ func (b *Builder) Store(slot int, v Value) {
 }
 func operation(k int, a, b uint64) uint64 {
 	switch k {
+	case ByteParity:
+		return byteParity(a)
 	case Add:
 		return a + b
 	case Sub:
@@ -167,6 +181,19 @@ func (b *Builder) Binary(k int, a, c Value) Value {
 		if b.Ops[a].Kind == Const {
 			a, c = c, a
 		}
+		// A zero modular difference tests equality of the participating low
+		// words. Preserve truncation: unequal high bits cannot affect it.
+		if b.Ops[c].Kind == Const && b.Ops[c].Imm == 0 {
+			difference := b.Ops[a]
+			mask := ^uint64(0)
+			if difference.Kind == And && b.Ops[difference.B].Kind == Const {
+				mask = b.Ops[difference.B].Imm
+				difference = b.Ops[difference.A]
+			}
+			if difference.Kind == Sub && mask&(mask+1) == 0 {
+				return b.Binary(Equal, b.Binary(And, difference.A, b.Constant(mask)), b.Binary(And, difference.B, b.Constant(mask)))
+			}
+		}
 		if b.Ops[c].Kind == Const && b.Ops[a].Kind == SelectValue {
 			selected := b.Ops[a]
 			t, f := b.Ops[selected.B], b.Ops[Value(selected.Imm)]
@@ -210,6 +237,32 @@ func (b *Builder) Binary(k int, a, c Value) Value {
 				return a
 			}
 			prior := b.Ops[a]
+			if prior.Kind == ArithmeticStatus {
+				field := mask & 0x8d5
+				if field != 0 && field&(field-1) == 0 {
+					return b.arithmeticStatusField(prior, field)
+				}
+			}
+			// Extract single status fields without materializing the packed word.
+			if prior.Kind == StatusBits {
+				v := b.Binary(And, prior.A, b.Constant(^uint64(0)>>(64-prior.Imm)))
+				switch mask & 0xc4 {
+				case 4:
+					return b.Shift(Shl, b.Binary(Xor, b.ByteParity(v), b.Constant(1)), 2)
+				case 64:
+					return b.Shift(Shl, b.Binary(Equal, v, b.Constant(0)), 6)
+				case 128:
+					return b.Shift(Shl, b.Shift(Shr, v, prior.Imm-1), 7)
+				}
+			}
+			// Push extraction through an immediate shift of a bitfield.
+			// This exposes disjoint fields to the ordinary mask/OR rules.
+			if prior.Kind == Shr && prior.Imm < 64 {
+				source := b.Ops[prior.A]
+				if source.Kind == Or || source.Kind == And || source.Kind == Shl || source.Kind == StatusBits || source.Kind == ArithmeticStatus {
+					return b.Shift(Shr, b.Binary(And, prior.A, b.Constant(mask<<prior.Imm)), prior.Imm)
+				}
+			}
 			// Low-bit truncation commutes with modular addition/subtraction/multiplication:
 			// ((x & m) + y) & m == (x + y) & m for m = 2^n - 1.
 			if mask&(mask+1) == 0 && (prior.Kind == Add || prior.Kind == Sub || prior.Kind == Mul) {
@@ -217,6 +270,16 @@ func (b *Builder) Binary(k int, a, c Value) Value {
 					o := b.Ops[v]
 					if o.Kind == And && b.Ops[o.B].Kind == Const && b.Ops[o.B].Imm&mask == mask {
 						return o.A
+					}
+					// (x XOR sign)-sign changes only bits above that sign bit.
+					// They cannot affect a narrower modular result, even when
+					// the sign extension itself still has an observable user.
+					if o.Kind == Sub && b.Ops[o.B].Kind == Const {
+						sign := b.Ops[o.B].Imm
+						x := b.Ops[o.A]
+						if sign != 0 && sign&(sign-1) == 0 && mask <= sign|(sign-1) && x.Kind == Xor && x.B == o.B {
+							return x.A
+						}
 					}
 					return v
 				}
@@ -250,6 +313,16 @@ func (b *Builder) Binary(k int, a, c Value) Value {
 	return b.emit(Op{Kind: k, A: a, B: c})
 }
 func (b *Builder) Shift(k int, a Value, count uint64) Value {
+	if count == 0 {
+		return a
+	}
+	if count >= 64 {
+		return b.Constant(0)
+	}
+	source := b.Ops[a]
+	if k == Shr && source.Kind == Shl && source.Imm == count && b.masks[source.A]>>(64-count) == 0 {
+		return source.A
+	}
 	if b.Ops[a].Kind == Const {
 		return b.Constant(operation(k, b.Ops[a].Imm, count))
 	}
@@ -397,6 +470,10 @@ func interpretValues(ops []Op, state, values []uint64) {
 			state[o.Imm] = values[o.A]
 		case Shl, Shr:
 			values[i] = operation(o.Kind, values[o.A], o.Imm)
+		case ArithmeticStatus:
+			values[i] = arithmeticStatus(values[o.A], values[o.B], o.Imm)
+		case StatusBits:
+			values[i] = statusBits(values[o.A], o.Imm)
 		case ArithmeticCondition, LogicalCondition:
 			values[i] = 0
 			if conditionFlags(flagsOperation(o.Kind-2, values[o.A], values[o.B], o.Imm&255), int(o.Imm>>8)) {

@@ -151,17 +151,23 @@ func position(source []byte, offset int) Position {
 	if offset > len(source) {
 		offset = len(source)
 	}
-	line := 1
-	column := 1
-	for i := 0; i < offset; i++ {
-		if source[i] == '\n' {
-			line++
-			column = 1
+	return advancePosition(source, Position{Line: 1, Column: 1}, offset)
+}
+
+// advancePosition walks forward from a known byte position. Ordered spans can
+// share a cursor rather than rescanning the whole prefix for every endpoint.
+// Callers supply ordered offsets within source; columns remain byte-based.
+func advancePosition(source []byte, from Position, offset int) Position {
+	for _, ch := range source[from.Offset:offset] {
+		if ch == '\n' {
+			from.Line++
+			from.Column = 1
 		} else {
-			column++
+			from.Column++
 		}
 	}
-	return Position{Offset: offset, Line: line, Column: column}
+	from.Offset = offset
+	return from
 }
 
 func sourceSpan(source []byte, start int, end int) Span {

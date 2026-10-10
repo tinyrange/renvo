@@ -13,6 +13,30 @@ import (
 // execution cannot exceed the independently bounded caller's session budget.
 // Loop entries can only be entered by that checked dispatcher, not CallMemory.
 func (n *Native) CompileLoop(ops []Op, words, instructions int) (int, error) {
+	return n.CompileLoopMode(ops, words, instructions, false)
+}
+
+// CompileLoopMode retains a checked entry body even when direct memory is
+// requested. Only an admitted foreign session with a direct window selects it.
+func (n *Native) CompileLoopMode(ops []Op, words, instructions int, direct bool) (int, error) {
+	return n.compileLoopMode(ops, words, instructions, direct, nil)
+}
+
+// CompileCodeVersionedLoop admits an owned address space whose generations are
+// code stamps, not observable data-write counters. The owner must serialize
+// mapping/execution, keep guest RAM disjoint from host metadata, invalidate
+// descriptors on mapping changes, and assign a fresh generation before making
+// data executable. Executable stores still exit to the architecture.
+// After installation, linked calls accept only contexts explicitly registered
+// through this method; generic contexts retain their original store semantics.
+func (n *Native) CompileCodeVersionedLoop(ops []Op, words, instructions int, memory *MemoryContext) (int, error) {
+	if memory == nil {
+		return 0, fmt.Errorf("missing code-versioned memory owner")
+	}
+	return n.compileLoopMode(ops, words, instructions, false, memory)
+}
+
+func (n *Native) compileLoopMode(ops []Op, words, instructions int, direct bool, codeVersions *MemoryContext) (int, error) {
 	if !linkLayoutOK() || instructions < 1 || instructions > 256 {
 		return 0, fmt.Errorf("invalid native loop dimensions")
 	}
@@ -52,12 +76,33 @@ func (n *Native) CompileLoop(ops []Op, words, instructions int) (int, error) {
 		return 0, fmt.Errorf("missing loop terminator")
 	}
 	records := nativeRecords(ops)
-	code, ok := backendcompiled.RenvoEmitSharedLoopBlock(records, words, instructions, runtime.GOARCH == "arm64")
+	var code []byte
+	var faults []int
+	var ok bool
+	if codeVersions != nil {
+		code, ok = backendcompiled.RenvoEmitCodeVersionedLoopBlock(records, words, instructions, runtime.GOARCH == "arm64")
+	} else if direct && runtime.GOOS == "linux" && runtime.GOARCH == "amd64" && NativeSessionsAvailable() {
+		code, faults, ok = backendcompiled.RenvoEmitDirectLoopBlock(records, words, instructions)
+	} else {
+		code, ok = backendcompiled.RenvoEmitSharedLoopBlock(records, words, instructions, runtime.GOARCH == "arm64")
+	}
 	if !ok {
 		return 0, fmt.Errorf("Renvo could not emit native loop")
 	}
-	entry, err := n.arena.InstallLoopBlock(code, words, instructions)
+	var entry int
+	var err error
+	if len(faults) != 0 {
+		entry, err = n.arena.InstallFaultLoopBlock(code, words, instructions, faults)
+	} else {
+		entry, err = n.arena.InstallLoopBlock(code, words, instructions)
+	}
 	if err == nil {
+		if codeVersions != nil {
+			if n.codeVersionedContexts == nil {
+				n.codeVersionedContexts = make(map[*MemoryContext]bool)
+			}
+			n.codeVersionedContexts[codeVersions] = true
+		}
 		n.Bytes += len(code)
 	}
 	return entry, err
