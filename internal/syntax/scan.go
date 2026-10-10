@@ -374,7 +374,7 @@ func scanTokenCapacity(src []byte) int {
 	capacity := 0
 	// The compact two-word token representation makes this estimate cheaper
 	// than growing and copying the arena while scanning a linked package.
-	capacity = len(src) / 4
+	capacity = len(src) / 5
 	if capacity < 16 {
 		return 16
 	}
