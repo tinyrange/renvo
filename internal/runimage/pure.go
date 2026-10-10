@@ -5,6 +5,7 @@ package runimage
 import (
 	"fmt"
 	"io"
+	"renvo.dev/internal/rfenativebridge"
 	"runtime"
 	"sync"
 	"unsafe"
@@ -15,6 +16,7 @@ import (
 // Installation, calls, and Close are serialized. Entries are offsets, so callers
 // cannot accidentally invoke an arbitrary host address.
 type CodeArena struct {
+	faults       []rfenativebridge.FaultSite
 	mu           sync.Mutex
 	base         uintptr
 	size, used   int
@@ -103,11 +105,30 @@ func (a *CodeArena) installWithBody(code []byte, words uint16, body int) (int, e
 }
 
 func (a *CodeArena) installRecord(code []byte, words uint16, body, instructions int) (int, error) {
+	return a.installFaultRecord(code, words, body, instructions, nil)
+}
+
+// InstallFaultLoopBlock registers only immutable scalar access/recovery sites.
+// Offsets cannot escape the installed fragment; table growth shares the same
+// lock as code installation, native calls, and Close.
+func (a *CodeArena) InstallFaultLoopBlock(code []byte, words, instructions int, faults []int) (int, error) {
+	if words < 1 || words > 256 || instructions < 1 || instructions > 256 || len(faults)%3 != 0 || !rfenativebridge.EnableFaults() {
+		return 0, fmt.Errorf("invalid direct loop dimensions or unavailable fault recovery")
+	}
+	return a.installFaultRecord(code, uint16(words)|32768|8192, 0, instructions, faults)
+}
+func (a *CodeArena) installFaultRecord(code []byte, words uint16, body, instructions int, faults []int) (int, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	at := (a.used + 15) &^ 15
 	if a.base == 0 || a.broken || len(code) == 0 || len(code) > a.size-at || body < 0 || body >= len(code) {
 		return 0, fmt.Errorf("native code arena full or closed")
+	}
+	for i := 0; i < len(faults); i += 3 {
+		pc, recovery, width := faults[i], faults[i+1], faults[i+2]
+		if pc < 0 || pc >= len(code) || recovery < 0 || recovery >= len(code) || i != 0 && pc <= faults[i-3] || width != 1 && width != 2 && width != 4 && width != 8 {
+			return 0, fmt.Errorf("invalid native fault site")
+		}
 	}
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
@@ -118,6 +139,9 @@ func (a *CodeArena) installRecord(code []byte, words uint16, body, instructions 
 	if err := pureSeal(a.base, a.size, at, len(code)); err != nil {
 		a.broken = true
 		return 0, err
+	}
+	for i := 0; i < len(faults); i += 3 {
+		a.faults = append(a.faults, rfenativebridge.FaultSite{PC: a.base + uintptr(at+faults[i]), Recovery: a.base + uintptr(at+faults[i+1]), Width: uintptr(faults[i+2])})
 	}
 	a.used = at + len(code)
 	slot := at >> 4
@@ -171,6 +195,7 @@ func (a *CodeArena) Close() error {
 	if err == nil {
 		a.base = 0
 		a.entries = nil
+		a.faults = nil
 		a.extents = nil
 		a.linkedView = [4]uint64{}
 		a.symbols = nil

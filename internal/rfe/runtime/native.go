@@ -12,6 +12,7 @@ import (
 
 type Native struct {
 	arena                   *runimage.CodeArena
+	codeVersionedContexts   map[*MemoryContext]bool // host-only admission for specialized data stores
 	Bytes                   int
 	SymbolErrors            uint64
 	linkEntry               int
@@ -68,4 +69,11 @@ func (n *Native) Close() error {
 		}
 	}
 	return n.arena.Close()
+}
+
+// CanLinkMemory reports whether a context may enter this arena's linked
+// dispatcher. Once specialized code exists, an unregistered context must use
+// ordinary checked leaves instead. The check is outside generated code.
+func (n *Native) CanLinkMemory(m *MemoryContext) bool {
+	return n.codeVersionedContexts == nil || n.codeVersionedContexts[m]
 }

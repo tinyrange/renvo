@@ -19,10 +19,16 @@ func (e *Engine) runLinked(c CPU, remaining uint64, first *compiledBlock, memory
 		e.Stats.NativeBytes = e.native.Bytes
 		e.Stats.ProfileErrors = e.native.SymbolErrors
 	}
-	if !first.region && (!first.regionAttempted || first.regionGeneration != e.Stats.Promotions) {
+	if !first.regionAttempted || first.regionGeneration != e.Stats.Promotions {
 		e.prepareRegion(c, first)
 		e.Stats.NativeBytes = e.native.Bytes
 		e.Stats.ProfileErrors = e.native.SymbolErrors
+	}
+	// An engine may be reused with another address space. Specialized regions
+	// never confer their owner's contract on a generic context; its ordinary
+	// checked leaves remain usable without entering the specialized dispatcher.
+	if !e.native.CanLinkMemory(context) {
+		return e.stepBlock(c, remaining, first)
 	}
 	pc := c.Registers()[e.arch.PC]
 	entry, instructions := first.entry, len(first.instructions)
@@ -48,7 +54,8 @@ func (e *Engine) runLinked(c CPU, remaining uint64, first *compiledBlock, memory
 		return e.stepBlock(c, remaining, first)
 	}
 	// This publication has completed cold region preparation at the current
-	// promotion generation. Regions are immutable and need no future retry.
+	// promotion generation. Suppress per-quantum retries for an installed region;
+	// the next host-selected session may upgrade it after further promotions.
 	link.Reserved = e.Stats.Promotions
 	if first.region {
 		link.Reserved = ^uint64(0)

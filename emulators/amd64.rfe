@@ -1,0 +1,1825 @@
+RFE 1
+
+-- rfe.json --
+{
+  "format": 1,
+  "name": "amd64",
+  "import": "renvo.dev/emulators/amd64"
+}
+
+-- adapter.go --
+package amd64
+
+import (
+	"renvo.dev/internal/rfe/engine"
+	emu "renvo.dev/internal/rfe/runtime"
+)
+
+const (
+	pcSlot     = 16
+	flagsSlot  = 17
+	stateWords = 18
+)
+
+// Adapter keeps the shared native ABI contiguous without forcing clients to
+// use its representation. Sync at interpreter transitions and schedule edges.
+type Adapter struct {
+	CPU   *CPU
+	state [stateWords]uint64
+}
+
+func NewAdapter(c *CPU) *Adapter { a := &Adapter{CPU: c}; a.Import(); return a }
+func (a *Adapter) Import() {
+	copy(a.state[:16], a.CPU.R[:])
+	a.state[pcSlot] = a.CPU.PC
+	a.state[flagsSlot] = a.CPU.Flags
+}
+func (a *Adapter) Export() {
+	copy(a.CPU.R[:], a.state[:16])
+	a.CPU.PC = a.state[pcSlot]
+	a.CPU.Flags = a.state[flagsSlot]
+}
+func (a *Adapter) Registers() []uint64      { return a.state[:] }
+func (a *Adapter) MemoryBus() engine.Memory { return a.CPU.Memory }
+func (a *Adapter) Retirement() *uint64      { return &a.CPU.Retired }
+func (a *Adapter) Step() error              { a.Export(); err := a.CPU.Step(); a.Import(); return err }
+func (a *Adapter) ExecuteInstruction(i engine.Instruction) error {
+	a.Export()
+	err := a.CPU.Execute(i.Decoded.(Instruction))
+	a.Import()
+	return err
+}
+func Architecture() engine.Architecture {
+	return engine.Architecture{Name: "x86_64", StateWords: stateWords, PC: pcSlot, Alignment: 1, Fetch: fetch, Lower: lower}
+}
+func supported(i Instruction) bool {
+	switch i.Op {
+	case "mov", "movsx", "movzx", "lea", "nop", "jmp", "jcc", "call", "callind", "jmpind", "ret", "push", "pop", "setcc", "cmov", "add", "sub", "cmp", "inc", "dec", "neg", "and", "or", "xor", "test", "not", "imul", "imul3":
+		return true
+	case "shl", "shr", "sar":
+		return i.Width >= 4 || i.Src.Kind == immOperand && i.Src.Imm&31 > 0 && i.Src.Imm&31 < uint64(i.Width)*8
+	case "rol", "ror":
+		return i.Src.Kind == immOperand && i.Src.Imm > 0 && i.Src.Imm < uint64(i.Width)*8
+	}
+	return false
+}
+func fetch(m engine.Memory, pc uint64) (engine.Instruction, error) {
+	i, err := Decode(m, pc)
+	if err != nil {
+		return engine.Instruction{}, err
+	}
+	memory := i.Dst.Kind == memOperand || i.Src.Kind == memOperand
+	switch i.Op {
+	case "call", "callind", "push", "pop", "ret":
+		memory = true
+	case "lea", "nop":
+		memory = false
+	}
+	ins := engine.Instruction{PC: pc, Length: uint8(i.Next - pc), Decoded: i, Memory: memory, InterpretOnly: !supported(i), Flow: engine.Successors{Known: true, Next: i.Next}}
+	switch i.Op {
+	case "jmp":
+		ins.Terminal = true
+		ins.Flow.Next = i.Src.Imm
+	case "jcc":
+		ins.Terminal = true
+		ins.Flow.Next = i.Src.Imm
+		ins.Flow.Alternate = i.Next
+		ins.Flow.Conditional = true
+	case "call":
+		ins.Terminal = true
+		ins.Flow.Next = i.Src.Imm
+	case "callind", "jmpind", "ret", "syscall":
+		ins.Terminal = true
+		ins.Flow.Known = false
+	}
+	return ins, nil
+}
+func lower(b *emu.Builder, ins engine.Instruction, completed int) bool {
+	i := ins.Decoded.(Instruction)
+	if !supported(i) {
+		return false
+	}
+	l := lowerer{b: b, i: i}
+	w := i.Width
+	if ins.Memory {
+		b.Store(pcSlot, b.Constant(i.PC))
+		b.Checkpoint(stateWords, completed)
+	}
+	next := b.Constant(i.Next)
+	if (i.Op == "shl" || i.Op == "shr" || i.Op == "sar") && w < 4 || i.Op == "rol" || i.Op == "ror" {
+		a := l.read(i.Dst, w)
+		n := i.Src.Imm & 31
+		if w == 8 {
+			n = i.Src.Imm & 63
+		}
+		width := uint64(w) * 8
+		var v, carry, overflow emu.Value
+		switch i.Op {
+		case "shl":
+			v = l.narrow(b.Shift(emu.Shl, a, n), w)
+			carry = l.and(b.Shift(emu.Shr, a, width-n), 1)
+			overflow = l.bin(emu.Xor, carry, b.Shift(emu.Shr, v, width-1))
+		case "shr":
+			v = b.Shift(emu.Shr, a, n)
+			carry = l.and(b.Shift(emu.Shr, a, n-1), 1)
+			overflow = b.Shift(emu.Shr, a, width-1)
+		case "sar":
+			v = l.narrow(b.VariableShift(emu.ArithmeticShr, l.sign(a, w), b.Constant(n), 64), w)
+			carry = l.and(b.Shift(emu.Shr, a, n-1), 1)
+			overflow = b.Constant(0)
+		case "rol":
+			v = l.narrow(l.bin(emu.Or, b.Shift(emu.Shl, a, n), b.Shift(emu.Shr, a, width-n)), w)
+			carry = l.and(v, 1)
+			overflow = l.bin(emu.Xor, carry, b.Shift(emu.Shr, v, width-1))
+		case "ror":
+			v = l.narrow(l.bin(emu.Or, b.Shift(emu.Shr, a, n), b.Shift(emu.Shl, a, width-n)), w)
+			carry = b.Shift(emu.Shr, v, width-1)
+			overflow = l.bin(emu.Xor, carry, l.and(b.Shift(emu.Shr, v, width-2), 1))
+		}
+		f := carry
+		if n == 1 {
+			f = l.bin(emu.Or, f, b.Shift(emu.Shl, overflow, 11))
+		}
+		changed := uint64(arithmeticFlags)
+		if i.Op == "rol" || i.Op == "ror" {
+			changed = CF | OF
+		} else {
+			f = l.bin(emu.Or, f, l.szp(v, w))
+		}
+		b.Store(flagsSlot, l.bin(emu.Or, l.and(b.Load(flagsSlot), ^changed), f))
+		l.write(i.Dst, w, v)
+		b.Store(pcSlot, next)
+		return true
+	}
+	switch i.Op {
+	case "nop":
+	case "lea":
+		l.write(i.Dst, w, l.address(i.Src))
+	case "mov", "movsx", "movzx", "cmov":
+		sw := w
+		if i.SourceWidth != 0 {
+			sw = i.SourceWidth
+		}
+		v := l.read(i.Src, sw)
+		if i.Op == "movsx" {
+			v = l.sign(v, sw)
+		}
+		if i.Op == "cmov" {
+			v = b.Choose(l.condition(i.CC), v, l.read(i.Dst, w))
+		}
+		l.write(i.Dst, w, v)
+	case "jmp":
+		next = b.Constant(i.Src.Imm)
+	case "jcc":
+		next = b.Choose(l.condition(i.CC), b.Constant(i.Src.Imm), next)
+	case "jmpind":
+		next = l.read(i.Dst, 8)
+	case "call", "callind":
+		target := b.Constant(i.Src.Imm)
+		if i.Op == "callind" {
+			target = l.read(i.Dst, 8)
+		}
+		sp := l.bin(emu.Sub, b.Load(RSP), b.Constant(8))
+		b.MemoryStore(sp, next, 8)
+		b.Store(RSP, sp)
+		next = target
+	case "push":
+		v := l.read(i.Dst, w)
+		sp := l.bin(emu.Sub, b.Load(RSP), b.Constant(uint64(w)))
+		b.MemoryStore(sp, v, int(w))
+		b.Store(RSP, sp)
+	case "pop", "ret":
+		sp := b.Load(RSP)
+		v := b.MemoryLoad(sp, int(w))
+		sp = l.bin(emu.Add, sp, b.Constant(uint64(w)))
+		if i.Op == "ret" {
+			next = v
+			sp = l.bin(emu.Add, sp, b.Constant(i.Src.Imm))
+			b.Store(RSP, sp)
+		} else {
+			// POP computes its memory destination using the post-increment SP, but
+			// must not commit SP if that destination faults.
+			dst := i.Dst
+			if dst.Kind == memOperand && dst.Base == RSP {
+				dst.Disp += int64(w)
+			}
+			if dst.Kind == memOperand {
+				l.write(dst, w, v)
+				b.Store(RSP, sp)
+			} else {
+				b.Store(RSP, sp)
+				l.write(dst, w, v)
+			}
+		}
+	case "setcc":
+		l.write(i.Dst, 1, l.condition(i.CC))
+	default:
+		a := l.read(i.Dst, w)
+		var rhs emu.Value
+		if i.Src.Kind != 0 {
+			rhs = l.read(i.Src, w)
+		} else {
+			rhs = b.Constant(0)
+		}
+		var v, f emu.Value
+		setFlags := true
+		write := true
+		switch i.Op {
+		case "add", "sub", "cmp", "inc", "dec", "neg":
+			sub := i.Op == "sub" || i.Op == "cmp" || i.Op == "dec" || i.Op == "neg"
+			if i.Op == "inc" || i.Op == "dec" {
+				rhs = b.Constant(1)
+			}
+			if i.Op == "neg" {
+				rhs = a
+				a = b.Constant(0)
+			}
+			k := emu.Add
+			if sub {
+				k = emu.Sub
+			}
+			v = l.narrow(l.bin(k, a, rhs), w)
+			f = l.arithmetic(a, rhs, v, w, sub)
+			if i.Op == "inc" || i.Op == "dec" {
+				f = l.bin(emu.Or, l.and(f, ^CF), l.and(b.Load(flagsSlot), CF))
+			}
+			write = i.Op != "cmp"
+		case "and", "or", "xor", "test":
+			k := emu.And
+			if i.Op == "or" {
+				k = emu.Or
+			}
+			if i.Op == "xor" {
+				k = emu.Xor
+			}
+			v = l.bin(k, a, rhs)
+			f = l.szp(v, w)
+			write = i.Op != "test"
+		case "not":
+			v = l.bin(emu.Xor, a, b.Constant(mask(w)))
+			setFlags = false
+		case "imul", "imul3":
+			if i.Op == "imul3" {
+				a = rhs
+				rhs = b.Constant(i.Dst.Imm & mask(w))
+			}
+			x, y := l.sign(a, w), l.sign(rhs, w)
+			full := l.bin(emu.Mul, x, y)
+			v = l.narrow(full, w)
+			var overflow emu.Value
+			if w == 8 {
+				hi := b.MultiplyHigh(x, y, true)
+				sign := b.VariableShift(emu.ArithmeticShr, v, b.Constant(63), 64)
+				overflow = l.not(l.bin(emu.Equal, hi, sign))
+			} else {
+				overflow = l.not(l.bin(emu.Equal, full, l.sign(v, w)))
+			}
+			f = l.bin(emu.Or, l.and(b.Load(flagsSlot), ^(CF|OF)), l.bin(emu.Mul, overflow, b.Constant(CF|OF)))
+		case "shl", "shr", "sar":
+			width := int(w) * 8
+			count := l.and(rhs, uint64(width-1))
+			kind := emu.VariableShl
+			if i.Op == "shr" {
+				kind = emu.VariableShr
+			}
+			if i.Op == "sar" {
+				kind = emu.ArithmeticShr
+			}
+			v = b.VariableShift(kind, a, count, width)
+			var carry, overflow emu.Value
+			if i.Op == "shl" {
+				carry = l.and(b.VariableShift(emu.VariableShr, a, l.bin(emu.Sub, b.Constant(uint64(width)), count), width), 1)
+				overflow = l.bin(emu.Xor, carry, b.Shift(emu.Shr, v, uint64(width-1)))
+			} else {
+				carry = l.and(b.VariableShift(emu.VariableShr, a, l.bin(emu.Sub, count, b.Constant(1)), width), 1)
+				overflow = b.Constant(0)
+				if i.Op == "shr" {
+					overflow = b.Shift(emu.Shr, a, uint64(width-1))
+				}
+			}
+			overflow = b.Choose(l.bin(emu.Equal, count, b.Constant(1)), b.Shift(emu.Shl, overflow, 11), b.Constant(0))
+			f = l.bin(emu.Or, l.szp(v, w), l.bin(emu.Or, carry, overflow))
+			f = l.bin(emu.Or, l.and(b.Load(flagsSlot), ^arithmeticFlags), f)
+			f = b.Choose(l.bin(emu.Equal, count, b.Constant(0)), b.Load(flagsSlot), f)
+			// A zero count preserves all destination bits, including a 32-bit
+			// register's upper half. Avoid the unconditional zero-extension write.
+			if i.Dst.Kind == regOperand && w == 4 {
+				b.Store(i.Dst.Reg, b.Choose(l.bin(emu.Equal, count, b.Constant(0)), b.Load(i.Dst.Reg), v))
+				write = false
+			}
+		}
+		if setFlags {
+			if i.Op != "imul" && i.Op != "imul3" && i.Op != "shl" && i.Op != "shr" && i.Op != "sar" {
+				f = l.bin(emu.Or, l.and(b.Load(flagsSlot), ^arithmeticFlags), f)
+			}
+			b.Store(flagsSlot, f)
+		}
+		if write {
+			l.write(i.Dst, w, v)
+		}
+	}
+	b.Store(pcSlot, next)
+	return true
+}
+
+type lowerer struct {
+	b *emu.Builder
+	i Instruction
+}
+
+func (l lowerer) bin(k int, a, b emu.Value) emu.Value { return l.b.Binary(k, a, b) }
+func (l lowerer) and(v emu.Value, m uint64) emu.Value { return l.bin(emu.And, v, l.b.Constant(m)) }
+func (l lowerer) not(v emu.Value) emu.Value           { return l.bin(emu.Xor, v, l.b.Constant(1)) }
+func (l lowerer) narrow(v emu.Value, w uint8) emu.Value {
+	if w == 8 {
+		return v
+	}
+	return l.and(v, mask(w))
+}
+func (l lowerer) sign(v emu.Value, w uint8) emu.Value {
+	if w == 8 {
+		return v
+	}
+	// Use the canonical sign-extension expression recognized by the shared
+	// emitter, including signed-load fusion. Narrow first: callers may pass
+	// a full register rather than an already truncated memory value.
+	sign := l.b.Constant(uint64(1) << (8*w - 1))
+	return l.bin(emu.Sub, l.bin(emu.Xor, l.narrow(v, w), sign), sign)
+}
+func (l lowerer) address(o Operand) emu.Value {
+	a := l.b.Constant(uint64(o.Disp))
+	if o.RIP {
+		a = l.bin(emu.Add, a, l.b.Constant(l.i.Next))
+	}
+	if o.Base >= 0 {
+		a = l.bin(emu.Add, a, l.b.Load(o.Base))
+	}
+	if o.Index >= 0 {
+		a = l.bin(emu.Add, a, l.b.Shift(emu.Shl, l.b.Load(o.Index), uint64(o.Scale)))
+	}
+	if o.Addr32 {
+		a = l.and(a, 0xffffffff)
+	}
+	return a
+}
+func (l lowerer) read(o Operand, w uint8) emu.Value {
+	if o.Kind == immOperand {
+		return l.b.Constant(o.Imm & mask(w))
+	}
+	if o.Kind == memOperand {
+		return l.b.MemoryLoad(l.address(o), int(w))
+	}
+	if o.Reg >= 16 {
+		return l.and(l.b.Shift(emu.Shr, l.b.Load(o.Reg-16), 8), 255)
+	}
+	return l.narrow(l.b.Load(o.Reg), w)
+}
+func (l lowerer) write(o Operand, w uint8, v emu.Value) {
+	if o.Kind == memOperand {
+		l.b.MemoryStore(l.address(o), v, int(w))
+		return
+	}
+	v = l.narrow(v, w)
+	if o.Reg >= 16 {
+		r := o.Reg - 16
+		l.b.Store(r, l.bin(emu.Or, l.and(l.b.Load(r), ^uint64(0xff00)), l.b.Shift(emu.Shl, v, 8)))
+		return
+	}
+	if w < 4 {
+		v = l.bin(emu.Or, l.and(l.b.Load(o.Reg), ^mask(w)), v)
+	}
+	l.b.Store(o.Reg, v)
+}
+func (l lowerer) szp(v emu.Value, w uint8) emu.Value {
+	return l.b.StatusBits(v, int(w)*8)
+}
+func (l lowerer) arithmetic(a, b, v emu.Value, w uint8, sub bool) emu.Value {
+	return l.b.ArithmeticStatus(a, b, int(w)*8, sub)
+}
+func (l lowerer) condition(cc uint8) emu.Value {
+	f := l.b.Load(flagsSlot)
+	bit := func(n uint64) emu.Value { return l.and(l.b.Shift(emu.Shr, f, n), 1) }
+	var v emu.Value
+	switch cc >> 1 {
+	case 0:
+		v = bit(11)
+	case 1:
+		v = bit(0)
+	case 2:
+		v = bit(6)
+	case 3:
+		v = l.bin(emu.Or, bit(0), bit(6))
+	case 4:
+		v = bit(7)
+	case 5:
+		v = bit(2)
+	case 6:
+		v = l.bin(emu.Xor, bit(7), bit(11))
+	case 7:
+		v = l.bin(emu.Or, bit(6), l.bin(emu.Xor, bit(7), bit(11)))
+	}
+	if cc&1 != 0 {
+		v = l.not(v)
+	}
+	return v
+}
+
+-- cpu.go --
+package amd64
+
+import (
+	"fmt"
+	"math/bits"
+	"renvo.dev/internal/rfe/engine"
+)
+
+type Memory = engine.Memory
+
+const (
+	RAX = 0
+	RCX = 1
+	RDX = 2
+	RBX = 3
+	RSP = 4
+	RBP = 5
+	RSI = 6
+	RDI = 7
+)
+const (
+	CF uint64 = 1
+	PF uint64 = 4
+	AF uint64 = 16
+	ZF uint64 = 64
+	SF uint64 = 128
+	OF uint64 = 2048
+)
+const arithmeticFlags = CF | PF | AF | ZF | SF | OF
+
+var Syscall = fmt.Errorf("x86-64 syscall")
+
+type CPU struct {
+	R                  [16]uint64
+	PC, Flags, Retired uint64
+	Memory             Memory
+	cache              map[uint64]Instruction
+	stamp              engine.CodeStamp
+}
+
+func mask(w uint8) uint64 {
+	if w == 8 {
+		return ^uint64(0)
+	}
+	return (uint64(1) << (8 * w)) - 1
+}
+func signed(v uint64, w uint8) int64 { return int64(v<<(64-8*w)) >> (64 - 8*w) }
+func (c *CPU) address(o Operand, next uint64) uint64 {
+	a := uint64(o.Disp)
+	if o.RIP {
+		a += next
+	}
+	if o.Base >= 0 {
+		a += c.R[o.Base]
+	}
+	if o.Index >= 0 {
+		a += c.R[o.Index] << o.Scale
+	}
+	if o.Addr32 {
+		a = uint64(uint32(a))
+	}
+	return a
+}
+func (c *CPU) read(o Operand, w uint8, next uint64) (uint64, error) {
+	switch o.Kind {
+	case immOperand:
+		return o.Imm & mask(w), nil
+	case regOperand:
+		if o.Reg >= 16 {
+			return (c.R[o.Reg-16] >> 8) & 255, nil
+		}
+		return c.R[o.Reg] & mask(w), nil
+	case memOperand:
+		return c.Memory.Read(c.address(o, next), int(w), false)
+	}
+	return 0, fmt.Errorf("invalid operand")
+}
+func (c *CPU) write(o Operand, w uint8, next, v uint64) error {
+	v &= mask(w)
+	if o.Kind == memOperand {
+		return c.Memory.Write(c.address(o, next), int(w), v)
+	}
+	if o.Kind != regOperand {
+		return fmt.Errorf("invalid destination")
+	}
+	if o.Reg >= 16 {
+		r := o.Reg - 16
+		c.R[r] = c.R[r]&^uint64(0xff00) | (v << 8)
+		return nil
+	}
+	if w == 4 || w == 8 {
+		c.R[o.Reg] = v
+	} else {
+		c.R[o.Reg] = c.R[o.Reg]&^mask(w) | v
+	}
+	return nil
+}
+func szp(v uint64, w uint8) uint64 {
+	v &= mask(w)
+	f := uint64(0)
+	if v == 0 {
+		f |= ZF
+	}
+	if v&(uint64(1)<<(8*w-1)) != 0 {
+		f |= SF
+	}
+	if bits.OnesCount8(uint8(v))&1 == 0 {
+		f |= PF
+	}
+	return f
+}
+func arithmetic(a, b, carry uint64, w uint8, sub bool) (uint64, uint64) {
+	m := mask(w)
+	a &= m
+	b &= m
+	var v, f uint64
+	if sub {
+		v = (a - b - carry) & m
+		if a < b || carry != 0 && a == b {
+			f |= CF
+		}
+		if ((a^b)&(a^v))&(uint64(1)<<(8*w-1)) != 0 {
+			f |= OF
+		}
+	} else {
+		v = (a + b + carry) & m
+		if v < a || carry != 0 && v == a {
+			f |= CF
+		}
+		if (^(a^b)&(a^v))&(uint64(1)<<(8*w-1)) != 0 {
+			f |= OF
+		}
+	}
+	if (a^b^v)&16 != 0 {
+		f |= AF
+	}
+	return v, f | szp(v, w)
+}
+func condition(flags uint64, cc uint8) bool {
+	c, z, s, o, p := flags&CF != 0, flags&ZF != 0, flags&SF != 0, flags&OF != 0, flags&PF != 0
+	v := false
+	switch cc >> 1 {
+	case 0:
+		v = o
+	case 1:
+		v = c
+	case 2:
+		v = z
+	case 3:
+		v = c || z
+	case 4:
+		v = s
+	case 5:
+		v = p
+	case 6:
+		v = s != o
+	case 7:
+		v = z || s != o
+	}
+	if cc&1 != 0 {
+		return !v
+	}
+	return v
+}
+
+// Step caches decoding only when the memory supplies executable mutation epochs.
+// Unknown buses are fetched each time; guest data is never treated as host code.
+func (c *CPU) Step() error {
+	var i Instruction
+	var ok bool
+	if m, versioned := c.Memory.(engine.CodeContextMemory); versioned {
+		stamp := m.CodeContext()
+		if c.cache == nil || stamp != c.stamp {
+			c.cache = make(map[uint64]Instruction)
+			c.stamp = stamp
+		}
+		i, ok = c.cache[c.PC]
+	}
+	if !ok {
+		var err error
+		i, err = Decode(c.Memory, c.PC)
+		if err != nil {
+			return err
+		}
+		if c.cache != nil {
+			if len(c.cache) >= 65536 {
+				c.cache = make(map[uint64]Instruction)
+			}
+			c.cache[c.PC] = i
+		}
+	}
+	if err := c.Execute(i); err != nil && err != Syscall {
+		return fmt.Errorf("pc=%#x %s: %w", i.PC, i.Op, err)
+	} else {
+		return err
+	}
+}
+func (c *CPU) Execute(i Instruction) error {
+	w := i.Width
+	next := i.Next
+	flags := c.Flags
+	var a, b, v uint64
+	var err error
+	// Reads are performed only for actual input operands. LEA and NOP do not
+	// access memory, and MOV must not read a write-only destination.
+	switch i.Op {
+	case "mov", "movsx", "movzx", "cmov":
+		sw := w
+		if i.SourceWidth != 0 {
+			sw = i.SourceWidth
+		}
+		v, err = c.read(i.Src, sw, next)
+		if err != nil {
+			return err
+		}
+		if i.Op == "movsx" {
+			v = uint64(signed(v, sw))
+		}
+		if i.Op != "cmov" || condition(flags, i.CC) {
+			err = c.write(i.Dst, w, next, v)
+		}
+		// A 32-bit CMOV zero-extends even when its condition is false.
+		if i.Op == "cmov" && w == 4 && !condition(flags, i.CC) {
+			err = c.write(i.Dst, w, next, c.R[i.Dst.Reg])
+		}
+	case "lea":
+		err = c.write(i.Dst, w, next, c.address(i.Src, next))
+	case "nop":
+	case "syscall":
+		c.R[RCX], c.R[11] = next, flags|2
+		c.PC = next
+		c.Retired++
+		return Syscall
+	case "jmp", "jcc":
+		if i.Op == "jmp" || condition(flags, i.CC) {
+			next = i.Src.Imm
+		}
+	case "jmpind", "callind", "call":
+		target := i.Src.Imm
+		if i.Op != "call" {
+			target, err = c.read(i.Dst, 8, next)
+			if err != nil {
+				return err
+			}
+		}
+		if i.Op != "jmpind" {
+			err = c.Memory.Write(c.R[RSP]-8, 8, next)
+			if err != nil {
+				return err
+			}
+			c.R[RSP] -= 8
+		}
+		next = target
+	case "push":
+		v, err = c.read(i.Dst, w, next)
+		if err != nil {
+			return err
+		}
+		err = c.Memory.Write(c.R[RSP]-uint64(w), int(w), v)
+		if err == nil {
+			c.R[RSP] -= uint64(w)
+		}
+	case "pop", "ret", "leave":
+		sp := c.R[RSP]
+		if i.Op == "leave" {
+			sp = c.R[RBP]
+		}
+		v, err = c.Memory.Read(sp, int(w), false)
+		if err != nil {
+			return err
+		}
+		oldSP := c.R[RSP]
+		c.R[RSP] = sp + uint64(w)
+		if i.Op == "ret" {
+			next = v
+			c.R[RSP] += i.Src.Imm
+		} else if i.Op == "leave" {
+			c.R[RBP] = v
+		} else {
+			err = c.write(i.Dst, w, next, v)
+			if err != nil {
+				c.R[RSP] = oldSP
+			}
+		}
+	case "setcc":
+		if condition(flags, i.CC) {
+			v = 1
+		}
+		err = c.write(i.Dst, 1, next, v)
+	case "signpair":
+		v = uint64(signed(c.R[RAX], w) >> 63)
+		err = c.write(Operand{Kind: regOperand, Reg: RDX}, w, next, v)
+	default:
+		a, err = c.read(i.Dst, w, next)
+		if err != nil {
+			return err
+		}
+		if i.Src.Kind != 0 {
+			b, err = c.read(i.Src, w, next)
+			if err != nil {
+				return err
+			}
+		}
+		write := true
+		switch i.Op {
+		case "add", "adc", "sub", "sbb", "cmp", "inc", "dec", "neg":
+			carry := uint64(0)
+			if i.Op == "adc" || i.Op == "sbb" {
+				carry = flags & CF
+			}
+			sub := i.Op == "sub" || i.Op == "sbb" || i.Op == "cmp" || i.Op == "dec" || i.Op == "neg"
+			if i.Op == "inc" || i.Op == "dec" {
+				b = 1
+			}
+			if i.Op == "neg" {
+				b = a
+				a = 0
+			}
+			var f uint64
+			v, f = arithmetic(a, b, carry, w, sub)
+			if i.Op == "inc" || i.Op == "dec" {
+				f = f&^CF | flags&CF
+			}
+			flags = flags&^arithmeticFlags | f
+			write = i.Op != "cmp"
+		case "and", "or", "xor", "test":
+			switch i.Op {
+			case "and", "test":
+				v = a & b
+			case "or":
+				v = a | b
+			case "xor":
+				v = a ^ b
+			}
+			flags = flags&^arithmeticFlags | szp(v, w)
+			write = i.Op != "test"
+		case "not":
+			v = ^a
+		case "shl", "shr", "sar", "rol", "ror":
+			count := b & 31
+			if w == 8 {
+				count = b & 63
+			}
+			v = a
+			if count == 0 {
+				write = false
+				break
+			}
+			width := uint64(w) * 8
+			f := uint64(0)
+			switch i.Op {
+			case "shl":
+				v = a << count
+				if count <= width {
+					f = (a >> (width - count)) & 1
+				}
+				if count == 1 && ((v>>(width-1))&1) != f {
+					f |= OF
+				}
+			case "shr":
+				v = a >> count
+				f = (a >> (count - 1)) & 1
+				if count == 1 && a>>(width-1) != 0 {
+					f |= OF
+				}
+			case "sar":
+				v = uint64(signed(a, w) >> count)
+				if count >= width {
+					f = a >> (width - 1)
+				} else {
+					f = (a >> (count - 1)) & 1
+				}
+			case "rol":
+				n := count % width
+				v = (a << n) | (a >> (width - n))
+				f = v & 1
+				if count == 1 && ((v>>(width-1))&1) != f {
+					f |= OF
+				}
+			case "ror":
+				n := count % width
+				v = (a >> n) | (a << (width - n))
+				f = (v >> (width - 1)) & 1
+				if count == 1 && ((v>>(width-2))&1) != f {
+					f |= OF
+				}
+			}
+			if i.Op == "rol" || i.Op == "ror" {
+				flags = flags&^(CF|OF) | f
+			} else {
+				flags = flags&^arithmeticFlags | f | szp(v, w)
+			}
+		case "imul", "imul3":
+			if i.Op == "imul3" {
+				a = b
+				b = i.Dst.Imm
+			}
+			v = a * b
+			hi, lo := bits.Mul64(uint64(signed(a, w)), uint64(signed(b, w)))
+			if signed(a, w) < 0 {
+				hi -= uint64(signed(b, w))
+			}
+			if signed(b, w) < 0 {
+				hi -= uint64(signed(a, w))
+			}
+			overflow := false
+			if w == 8 {
+				expected := uint64(0)
+				if int64(lo) < 0 {
+					expected = ^uint64(0)
+				}
+				overflow = hi != expected
+			} else {
+				overflow = int64(lo) != signed(v, w)
+			}
+			flags &^= CF | OF
+			if overflow {
+				flags |= CF | OF
+			}
+		case "mul", "imul1":
+			if w == 1 {
+				return fmt.Errorf("byte multiply not implemented")
+			}
+			x := c.R[RAX] & mask(w)
+			hi, lo := bits.Mul64(x, a)
+			if i.Op == "imul1" {
+				hi, lo = bits.Mul64(uint64(signed(x, w)), uint64(signed(a, w)))
+				if signed(x, w) < 0 {
+					hi -= uint64(signed(a, w))
+				}
+				if signed(a, w) < 0 {
+					hi -= uint64(signed(x, w))
+				}
+			}
+			if w < 8 {
+				hi = lo >> (8 * w) & mask(w)
+			}
+			overflow := hi != 0
+			if i.Op == "imul1" {
+				expected := uint64(0)
+				if signed(lo, w) < 0 {
+					expected = mask(w)
+				}
+				overflow = hi != expected
+			}
+			c.write(Operand{Kind: regOperand, Reg: RAX}, w, next, lo)
+			c.write(Operand{Kind: regOperand, Reg: RDX}, w, next, hi)
+			flags &^= CF | OF
+			if overflow {
+				flags |= CF | OF
+			}
+			write = false
+		case "div":
+			if w == 1 {
+				return fmt.Errorf("byte division not implemented")
+			}
+			hi, lo := c.R[RDX]&mask(w), c.R[RAX]&mask(w)
+			if a == 0 || hi >= a {
+				return fmt.Errorf("divide error")
+			}
+			var q, r uint64
+			if w == 8 {
+				q, r = bits.Div64(hi, lo, a)
+			} else {
+				n := hi<<(8*w) | lo
+				q, r = n/a, n%a
+			}
+			if q > mask(w) {
+				return fmt.Errorf("divide overflow")
+			}
+			c.write(Operand{Kind: regOperand, Reg: RAX}, w, next, q)
+			c.write(Operand{Kind: regOperand, Reg: RDX}, w, next, r)
+			write = false
+		case "idiv":
+			if w != 4 {
+				return fmt.Errorf("signed division width %d not implemented", w)
+			}
+			n := int64((c.R[RDX]&0xffffffff)<<32 | c.R[RAX]&0xffffffff)
+			den := signed(a, w)
+			if den == 0 || n == (-1<<63) && den == -1 {
+				return fmt.Errorf("divide error")
+			}
+			q, r := n/den, n%den
+			if q < (-1<<31) || q > (1<<31)-1 {
+				return fmt.Errorf("divide overflow")
+			}
+			c.R[RAX], c.R[RDX] = uint64(uint32(q)), uint64(uint32(r))
+			write = false
+		default:
+			return fmt.Errorf("unimplemented operation %s", i.Op)
+		}
+		if write {
+			err = c.write(i.Dst, w, next, v)
+		}
+	}
+	if err != nil {
+		return err
+	}
+	c.Flags = flags
+	c.PC = next
+	c.Retired++
+	return nil
+}
+
+-- cpu_test.go --
+package amd64
+
+import (
+	"bytes"
+	"renvo.dev/internal/rfe/linuxuser"
+	"testing"
+)
+
+func testCPU(t *testing.T, code []byte) *CPU {
+	t.Helper()
+	m := linuxuser.NewMemory()
+	if err := m.Map(0x1000, 4096, 7); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.WriteBytes(0x1000, code); err != nil {
+		t.Fatal(err)
+	}
+	return &CPU{Memory: m, PC: 0x1000, Flags: 2}
+}
+func step(t *testing.T, c *CPU) {
+	t.Helper()
+	if err := c.Step(); err != nil {
+		t.Fatal(err)
+	}
+}
+func TestRegisterWidthsAndPrefixes(t *testing.T) {
+	c := testCPU(t, []byte{0xb4, 0x12, 0x40, 0xb4, 0x34, 0x66, 0xb8, 0x78, 0x56, 0xb8, 0x44, 0x33, 0x22, 0x11})
+	c.R[RAX] = ^uint64(0)
+	c.R[RSP] = 0x123456789abcde00
+	step(t, c)
+	if c.R[RAX] != 0xffffffffffff12ff {
+		t.Fatal("AH", c.R[RAX])
+	}
+	step(t, c)
+	if c.R[RSP] != 0x123456789abcde34 {
+		t.Fatal("REX SPL", c.R[RSP])
+	}
+	step(t, c)
+	if c.R[RAX] != 0xffffffffffff5678 {
+		t.Fatal("AX merge", c.R[RAX])
+	}
+	step(t, c)
+	if c.R[RAX] != 0x11223344 {
+		t.Fatal("EAX zero extension", c.R[RAX])
+	}
+	// A legacy prefix following REX cancels that REX.
+	c = testCPU(t, []byte{0x48, 0x66, 0xb8, 0x34, 0x12})
+	c.R[0] = ^uint64(0)
+	step(t, c)
+	if c.R[0] != 0xffffffffffff1234 || c.PC != 0x1005 {
+		t.Fatal("prefix order", c)
+	}
+}
+func TestAddressingAndFetchBoundary(t *testing.T) {
+	c := testCPU(t, []byte{0x48, 0x8d, 0x44, 0xcb, 0xf0, 0x48, 0x8d, 0x05, 0x10, 0, 0, 0})
+	c.R[RBX] = 100
+	c.R[RCX] = 3
+	step(t, c)
+	if c.R[0] != 108 {
+		t.Fatal("SIB", c.R[0])
+	}
+	step(t, c)
+	if c.R[0] != 0x101c {
+		t.Fatal("RIP", c.R[0])
+	}
+	c = testCPU(t, []byte{0x67, 0x48, 0x8d, 0x03})
+	c.R[RBX] = 0x100000012
+	step(t, c)
+	if c.R[0] != 18 {
+		t.Fatal("address size wrap", c.R[0])
+	}
+	m := c.Memory.(*linuxuser.Memory)
+	if err := m.Write(0x1fff, 1, 0x90); err != nil {
+		t.Fatal(err)
+	}
+	c.PC = 0x1fff
+	step(t, c) // Must not fetch an unused byte on the unmapped next page.
+	c.PC = 0x1fff
+	m.Write(0x1fff, 1, 0x48)
+	before := c.Retired
+	if err := c.Step(); err == nil || c.Retired != before || c.PC != 0x1fff {
+		t.Fatal("truncated fetch retired")
+	}
+	for _, n := range []int{14, 15} {
+		code := append(bytes.Repeat([]byte{0x66}, n), 0x90)
+		c = testCPU(t, code)
+		err := c.Step()
+		if (err == nil) != (n == 14) {
+			t.Fatal("15-byte maximum", n, err)
+		}
+	}
+}
+func TestArithmeticFlagsExhaustiveByte(t *testing.T) {
+	for _, sub := range []bool{false, true} {
+		for a := 0; a < 256; a++ {
+			for b := 0; b < 256; b++ {
+				for carry := 0; carry < 2; carry++ {
+					result, f := arithmetic(uint64(a), uint64(b), uint64(carry), 1, sub)
+					wide := a + b + carry
+					low := (a & 15) + (b & 15) + carry
+					sa, sb := int(int8(a)), int(int8(b))
+					ss := sa + sb + carry
+					if sub {
+						wide = a - b - carry
+						low = (a & 15) - (b & 15) - carry
+						ss = sa - sb - carry
+					}
+					want := uint64(uint8(wide))
+					wf := uint64(0)
+					if wide < 0 || wide > 255 {
+						wf |= CF
+					}
+					if low < 0 || low > 15 {
+						wf |= AF
+					}
+					if ss < -128 || ss > 127 {
+						wf |= OF
+					}
+					if want == 0 {
+						wf |= ZF
+					}
+					if want >= 128 {
+						wf |= SF
+					}
+					parity := 0
+					for bit := 0; bit < 8; bit++ {
+						parity += int(want >> bit & 1)
+					}
+					if parity%2 == 0 {
+						wf |= PF
+					}
+					if result != want || f != wf {
+						t.Fatalf("a=%d b=%d carry=%d sub=%v: %#x/%#x want %#x/%#x", a, b, carry, sub, result, f, want, wf)
+					}
+				}
+			}
+		}
+	}
+}
+func TestFaultCommitAndCodeInvalidation(t *testing.T) {
+	// ADD dword [RBX],1: the full operand straddles an unmapped page.
+	c := testCPU(t, []byte{0x83, 0x03, 0x01})
+	c.R[RBX] = 0x1ffe
+	before, flags := c.R, c.Flags
+	if err := c.Step(); err == nil || c.R != before || c.Flags != flags || c.Retired != 0 || c.PC != 0x1000 {
+		t.Fatal("imprecise memory fault", err)
+	}
+	m := c.Memory.(*linuxuser.Memory)
+	c.R[RBX] = 0x1800
+	m.Write(0x1800, 4, 0x7fffffff)
+	m.Protect(0x1000, 4096, 5)
+	if err := c.Step(); err == nil || c.Flags != flags || c.Retired != 0 {
+		t.Fatal("read-only RMW committed", err)
+	}
+	m.Protect(0x1000, 4096, 7)
+	m.WriteBytes(0x1000, []byte{0xb8, 1, 0, 0, 0})
+	step(t, c)
+	c.PC = 0x1000
+	m.Write(0x1001, 1, 2)
+	step(t, c)
+	if c.R[0] != 2 {
+		t.Fatal("stale decoded instruction")
+	}
+	m.Protect(0x1000, 4096, 3)
+	c.PC = 0x1000
+	retired := c.Retired
+	if err := c.Step(); err == nil || c.Retired != retired {
+		t.Fatal("revoked code executed")
+	}
+}
+func TestCallStackAndSyscall(t *testing.T) {
+	c := testCPU(t, []byte{0xe8, 1, 0, 0, 0, 0x90, 0xc3})
+	c.R[RSP] = 0x1800
+	step(t, c)
+	if c.PC != 0x1006 || c.R[RSP] != 0x17f8 {
+		t.Fatal("call", c)
+	}
+	step(t, c)
+	if c.PC != 0x1005 || c.R[RSP] != 0x1800 {
+		t.Fatal("ret", c)
+	}
+	c = testCPU(t, []byte{0x0f, 0x05})
+	c.Flags = CF | ZF | 2
+	if err := c.Step(); err != Syscall || c.R[RCX] != 0x1002 || c.R[11] != CF|ZF|2 || c.Retired != 1 {
+		t.Fatal("syscall", err, c)
+	}
+}
+func TestConditionalMoveAndDivideFault(t *testing.T) {
+	c := testCPU(t, []byte{0x0f, 0x44, 0xc1})
+	c.R[0] = ^uint64(0)
+	c.R[1] = 7
+	step(t, c)
+	if c.R[0] != 0xffffffff {
+		t.Fatal("false 32-bit CMOV extension")
+	}
+	c = testCPU(t, []byte{0xf7, 0xf1})
+	c.R[RDX] = 1
+	c.R[RCX] = 1
+	c.R[RAX] = 123
+	before := c.R
+	if err := c.Step(); err == nil || c.R != before || c.Retired != 0 {
+		t.Fatal("divide overflow committed")
+	}
+}
+
+-- decode.go --
+package amd64
+
+import "fmt"
+
+// Operand is a decoded register, immediate, or base/index/displacement address.
+// Register numbers 16..19 represent AH..BH, not extended general registers.
+type Operand struct {
+	Kind             uint8
+	Reg, Base, Index int
+	Scale            uint8
+	Disp             int64
+	Imm              uint64
+	RIP, Addr32      bool
+}
+
+const (
+	regOperand = 1
+	memOperand = 2
+	immOperand = 3
+)
+
+type Instruction struct {
+	PC, Next           uint64
+	Op                 string
+	Dst, Src           Operand
+	Width, SourceWidth uint8
+	CC                 uint8
+}
+type decoder struct {
+	memory     Memory
+	pc, start  uint64
+	rex, width uint8
+	addr32     bool
+	err        error
+}
+
+func (d *decoder) byte() byte {
+	if d.err != nil {
+		return 0
+	}
+	if d.pc-d.start >= 15 {
+		d.err = fmt.Errorf("instruction exceeds 15 bytes at %#x", d.start)
+		return 0
+	}
+	v, e := d.memory.Read(d.pc, 1, true)
+	if e != nil {
+		d.err = e
+		return 0
+	}
+	d.pc++
+	return byte(v)
+}
+func (d *decoder) immediate(n uint8, signed bool) uint64 {
+	var v uint64
+	for i := uint8(0); i < n; i++ {
+		v |= uint64(d.byte()) << (8 * i)
+	}
+	if signed && n < 8 {
+		return uint64(int64(v<<(64-8*n)) >> (64 - 8*n))
+	}
+	return v
+}
+func immediate(v uint64) Operand { return Operand{Kind: immOperand, Imm: v} }
+func (d *decoder) reg(n uint8, w uint8) Operand {
+	if w == 1 && d.rex == 0 && n >= 4 && n < 8 {
+		return Operand{Kind: regOperand, Reg: int(n) + 12}
+	}
+	return Operand{Kind: regOperand, Reg: int(n)}
+}
+func (d *decoder) modrm(w uint8) (Operand, Operand, uint8) {
+	b := d.byte()
+	mode, group, rm := b>>6, (b>>3)&7, b&7
+	r := d.reg(group+((d.rex>>2)&1)*8, w)
+	if mode == 3 {
+		return d.reg(rm+(d.rex&1)*8, w), r, group
+	}
+	m := Operand{Kind: memOperand, Base: -1, Index: -1, Addr32: d.addr32}
+	if rm == 4 {
+		sib := d.byte()
+		base, index := sib&7, (sib>>3)&7
+		m.Scale = sib >> 6
+		if index != 4 || d.rex&2 != 0 {
+			m.Index = int(index + ((d.rex>>1)&1)*8)
+		}
+		if base == 5 && mode == 0 {
+			m.Disp = int64(d.immediate(4, true))
+		} else {
+			m.Base = int(base + (d.rex&1)*8)
+		}
+	} else if rm == 5 && mode == 0 {
+		m.Disp = int64(d.immediate(4, true))
+		m.RIP = true
+	} else {
+		m.Base = int(rm + (d.rex&1)*8)
+	}
+	if mode == 1 {
+		m.Disp += int64(d.immediate(1, true))
+	}
+	if mode == 2 {
+		m.Disp += int64(d.immediate(4, true))
+	}
+	return m, r, group
+}
+func Decode(m Memory, pc uint64) (Instruction, error) {
+	d := decoder{memory: m, pc: pc, start: pc, width: 4}
+	i := Instruction{PC: pc}
+	var op byte
+	operand16 := false
+	for {
+		op = d.byte()
+		if d.err != nil {
+			return i, d.err
+		}
+		if op >= 0x40 && op <= 0x4f {
+			d.rex = op
+			continue
+		}
+		if op == 0x66 {
+			operand16 = true
+			d.rex = 0
+			continue
+		}
+		if op == 0x67 {
+			d.addr32 = true
+			d.rex = 0
+			continue
+		}
+		if op == 0x2e || op == 0x3e || op == 0x26 || op == 0x36 {
+			d.rex = 0
+			continue
+		}
+		break
+	}
+	if operand16 {
+		d.width = 2
+	}
+	if d.rex&8 != 0 {
+		d.width = 8
+	}
+	i.Width = d.width
+	w := d.width
+	immWidth := w
+	if immWidth == 8 {
+		immWidth = 4
+	}
+	alu := []string{"add", "or", "adc", "sbb", "and", "sub", "xor", "cmp"}
+	switch {
+	case op < 0x40 && op&7 <= 5:
+		i.Op = alu[op>>3]
+		if op&1 == 0 {
+			i.Width = 1
+		}
+		if op&7 < 4 {
+			rm, r, _ := d.modrm(i.Width)
+			i.Dst, i.Src = rm, r
+			if op&2 != 0 {
+				i.Dst, i.Src = r, rm
+			}
+		} else {
+			i.Dst = d.reg(0, i.Width)
+			n := immWidth
+			if i.Width == 1 {
+				n = 1
+			}
+			i.Src = immediate(d.immediate(n, w == 8))
+		}
+	case op >= 0x50 && op <= 0x5f:
+		i.Width = 8
+		if operand16 {
+			i.Width = 2
+		}
+		i.Dst = d.reg((op&7)+(d.rex&1)*8, i.Width)
+		i.Op = "push"
+		if op&8 != 0 {
+			i.Op = "pop"
+		}
+	case op == 0x68 || op == 0x6a:
+		i.Op = "push"
+		i.Width = 8
+		n := uint8(4)
+		if operand16 {
+			i.Width = 2
+			n = 2
+		}
+		if op == 0x6a {
+			n = 1
+		}
+		i.Dst = immediate(d.immediate(n, true))
+	case op == 0x69 || op == 0x6b:
+		rm, r, _ := d.modrm(w)
+		i.Op = "imul3"
+		i.Dst, i.Src = r, rm
+		n := immWidth
+		if op == 0x6b {
+			n = 1
+		}
+		i.Dst.Imm = d.immediate(n, true)
+	case op >= 0x70 && op <= 0x7f:
+		i.Op = "jcc"
+		i.CC = op & 15
+		i.Src = immediate(d.immediate(1, true))
+	case op == 0x80 || op == 0x81 || op == 0x83:
+		if op == 0x80 {
+			i.Width = 1
+		}
+		rm, _, g := d.modrm(i.Width)
+		i.Op = alu[g]
+		i.Dst = rm
+		n := immWidth
+		if op != 0x81 {
+			n = 1
+		}
+		i.Src = immediate(d.immediate(n, op == 0x83 || w == 8))
+	case op == 0x84 || op == 0x85 || op == 0x88 || op == 0x89 || op == 0x8a || op == 0x8b || op == 0x8d:
+		if op&1 == 0 {
+			i.Width = 1
+		}
+		rm, r, _ := d.modrm(i.Width)
+		i.Dst, i.Src = rm, r
+		i.Op = "mov"
+		if op == 0x84 || op == 0x85 {
+			i.Op = "test"
+		}
+		if op == 0x8a || op == 0x8b || op == 0x8d {
+			i.Dst, i.Src = r, rm
+		}
+		if op == 0x8d {
+			i.Op = "lea"
+			if rm.Kind != memOperand {
+				i.Op = ""
+			}
+		}
+	case op == 0x90:
+		if d.rex&1 == 0 {
+			i.Op = "nop"
+		}
+	case op == 0x98:
+		i.Op = "movsx"
+		i.Dst = d.reg(0, w)
+		i.Src = d.reg(0, w/2)
+		i.SourceWidth = w / 2
+	case op == 0x99:
+		i.Op = "signpair"
+	case op == 0x63:
+		if w == 8 {
+			rm, r, _ := d.modrm(4)
+			i.Op = "movsx"
+			i.Dst, i.Src = r, rm
+			i.SourceWidth = 4
+		}
+	case op >= 0xb0 && op <= 0xbf:
+		if op < 0xb8 {
+			i.Width = 1
+		}
+		i.Op = "mov"
+		i.Dst = d.reg((op&7)+(d.rex&1)*8, i.Width)
+		i.Src = immediate(d.immediate(i.Width, false))
+	case op == 0xa8 || op == 0xa9:
+		if op == 0xa8 {
+			i.Width = 1
+			immWidth = 1
+		}
+		i.Op = "test"
+		i.Dst = d.reg(0, i.Width)
+		i.Src = immediate(d.immediate(immWidth, w == 8))
+	case op == 0xc0 || op == 0xc1 || op == 0xd0 || op == 0xd1 || op == 0xd2 || op == 0xd3:
+		if op&1 == 0 {
+			i.Width = 1
+		}
+		rm, _, g := d.modrm(i.Width)
+		i.Dst = rm
+		shifts := []string{"rol", "ror", "", "", "shl", "shr", "shl", "sar"}
+		i.Op = shifts[g]
+		if op == 0xc0 || op == 0xc1 {
+			i.Src = immediate(d.immediate(1, false))
+		} else if op == 0xd0 || op == 0xd1 {
+			i.Src = immediate(1)
+		} else {
+			i.Src = d.reg(1, 1)
+		}
+	case op == 0xc2 || op == 0xc3:
+		i.Op = "ret"
+		i.Width = 8
+		if op == 0xc2 {
+			i.Src = immediate(d.immediate(2, false))
+		}
+	case op == 0xc6 || op == 0xc7:
+		if op == 0xc6 {
+			i.Width = 1
+			immWidth = 1
+		}
+		rm, _, g := d.modrm(i.Width)
+		if g == 0 {
+			i.Op = "mov"
+		}
+		i.Dst = rm
+		i.Src = immediate(d.immediate(immWidth, w == 8))
+	case op == 0xc9:
+		i.Op = "leave"
+		i.Width = 8
+		if operand16 {
+			i.Op = ""
+		}
+	case op == 0xe8 || op == 0xe9 || op == 0xeb:
+		i.Op = "jmp"
+		if op == 0xe8 {
+			i.Op = "call"
+		}
+		n := uint8(4)
+		if op == 0xeb {
+			n = 1
+		}
+		i.Src = immediate(d.immediate(n, true))
+	case op == 0xf6 || op == 0xf7:
+		if op == 0xf6 {
+			i.Width = 1
+			immWidth = 1
+		}
+		rm, _, g := d.modrm(i.Width)
+		i.Dst = rm
+		names := []string{"test", "", "not", "neg", "mul", "imul1", "div", "idiv"}
+		i.Op = names[g]
+		if g == 0 {
+			i.Src = immediate(d.immediate(immWidth, w == 8))
+		}
+	case op == 0xfe || op == 0xff:
+		if op == 0xfe {
+			i.Width = 1
+		}
+		rm, _, g := d.modrm(i.Width)
+		i.Dst = rm
+		if g == 0 {
+			i.Op = "inc"
+		}
+		if g == 1 {
+			i.Op = "dec"
+		}
+		if op == 0xff && (g == 2 || g == 4 || g == 6) {
+			i.Width = 8
+			if g == 2 {
+				i.Op = "callind"
+			}
+			if g == 4 {
+				i.Op = "jmpind"
+			}
+			if g == 6 {
+				i.Op = "push"
+				if operand16 {
+					i.Width = 2
+				}
+			}
+		}
+	case op == 0x0f:
+		second := d.byte()
+		switch {
+		case second == 0x05:
+			i.Op = "syscall"
+		case second == 0x1f:
+			_, _, g := d.modrm(w)
+			if g == 0 {
+				i.Op = "nop"
+			}
+		case second >= 0x80 && second <= 0x8f:
+			i.Op = "jcc"
+			i.CC = second & 15
+			i.Src = immediate(d.immediate(4, true))
+		case second >= 0x90 && second <= 0x9f:
+			rm, _, _ := d.modrm(1)
+			i.Op = "setcc"
+			i.CC = second & 15
+			i.Dst = rm
+			i.Width = 1
+		case second >= 0x40 && second <= 0x4f:
+			rm, r, _ := d.modrm(w)
+			i.Op = "cmov"
+			i.CC = second & 15
+			i.Dst, i.Src = r, rm
+		case second == 0xaf:
+			rm, r, _ := d.modrm(w)
+			i.Op = "imul"
+			i.Dst, i.Src = r, rm
+		case second == 0xb6 || second == 0xb7 || second == 0xbe || second == 0xbf:
+			sw := uint8(1)
+			if second&1 != 0 {
+				sw = 2
+			}
+			rm, r, _ := d.modrm(sw)
+			// ModRM.reg is a full destination register, never AH..BH.
+			if r.Reg >= 16 {
+				r.Reg -= 12
+			}
+			i.Op = "movzx"
+			if second >= 0xbe {
+				i.Op = "movsx"
+			}
+			i.Dst, i.Src, i.SourceWidth = r, rm, sw
+		}
+	}
+	if d.err != nil {
+		return i, d.err
+	}
+	if i.Op == "" {
+		return i, fmt.Errorf("unsupported instruction at %#x (opcode %#x)", pc, op)
+	}
+	i.Next = d.pc
+	if i.Op == "jmp" || i.Op == "call" || i.Op == "jcc" {
+		i.Src.Imm += i.Next
+	}
+	return i, nil
+}
+
+-- direct_call_region_test.go --
+package amd64
+
+import (
+	"renvo.dev/internal/rfe/engine"
+	"renvo.dev/internal/rfe/linuxuser"
+	"testing"
+)
+
+func TestNativeDirectCallRegionBudgetsAndStackFault(t *testing.T) {
+	// CALL callee; JMP call; callee: INC RAX; RET.
+	code := []byte{0xe8, 2, 0, 0, 0, 0xeb, 0xf9, 0x48, 0xff, 0xc0, 0xc3}
+	for _, budget := range []uint64{1, 2, 3, 4, 5, 63, 65, 257} {
+		expected, actual := testCPU(t, code), testCPU(t, code)
+		for _, c := range []*CPU{expected, actual} {
+			if err := c.Memory.(*linuxuser.Memory).Map(0x3000, 4096, 3); err != nil {
+				t.Fatal(err)
+			}
+			c.R[RSP] = 0x3800
+		}
+		ins, err := fetch(actual.Memory, actual.PC)
+		if err != nil || !ins.Terminal || !ins.Flow.Known || ins.Flow.Next != 0x1007 {
+			t.Fatal("direct call flow", ins, err)
+		}
+		cfg := engine.DefaultEngineConfig()
+		cfg.IRThreshold, cfg.NativeThreshold = 1, 1
+		e, err := engine.New(cfg, Architecture())
+		if err != nil {
+			t.Fatal(err)
+		}
+		adapter := NewAdapter(actual)
+		// Discover and compile the call and its callee before testing small slices.
+		for actual.Retired < 128 {
+			if err = e.RunQuanta(adapter, 128-actual.Retired); err != nil {
+				t.Fatal(err)
+			}
+		}
+		adapter.Export()
+		actual.R, actual.PC, actual.Flags, actual.Retired = expected.R, expected.PC, expected.Flags, 0
+		adapter.Import()
+		for expected.Retired < budget {
+			step(t, expected)
+		}
+		for actual.Retired < budget {
+			if err = e.RunQuanta(adapter, budget-actual.Retired); err != nil {
+				t.Fatal(err)
+			}
+		}
+		adapter.Export()
+		got, ge := actual.Memory.Read(0x37f8, 8, false)
+		want, we := expected.Memory.Read(0x37f8, 8, false)
+		if actual.R != expected.R || actual.PC != expected.PC || actual.Flags != expected.Flags || actual.Retired != budget || got != want || ge != nil || we != nil {
+			t.Fatal("direct-call slice mismatch", budget, actual, expected, got, want, ge, we)
+		}
+		if e.NativeAvailable() && (e.Stats.Native == 0 || e.Stats.Regions == 0) {
+			t.Fatal("call path did not run native regions", e.Stats)
+		}
+		actual.PC, actual.R[RSP] = 0x1000, 0x3800
+		if err = actual.Memory.(*linuxuser.Memory).Protect(0x3000, 4096, 1); err != nil {
+			t.Fatal(err)
+		}
+		before := *actual
+		adapter.Import()
+		err = e.RunQuanta(adapter, 64)
+		adapter.Export()
+		afterWord, readErr := actual.Memory.Read(0x37f8, 8, false)
+		if err == nil || actual.R != before.R || actual.PC != before.PC || actual.Flags != before.Flags || actual.Retired != before.Retired || readErr != nil || afterWord != got {
+			t.Fatal("call stack fault committed state", err, actual, before, afterWord, got)
+		}
+		if err = e.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+-- native_test.go --
+package amd64
+
+import (
+	"renvo.dev/internal/rfe/engine"
+	"renvo.dev/internal/rfe/linuxuser"
+	"testing"
+)
+
+func TestNativeAndIRInstructionDifferential(t *testing.T) {
+	codes := [][]byte{
+		{0x48, 0x01, 0xd8}, {0x01, 0xd8}, {0x66, 0x01, 0xd8}, {0x00, 0xd8},
+		{0x48, 0x29, 0xd8}, {0x29, 0xd8}, {0x66, 0x29, 0xd8}, {0x28, 0xd8},
+		{0x48, 0x39, 0xd8}, {0x48, 0x21, 0xd8}, {0x48, 0x09, 0xd8}, {0x48, 0x31, 0xd8},
+		{0x48, 0xff, 0xc0}, {0x48, 0xff, 0xc8}, {0x48, 0xf7, 0xd8}, {0x48, 0xf7, 0xd0},
+		{0x48, 0x0f, 0xaf, 0xc3}, {0x0f, 0xaf, 0xc3}, {0x66, 0x0f, 0xaf, 0xc3},
+		{0x48, 0x6b, 0xc3, 0xfd}, {0x0f, 0xb6, 0xc4}, {0x48, 0x0f, 0xbe, 0xc4},
+		{0x48, 0x0f, 0xbf, 0xc3}, {0x48, 0x63, 0xc3}, {0x48, 0x8d, 0x44, 0xcb, 0xf0},
+		{0x48, 0xb8, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88},
+		{0x48, 0xd3, 0xe0}, {0x48, 0xd3, 0xe8}, {0x48, 0xd3, 0xf8},
+		{0xd3, 0xe0}, {0xd3, 0xe8}, {0xd3, 0xf8},
+		{0x66, 0xc1, 0xe0, 3}, {0x66, 0xc1, 0xe8, 3}, {0x66, 0xc1, 0xf8, 3},
+		{0xc0, 0xe0, 3}, {0xc0, 0xe8, 3}, {0xc0, 0xf8, 3},
+		{0x66, 0xc1, 0xc0, 8}, {0xc0, 0xc0, 4}, {0x66, 0xc1, 0xc8, 8}, {0xc0, 0xc8, 4},
+	}
+	for cc := byte(0); cc < 16; cc++ {
+		codes = append(codes, []byte{0x0f, 0x40 + cc, 0xc3}, []byte{0x0f, 0x90 + cc, 0xc0}, []byte{0x70 + cc, 0x10})
+	}
+	values := []uint64{0, 1, 0x7f, 0x80, 0x7fff, 0x8000, 0x7fffffff, 0x80000000, 0xffffffff, 0x7fffffffffffffff, 0x8000000000000000, ^uint64(0)}
+	for _, mode := range []string{"ir", "native"} {
+		for _, code := range codes {
+			base := testCPU(t, code)
+			config := engine.DefaultEngineConfig()
+			config.Mode = mode
+			config.IRThreshold = 1
+			config.NativeThreshold = 1
+			config.MaxInstructions = 1
+			config.MaxRegionInstructions = 1
+			e, err := engine.New(config, Architecture())
+			if err != nil {
+				t.Fatal(err)
+			}
+			for index, v := range values {
+				expected := *base
+				expected.R[0] = v
+				expected.R[RBX] = values[len(values)-1-index]
+				expected.R[RCX] = uint64(index * 7)
+				expected.Flags = uint64(index)*0x111 | 2
+				actual := expected
+				adapter := NewAdapter(&actual)
+				if err = expected.Step(); err != nil {
+					t.Fatal(err)
+				}
+				if err = e.Step(adapter, 1); err != nil {
+					t.Fatalf("%s %x: %v", mode, code, err)
+				}
+				adapter.Export()
+				if actual.R != expected.R || actual.PC != expected.PC || actual.Flags != expected.Flags || actual.Retired != expected.Retired {
+					t.Fatalf("%s code=%x value=%#x: R=%x flags=%x pc=%x; want R=%x flags=%x pc=%x", mode, code, v, actual.R, actual.Flags, actual.PC, expected.R, expected.Flags, expected.PC)
+				}
+			}
+			if e.Stats.IR+e.Stats.Native == 0 {
+				t.Fatalf("%s %x never compiled", mode, code)
+			}
+			if mode == "native" && e.NativeAvailable() && e.Stats.Native == 0 {
+				t.Fatalf("%x never executed native", code)
+			}
+			if err = e.Close(); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+}
+func TestNativeMemoryFaultsAndBudgets(t *testing.T) {
+	// INC RAX; ADD dword [RBX],1; JMP back. The first instruction is permitted
+	// to retire before a protected-memory fault; flags after it must survive.
+	code := []byte{0x48, 0xff, 0xc0, 0x83, 0x03, 1, 0xeb, 0xf8}
+	for _, budget := range []uint64{1, 2, 3, 5, 63, 65, 257} {
+		expected := testCPU(t, code)
+		actual := testCPU(t, code)
+		expected.Memory.(*linuxuser.Memory).Map(0x3000, 4096, 3)
+		actual.Memory.(*linuxuser.Memory).Map(0x3000, 4096, 3)
+		expected.R[RBX] = 0x3000
+		actual.R[RBX] = 0x3000
+		config := engine.DefaultEngineConfig()
+		config.IRThreshold = 1
+		config.NativeThreshold = 1
+		e, err := engine.New(config, Architecture())
+		if err != nil {
+			t.Fatal(err)
+		}
+		adapter := NewAdapter(actual)
+		for expected.Retired < budget {
+			step(t, expected)
+		}
+		for actual.Retired < budget {
+			if err = e.RunQuanta(adapter, budget-actual.Retired); err != nil {
+				t.Fatal(err)
+			}
+		}
+		adapter.Export()
+		if actual.R != expected.R || actual.PC != expected.PC || actual.Flags != expected.Flags || actual.Retired != budget {
+			t.Fatal("budget mismatch", budget, actual, expected)
+		}
+		got, _ := actual.Memory.Read(0x3000, 4, false)
+		want, _ := expected.Memory.Read(0x3000, 4, false)
+		if got != want {
+			t.Fatal("memory", got, want)
+		}
+		actual.PC = 0x1000
+		adapter.Import()
+		m := actual.Memory.(*linuxuser.Memory)
+		if budget == 257 && e.NativeAvailable() && e.Stats.NativeMemory == 0 {
+			t.Fatal("memory never ran native", e.Stats)
+		}
+		m.Protect(0x3000, 4096, 1)
+		before := actual.Retired
+		old := actual.R[0]
+		for actual.Retired-before < 1 {
+			if err = e.RunQuanta(adapter, 3); err != nil {
+				break
+			}
+		}
+		if err == nil {
+			err = e.RunQuanta(adapter, 3)
+		}
+		adapter.Export()
+		if err == nil || actual.PC != 0x1003 || actual.R[0] != old+1 || actual.Retired != before+1 {
+			t.Fatal("precise native fault", err, actual)
+		}
+		if err = e.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+-- signed_memory_test.go --
+package amd64
+
+import (
+	"renvo.dev/internal/rfe/engine"
+	"renvo.dev/internal/rfe/linuxuser"
+	"testing"
+)
+
+func TestNativeSignedMemoryResultsAndFault(t *testing.T) {
+	for _, code := range [][]byte{{0x0f, 0xbe, 3}, {0x0f, 0xbf, 3}, {0x48, 0x0f, 0xbe, 3}, {0x48, 0x0f, 0xbf, 3}, {0x48, 0x63, 3}} {
+		base := testCPU(t, code)
+		m := base.Memory.(*linuxuser.Memory)
+		if err := m.Map(0x3000, 4096, 3); err != nil {
+			t.Fatal(err)
+		}
+		cfg := engine.DefaultEngineConfig()
+		cfg.IRThreshold = 1
+		cfg.NativeThreshold = 1
+		cfg.MaxInstructions = 1
+		cfg.MaxRegionInstructions = 1
+		e, err := engine.New(cfg, Architecture())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, value := range []uint64{0, 0x7f, 0x80, 0xff, 0x7fff, 0x8000, 0xffff, 0x7fffffff, 0x80000000, 0xffffffff} {
+			if err = m.Write(0x3000, 8, value); err != nil {
+				t.Fatal(err)
+			}
+			expected := *base
+			expected.R[RBX] = 0x3000
+			expected.R[RAX] = ^uint64(0)
+			actual := expected
+			adapter := NewAdapter(&actual)
+			step(t, &expected)
+			if err = e.Step(adapter, 1); err != nil {
+				t.Fatal(err)
+			}
+			adapter.Export()
+			if actual.R != expected.R || actual.Flags != expected.Flags || actual.PC != expected.PC {
+				t.Fatalf("code=%x value=%x actual=%x expected=%x", code, value, actual.R, expected.R)
+			}
+		}
+		if e.NativeAvailable() && e.Stats.NativeMemory == 0 {
+			t.Fatal("signed load never ran natively", e.Stats)
+		}
+		actual := *base
+		actual.R[RBX] = 0x3000
+		adapter := NewAdapter(&actual)
+		if err = m.Protect(0x3000, 4096, 0); err != nil {
+			t.Fatal(err)
+		}
+		before := actual.R
+		if err = e.Step(adapter, 1); err == nil {
+			t.Fatal("protected signed load succeeded")
+		}
+		adapter.Export()
+		if actual.R != before || actual.PC != base.PC || actual.Retired != 0 {
+			t.Fatal("fault committed state")
+		}
+		if err = e.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

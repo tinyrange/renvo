@@ -15,7 +15,10 @@ type Memory interface {
 // Instruction describes one architectural instruction, independently of its
 // byte length. PC/Length cover every fetched byte, including a straddling page.
 // Bits is decoder-owned. Class is an optional cached-interpreter classification.
+// Decoded, when set, must be an immutable comparable value. Byte-validation
+// buses compare it along with the instruction extent and control-flow metadata.
 type Instruction struct {
+	Decoded                         any
 	PC                              uint64
 	Bits                            uint64
 	Length                          uint8
@@ -81,4 +84,13 @@ type NativeMemory interface {
 	CodeContextMemory
 	NativeContext() *emu.MemoryContext
 	NativeRefill(uint64)
+}
+
+// CodeVersionedNativeMemory owns disjoint guest RAM and maintains generations
+// for executable code, not for every data write. Mapping and execution must be
+// serialized; permission transitions assign fresh code stamps and forget stale
+// native descriptors. This host capability is never stored in guest RAM.
+type CodeVersionedNativeMemory interface {
+	NativeMemory
+	NativeCodeVersions() bool
 }

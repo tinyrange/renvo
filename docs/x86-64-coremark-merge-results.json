@@ -1,0 +1,35 @@
+{
+  "combined_final": {
+    "exit_code": 0,
+    "iterations_per_second": [
+      7985.291093805211,
+      7969.6299716743415
+    ],
+    "stderr": "retired=65693860697 stats={LoopIterations:4520029871 NativeSessions:1008990 LinkMissStops:6413 BudgetStops:941576 OtherStops:0 Regions:252 RegionExits:1590871263 ProfileErrors:0 Linked:65693725797 Interpreted:60785 IR:72130 Native:65693727782 Blocks:2476 Promotions:311 Invalidations:0 CompileFailures:0 NativeBytes:1479151 NativeMemory:14675729513 MemoryExits:0 CodeReads:16534 VersionChecks:2476 ContextChecks:1084183}\nreal 25.08\nuser 25.38\nsys 0.09\n",
+    "stderr_truncated": false,
+    "stdout": "2K performance run parameters for coremark.\nCoreMark Size    : 666\nTotal ticks      : 12523025\nTotal time (secs): 12\nIterations/Sec   : 8333\nIterations       : 100000\nCompiler version : GCC 16.2.1 20260819 (Red Hat 16.2.1-2)\nCompiler flags   : -O2 -static -nostdlib -fno-builtin -fno-stack-protector -fno-pie -no-pie -march=x86-64 -mtune=generic -mgeneral-regs-only -fno-tree-vectorize -I. -Ihost-port -DITERATIONS=100000 -DPERFORMANCE_RUN=1 -Wl,-e,_start -Wl,--build-id=none\nMemory location  : Stack; 2000 bytes; single context; freestanding Linux x86-64\nseedcrc          : 0xe9f5\n[0]crclist       : 0xe714\n[0]crcmatrix     : 0x1fd7\n[0]crcstate      : 0x8e3a\n[0]crcfinal      : 0xd340\nCorrect operation validated. See README.md for run and reporting rules.\n2K validation run parameters for coremark.\nCoreMark Size    : 666\nTotal ticks      : 12547634\nTotal time (secs): 12\nIterations/Sec   : 8333\nIterations       : 100000\nCompiler version : GCC 16.2.1 20260819 (Red Hat 16.2.1-2)\nCompiler flags   : -O2 -static -nostdlib -fno-builtin -fno-stack-protector -fno-pie -no-pie -march=x86-64 -mtune=generic -mgeneral-regs-only -fno-tree-vectorize -I. -Ihost-port -DITERATIONS=100000 -DPERFORMANCE_RUN=1 -Wl,-e,_start -Wl,--build-id=none\nMemory location  : Stack; 2000 bytes; single context; freestanding Linux x86-64\nseedcrc          : 0x18f2\n[0]crclist       : 0xe3c1\n[0]crcmatrix     : 0x0747\n[0]crcstate      : 0x8d84\n[0]crcfinal      : 0x5c66\nCorrect operation validated. See README.md for run and reporting rules.\n",
+    "stdout_truncated": false,
+    "ticks_us": [
+      12523025,
+      12547634
+    ],
+    "timed_out": false
+  },
+  "restored_control": {
+    "exit_code": 0,
+    "iterations_per_second": [
+      7860.120046041439,
+      7848.212432274832
+    ],
+    "stderr": "retired=65693860697 stats={LoopIterations:4520029871 NativeSessions:1008990 LinkMissStops:6413 BudgetStops:941576 OtherStops:0 Regions:252 RegionExits:1590871263 ProfileErrors:0 Linked:65693725797 Interpreted:60785 IR:72130 Native:65693727782 Blocks:2476 Promotions:311 Invalidations:0 CompileFailures:0 NativeBytes:1482321 NativeMemory:14675729513 MemoryExits:0 CodeReads:16534 VersionChecks:2476 ContextChecks:1084183}\nreal 25.47\nuser 25.71\nsys 0.12\n",
+    "stderr_truncated": false,
+    "stdout": "2K performance run parameters for coremark.\nCoreMark Size    : 666\nTotal ticks      : 12722452\nTotal time (secs): 12\nIterations/Sec   : 8333\nIterations       : 100000\nCompiler version : GCC 16.2.1 20260819 (Red Hat 16.2.1-2)\nCompiler flags   : -O2 -static -nostdlib -fno-builtin -fno-stack-protector -fno-pie -no-pie -march=x86-64 -mtune=generic -mgeneral-regs-only -fno-tree-vectorize -I. -Ihost-port -DITERATIONS=100000 -DPERFORMANCE_RUN=1 -Wl,-e,_start -Wl,--build-id=none\nMemory location  : Stack; 2000 bytes; single context; freestanding Linux x86-64\nseedcrc          : 0xe9f5\n[0]crclist       : 0xe714\n[0]crcmatrix     : 0x1fd7\n[0]crcstate      : 0x8e3a\n[0]crcfinal      : 0xd340\nCorrect operation validated. See README.md for run and reporting rules.\n2K validation run parameters for coremark.\nCoreMark Size    : 666\nTotal ticks      : 12741755\nTotal time (secs): 12\nIterations/Sec   : 8333\nIterations       : 100000\nCompiler version : GCC 16.2.1 20260819 (Red Hat 16.2.1-2)\nCompiler flags   : -O2 -static -nostdlib -fno-builtin -fno-stack-protector -fno-pie -no-pie -march=x86-64 -mtune=generic -mgeneral-regs-only -fno-tree-vectorize -I. -Ihost-port -DITERATIONS=100000 -DPERFORMANCE_RUN=1 -Wl,-e,_start -Wl,--build-id=none\nMemory location  : Stack; 2000 bytes; single context; freestanding Linux x86-64\nseedcrc          : 0x18f2\n[0]crclist       : 0xe3c1\n[0]crcmatrix     : 0x0747\n[0]crcstate      : 0x8d84\n[0]crcfinal      : 0x5c66\nCorrect operation validated. See README.md for run and reporting rules.\n",
+    "stdout_truncated": false,
+    "ticks_us": [
+      12722452,
+      12741755
+    ],
+    "timed_out": false
+  },
+  "scope": "Linux/amd64 native RFE; unchanged scalar x86-64 ELF, 100000 iterations per seed; control removes only latest cold-input and low-word-copy optimizations"
+}

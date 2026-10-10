@@ -16,7 +16,7 @@ const (
 )
 
 type page struct {
-	data        [4096]byte
+	data        *[4096]byte
 	permissions uint8
 	epoch       uint64
 }
@@ -36,7 +36,7 @@ func pageRange(address, length uint64) bool {
 }
 
 func (m *Memory) Map(address, length uint64, permissions uint8) error {
-	if !pageRange(address, length) || permissions&^uint8(7) != 0 || length > MemoryLimit || uint64(len(m.pages))*PageSize > MemoryLimit-length {
+	if m.versions.closed || !pageRange(address, length) || permissions&^uint8(7) != 0 || length > MemoryLimit || uint64(len(m.pages))*PageSize > MemoryLimit-length {
 		return fmt.Errorf("invalid or over-budget mapping")
 	}
 	for at := address; at < address+length; at += PageSize {
@@ -48,8 +48,16 @@ func (m *Memory) Map(address, length uint64, permissions uint8) error {
 	if err != nil {
 		return err
 	}
+	m.clearDirect()
 	for at := address; at < address+length; at += PageSize {
-		m.pages[at/PageSize] = &page{permissions: permissions, epoch: version}
+		var data *[4096]byte
+		if m.versions.direct != nil {
+			data = m.versions.direct.page(at, permissions)
+		}
+		if data == nil {
+			data = new([4096]byte)
+		}
+		m.pages[at/PageSize] = &page{data: data, permissions: permissions, epoch: version}
 	}
 	if permissions&ExecutePermission != 0 {
 		m.versions.codeEpoch = version
@@ -57,7 +65,7 @@ func (m *Memory) Map(address, length uint64, permissions uint8) error {
 	return nil
 }
 func (m *Memory) Protect(address, length uint64, permissions uint8) error {
-	if !pageRange(address, length) || permissions&^uint8(7) != 0 || length > MemoryLimit {
+	if m.versions.closed || !pageRange(address, length) || permissions&^uint8(7) != 0 || length > MemoryLimit {
 		return fmt.Errorf("invalid protection range")
 	}
 	for at := address; at < address+length; at += PageSize {
@@ -68,6 +76,10 @@ func (m *Memory) Protect(address, length uint64, permissions uint8) error {
 	version, err := m.nextVersion()
 	if err != nil {
 		return err
+	}
+	m.clearDirect()
+	if m.versions.direct != nil {
+		m.versions.direct.protect(address, length, permissions)
 	}
 	for at := address; at < address+length; at += PageSize {
 		if (m.pages[at/PageSize].permissions|permissions)&ExecutePermission != 0 {
@@ -95,6 +107,10 @@ func (m *Memory) Unmap(address, length uint64) error {
 			return err
 		}
 		m.versions.codeEpoch = version
+	}
+	m.clearDirect()
+	if m.versions.direct != nil {
+		m.versions.direct.unmap(address, length)
 	}
 	for at := address; at < address+length; at += PageSize {
 		m.forgetPage(at / PageSize)
@@ -183,6 +199,9 @@ func (m *Memory) readChecked(address uint64, size int) uint64 {
 	return value
 }
 func (m *Memory) Read(address uint64, size int, execute bool) (uint64, error) {
+	if !execute {
+		m.selectDirect(address)
+	}
 	permission := ReadPermission
 	if execute {
 		permission = ExecutePermission
@@ -200,6 +219,7 @@ func (m *Memory) Read(address uint64, size int, execute bool) (uint64, error) {
 	return m.readChecked(address, size), nil
 }
 func (m *Memory) Write(address uint64, size int, value uint64) error {
+	m.selectDirect(address)
 	p, err := m.scalarPage(address, size, WritePermission)
 	if err != nil {
 		return err

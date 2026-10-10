@@ -193,3 +193,9 @@ The AArch64 RFE adds an integer CPU, static-ELF Linux personality and bounded
 IR/native tiers with versioned code guards and precise memory exits. See
 [aarch64-user.md](aarch64-user.md) for usage, scope and limits, and
 [rfe-native-abi.md](rfe-native-abi.md) for the native ownership contract.
+
+## x86-64 user mode
+
+The x86-64 RFE adds variable-length scalar integer decoding and a static-ELF
+Linux personality using the same native runtime. See [x86-64-user.md](x86-64-user.md)
+for supported scope, shared optimizations and the optional direct-memory mode.

@@ -1436,7 +1436,203 @@ def cross_corpus(kind, filter):
 repo = repo + module("repo", cross_corpus = cross_corpus)
 
 
+
+# Fixed x86-64 RFE/CoreMark bring-up. Separate artifacts; existing AArch64
+# workflows and resource gates are unchanged. No shell or caller paths/env.
+_X86_COREMARK_ELF = "coremark-x86.elf"
+_X86_COREMARK_RUNNER = "linux-amd64-user"
+
+def coremark_x86_build(iterations):
+    """Build unchanged provisioned CoreMark with the reviewed scalar x86-64 port.
+
+    Review upstream provenance/license and both port copies first. Iterations
+    below scoring duration are correctness-only; require both seed CRC sets and
+    >=10 seconds per seed for a score. No source/flag/path/environment overrides.
+    """
+    if type(iterations) != "int" or iterations < 1 or iterations > 100000000:
+        fail("iterations must be 1 through 100000000")
+    directory = _coremark_directory()
+    for name in ["core_portme.c", "core_portme.h", "start.S"]:
+        if _work().read_file(_COREMARK + "/host-port/" + name) != _work().read_file("emulators/coremark-host-port/" + name):
+            fail("Review and synchronize the fixed host port before building")
+    artifact = _COREMARK + "/" + _X86_COREMARK_ELF
+    if _X86_COREMARK_ELF in _work().list_dir(_COREMARK):
+        _work().delete(artifact)
+    result = privileged.run("gcc", "-O2", "-static", "-nostdlib",
+        "-fno-builtin", "-fno-stack-protector", "-fno-pie", "-no-pie",
+        "-march=x86-64", "-mtune=generic", "-mgeneral-regs-only",
+        "-fno-tree-vectorize", "-I.", "-Ihost-port",
+        "-DITERATIONS=" + str(iterations), "-DPERFORMANCE_RUN=1",
+        "core_list_join.c", "core_main.c", "core_matrix.c", "core_state.c",
+        "core_util.c", "host-port/core_portme.c", "host-port/start.S",
+        "-Wl,-e,_start", "-Wl,--build-id=none", "-o", _X86_COREMARK_ELF,
+        cwd = directory, timeout_ms = 120000, output_limit = 1048576)
+    if (not result.success or result.timed_out) and _X86_COREMARK_ELF in _work().list_dir(_COREMARK):
+        _work().delete(artifact)
+    return result
+
+def coremark_x86_build_runner():
+    """Build only the x86-64 Linux-user RFE runner at its fixed sandbox path."""
+    _coremark_directory()
+    artifact = _COREMARK + "/" + _X86_COREMARK_RUNNER
+    if _X86_COREMARK_RUNNER in _work().list_dir(_COREMARK):
+        _work().delete(artifact)
+    result = privileged.run("go", "run", "./cmd/renvoemu", "build", "-o",
+        _work().path(artifact), "emulators/linux-amd64-user.rfe", cwd = _work(),
+        timeout_ms = 180000, output_limit = 1048576)
+    if (not result.success or result.timed_out) and _X86_COREMARK_RUNNER in _work().list_dir(_COREMARK):
+        _work().delete(artifact)
+    return result
+
+def coremark_x86_format(write = False):
+    """Check or format only the two x86-64 RFE packages; review written diffs."""
+    if type(write) != "bool":
+        fail("write must be a bool")
+    return privileged.run("go", "run", "./cmd/renvofmt",
+        "-w" if write else "-check", "emulators/amd64.rfe",
+        "emulators/linux-amd64-user.rfe", cwd = _work(),
+        timeout_ms = 180000, output_limit = 1048576)
+
+def coremark_x86_disassemble():
+    """Inspect only the fixed x86-64 CoreMark guest ELF; no caller flags."""
+    return privileged.run("objdump", "-d", _X86_COREMARK_ELF,
+        cwd = _coremark_directory(), timeout_ms = 30000, output_limit = 4194304)
+
+def coremark_x86_run(engine, steps = 10000000000):
+    """Time the same x86-64 ELF in RFE, QEMU, or directly on the host.
+
+    Fixed 180s deadline. CRC validation precedes scoring; short runs are not
+    scores. No guest arguments, executable paths, environment or backgrounding.
+    """
+    if engine not in ["interpreter", "ir", "native", "qemu", "host"]:
+        fail("engine must be interpreter, ir, native, qemu, or host")
+    if type(steps) != "int" or steps < 1 or steps > 1000000000000:
+        fail("steps must be 1 through 1000000000000")
+    directory = _coremark_directory()
+    if engine == "host":
+        args = ["./" + _X86_COREMARK_ELF]
+    elif engine == "qemu":
+        args = ["qemu-x86_64", "./" + _X86_COREMARK_ELF]
+    else:
+        args = [_work().path(_COREMARK + "/" + _X86_COREMARK_RUNNER),
+            "-engine", engine, "-steps", str(steps), "-stats", "./" + _X86_COREMARK_ELF]
+    return privileged.run(cwd = directory, timeout_ms = 180000,
+        output_limit = 1048576, *(["/usr/bin/time", "-p"] + args))
+
+def coremark_x86_qemu_version():
+    """Inspect only the installed QEMU x86-64 user-mode version."""
+    return privileged.run("qemu-x86_64", "--version", cwd = _coremark_directory(),
+        timeout_ms = 10000, output_limit = 65536)
+
+def coremark_x86_profile():
+    """Sample only the fixed native x86-64 CoreMark guest at 99 Hz.
+
+    Fixed 180s deadline and 100-billion instruction ceiling; no workload,
+    environment, paths, flags, or resource-gate overrides. Validate both CRC
+    sets and inspect success/truncation before reading the report.
+    """
+    directory = _coremark_directory()
+    artifact = _COREMARK + "/coremark-x86.perf"
+    if "coremark-x86.perf" in _work().list_dir(_COREMARK):
+        _work().delete(artifact)
+    result = privileged.run("perf", "record", "--freq", "99", "--call-graph", "fp",
+        "--output", _work().path(artifact), "--",
+        _work().path(_COREMARK + "/" + _X86_COREMARK_RUNNER),
+        "-engine", "native", "-steps", "100000000000", "-stats", "./" + _X86_COREMARK_ELF,
+        cwd = directory, timeout_ms = 180000, output_limit = 1048576)
+    if not result.success or result.timed_out or result.stdout_truncated or result.stderr_truncated:
+        if "coremark-x86.perf" in _work().list_dir(_COREMARK):
+            _work().delete(artifact)
+    return result
+
+def coremark_x86_profile_report():
+    """Read only the fixed successful x86-64 CoreMark CPU profile."""
+    directory = _coremark_directory()
+    if "coremark-x86.perf" not in _work().list_dir(_COREMARK):
+        fail("No successful x86-64 CoreMark profile is available")
+    return privileged.run("perf", "report", "--stdio", "--no-children",
+        "--percent-limit", "0.5", "--sort", "symbol", "--input",
+        _work().path(_COREMARK + "/coremark-x86.perf"), cwd = directory,
+        timeout_ms = 30000, output_limit = 1048576)
+
+def coremark_x86_profile_code():
+    """Profile the fixed guest with opt-in bounded native-code snapshots.
+
+    Same 99 Hz, 100-billion instruction ceiling and 180-second deadline as
+    profile(). The runtime must implement the reviewed opt-in snapshot hook.
+    No benchmark/port/flag changes, resource-gate changes or caller environment.
+    Inspect both CRC sets and artifact metadata before instruction correlation.
+    """
+    directory = _coremark_directory()
+    artifacts = ["coremark-x86.perf", "native-code.bin", "native-code.meta"]
+    for artifact in artifacts:
+        if artifact in _work().list_dir(_COREMARK):
+            _work().delete(_COREMARK + "/" + artifact)
+    result = privileged.run(
+        "perf", "record", "--freq", "99", "--call-graph", "fp",
+        "--output", _work().path(_COREMARK + "/coremark-x86.perf"), "--",
+        _work().path(_COREMARK + "/linux-amd64-user"),
+        "-engine", "native", "-steps", "100000000000", "-stats", "./coremark-x86.elf",
+        cwd = directory, env = {"RENVO_RFE_PROFILE_CODE": "1"},
+        timeout_ms = 180000, output_limit = 1048576,
+    )
+    if not result.success or result.timed_out or result.stdout_truncated or result.stderr_truncated:
+        for artifact in artifacts:
+            if artifact in _work().list_dir(_COREMARK):
+                _work().delete(_COREMARK + "/" + artifact)
+    return result
+
+def coremark_x86_profile_ips():
+    """Read instruction addresses/symbols from the fixed successful profile.
+
+    No caller-selected data file, arguments, flags, process or environment.
+    """
+    directory = _coremark_directory()
+    if "coremark-x86.perf" not in _work().list_dir(_COREMARK):
+        fail("No successful CoreMark profile is available")
+    return privileged.run(
+        "perf", "script", "--hide-call-graph", "-F", "ip,sym", "-i",
+        _work().path(_COREMARK + "/coremark-x86.perf"),
+        cwd = directory, timeout_ms = 30000, output_limit = 1048576,
+    )
+
+
+def coremark_x86_host_profile():
+    """Profile the unchanged fixed x86-64 guest directly on the host at 999 Hz.
+
+    Diagnostic only: short runs are not CoreMark scores. Fixed 180s deadline,
+    separate output from RFE profiles; no paths, flags, environment or arguments.
+    Inspect process status, truncation and both CRC sets before analysis.
+    """
+    artifact = _COREMARK + "/coremark-x86-host.perf"
+    if "coremark-x86-host.perf" in _work().list_dir(_COREMARK):
+        _work().delete(artifact)
+    result = privileged.run("perf", "record", "--freq", "999", "--call-graph", "fp",
+        "--output", _work().path(artifact), "--", "./" + _X86_COREMARK_ELF,
+        cwd = _coremark_directory(), timeout_ms = 180000, output_limit = 1048576)
+    if not result.success or result.timed_out or result.stdout_truncated or result.stderr_truncated:
+        if "coremark-x86-host.perf" in _work().list_dir(_COREMARK):
+            _work().delete(artifact)
+    return result
+
+def coremark_x86_host_profile_ips():
+    """Read bounded exclusive sampled IPs from the fixed native-host profile."""
+    if "coremark-x86-host.perf" not in _work().list_dir(_COREMARK):
+        fail("No successful native-host profile is available")
+    return privileged.run("perf", "script", "--hide-call-graph", "-F", "ip,sym",
+        "-i", _work().path(_COREMARK + "/coremark-x86-host.perf"),
+        cwd = _coremark_directory(), timeout_ms = 30000, output_limit = 1048576)
+
+coremark_x86 = module("coremark_x86", host_profile = coremark_x86_host_profile, host_profile_ips = coremark_x86_host_profile_ips, build = coremark_x86_build,
+    build_runner = coremark_x86_build_runner, format = coremark_x86_format,
+    disassemble = coremark_x86_disassemble, run = coremark_x86_run,
+    qemu_version = coremark_x86_qemu_version, profile = coremark_x86_profile,
+    profile_report = coremark_x86_profile_report,
+    profile_code = coremark_x86_profile_code, profile_ips = coremark_x86_profile_ips,
+    native_disassemble = coremark_native_disassemble)
+
 environment = {
+    "coremark_x86": coremark_x86,
     "compiler_perf": compiler_perf,
     "workspace": workspace, "git": git, "go": go, "repo": repo, "coremark": coremark,
     "propose_agents_star": propose_agents_star, "publication": publication,

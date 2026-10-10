@@ -27,6 +27,7 @@ const (
 	sessionRemainingWord   = unsafe.Offsetof(LinkedContextABI{}.Remaining) / 8
 	sessionTotalWord       = unsafe.Offsetof(LinkedContextABI{}.Total) / 8
 	sessionMemoryWord      = unsafe.Offsetof(LinkedContextABI{}.MemoryTotal) / 8
+	sessionDirectWord      = unsafe.Offsetof(LinkedContextABI{}.DirectGuest) / 8
 )
 
 func ForeignSessionsAvailable() bool { return rfenativebridge.Available }
@@ -85,8 +86,10 @@ func (c *LinkedCall) CallSession(state []uint64, m *LinkedContextABI, budget uin
 		// observable in their authoritative public table on every selection.
 		copy(image[:sessionPrefixWords], unsafe.Slice((*uint64)(unsafe.Pointer(m)), sessionPrefixWords))
 		image[sessionExitsWord], image[sessionIterationsWord] = 0, 0
+		image[sessionDirectWord], image[sessionDirectWord+1], image[sessionDirectWord+2] = m.DirectGuest, m.DirectHost, m.DirectSize
 		defer func() {
 			clear(image[:sessionPrefixWords])
+			clear(image[sessionDirectWord : sessionDirectWord+3])
 			image[sessionTargetsWord], image[sessionDescriptorsWord], image[sessionEpochWord] = 0, 0, 0
 		}() // integer addresses must not outlive their pins
 		pins.Pin(m) // native reads only its pointer-free Blocks field
@@ -109,7 +112,10 @@ func (c *LinkedCall) CallSession(state []uint64, m *LinkedContextABI, budget uin
 		copy(image[sessionCodeViewWord:sessionPrefixWords], a.linkedView[:])
 		image[sessionTargetsWord] = uint64(uintptr(unsafe.Pointer(&a.targets[0])))
 		image[sessionDescriptorsWord] = uint64(uintptr(unsafe.Pointer(&m.Blocks[0])))
-		rfenativebridge.Call(c.entry, unsafe.Pointer(&nativeState[0]), unsafe.Pointer(image), c.top)
+		if len(a.faults) != 0 {
+			pins.Pin(&a.faults[0])
+		}
+		rfenativebridge.CallFaults(c.entry, unsafe.Pointer(&nativeState[0]), unsafe.Pointer(image), c.top, a.faults)
 		copy(state, nativeState)
 		m.Retired, m.Status, m.Address = image[0], image[1], image[2]
 		m.Remaining, m.Total, m.MemoryTotal = image[sessionRemainingWord], image[sessionTotalWord], image[sessionMemoryWord]

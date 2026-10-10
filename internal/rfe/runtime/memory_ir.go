@@ -167,7 +167,9 @@ type NativeContext = rfeabi.Context
 
 // MemoryContext is the checked native-memory ABI, owned by one single-threaded
 // address space and shared by its aliases. Native stores require non-executable
-// writable pages and allocate a fresh clock generation before changing bytes.
+// writable pages and normally allocate a fresh clock generation before changing
+// bytes. Explicitly admitted code-versioned loops omit data-write generations;
+// their owner must maintain code stamps at mapping and executable transitions.
 // Executable stores, cross-page accesses and cache misses exit to architecture.
 // Status: 0 success; 1 access slow path (Address); 2 failed non-memory guard;
 // 3 invalid linked progress (a host implementation error, not a guest trap);

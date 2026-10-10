@@ -9,6 +9,8 @@ import (
 // Copies of a Memory share both the page map and version clock, so they cannot
 // accidentally reuse a generation when updating aliased pages.
 type memoryVersions struct {
+	direct    directMemory
+	closed    bool
 	identity  *engine.CodeIdentity
 	epoch     uint64
 	codeEpoch uint64             // last mutation affecting executable pages
@@ -46,7 +48,10 @@ func (m *Memory) markWritten(p *page, version uint64) {
 }
 
 // commit is used only after a full-range write check. Every touched page gets
-// a fresh generation, including non-executable pages that may become executable.
+// a fresh generation. Owned native non-executable stores need no generation:
+// they cannot change a valid code stamp, and Protect assigns a fresh generation
+// before such a page becomes executable. Executable stores always exit native
+// code before mutation, then use this checked invalidation path.
 func (m *Memory) commit(address uint64, data []byte) error {
 	if len(data) == 0 {
 		return nil

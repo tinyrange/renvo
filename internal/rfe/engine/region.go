@@ -32,12 +32,12 @@ func (e *Engine) regionParts(c CPU, first *compiledBlock) []regionPart {
 	// native execution. A failed taken edge must not hide a fallthrough cycle.
 	attempts := 0
 	best := []regionPart(nil)
-	bestInstructions := 0
-	var search func(int) []regionPart
-	search = func(total int) []regionPart {
-		if len(parts) > 1 && total > bestInstructions {
+	bestScore := float64(0)
+	var search func(int, float64, float64) []regionPart
+	search = func(total int, score, probability float64) []regionPart {
+		if len(parts) > 1 && score > bestScore {
 			best = append([]regionPart(nil), parts...)
-			bestInstructions = total
+			bestScore = score
 		}
 		current := parts[len(parts)-1]
 		if len(current.block.instructions) == 0 || !current.block.instructions[len(current.block.instructions)-1].Flow.Known {
@@ -55,6 +55,14 @@ func (e *Engine) regionParts(c CPU, first *compiledBlock) []regionPart {
 				targets = append(targets, alternate)
 			}
 		}
+		counts := e.edgeCounts[current.block.instructions[len(current.block.instructions)-1].PC]
+		if conditional && counts[0]+counts[1] != 0 {
+			if counts[1] > counts[0] {
+				targets = []uint64{alternate, next}
+			} else {
+				targets = []uint64{next, alternate}
+			}
+		}
 		for _, target := range targets {
 			attempts++
 			if attempts > 256 {
@@ -69,7 +77,15 @@ func (e *Engine) regionParts(c CPU, first *compiledBlock) []regionPart {
 			}
 			seen[target] = true
 			parts = append(parts, regionPart{target, candidate})
-			result := search(total + len(candidate.instructions))
+			reach := probability
+			if conditional && counts[0]+counts[1] != 0 {
+				edge := 0
+				if target == alternate {
+					edge = 1
+				}
+				reach *= float64(counts[edge]+1) / float64(counts[0]+counts[1]+2)
+			}
+			result := search(total+len(candidate.instructions), score+reach*float64(len(candidate.instructions)), reach)
 			parts = parts[:len(parts)-1]
 			delete(seen, target)
 			if len(result) != 0 {
@@ -78,14 +94,14 @@ func (e *Engine) regionParts(c CPU, first *compiledBlock) []regionPart {
 		}
 		return nil
 	}
-	if cycle := search(len(first.instructions)); len(cycle) != 0 {
+	if cycle := search(len(first.instructions), float64(len(first.instructions)), 1); len(cycle) != 0 {
 		return cycle
 	}
 	return best
 }
 
 func (e *Engine) prepareRegion(c CPU, block *compiledBlock) {
-	if block.region || !block.native || e.native == nil || block.regionAttempted && block.regionGeneration == e.Stats.Promotions {
+	if !block.native || e.native == nil || block.regionAttempted && block.regionGeneration == e.Stats.Promotions {
 		return
 	}
 	block.regionAttempted = true
@@ -98,7 +114,7 @@ func (e *Engine) prepareRegion(c CPU, block *compiledBlock) {
 	for _, part := range parts {
 		count += len(part.block.instructions)
 	}
-	if count > e.config.MaxRegionInstructions {
+	if count > e.config.MaxRegionInstructions || block.region && count <= block.regionInstructions {
 		return
 	}
 	var b emu.Builder
@@ -136,7 +152,19 @@ func (e *Engine) prepareRegion(c CPU, block *compiledBlock) {
 	} else {
 		b.LoopContinue(b.Binary(emu.Equal, b.Load(e.arch.PC), b.Constant(pc)))
 	}
-	entry, err := e.native.CompileLoop(b.FinishMemory(e.arch.StateWords), e.arch.StateWords, count)
+	direct := false
+	if memory, ok := c.MemoryBus().(NativeMemory); ok && e.config.MaxNativeInstructions > 64 {
+		context := memory.NativeContext()
+		direct = context != nil && context.DirectSize == 64<<20
+	}
+	ops := b.FinishMemory(e.arch.StateWords)
+	var entry int
+	var err error
+	if memory, ok := c.MemoryBus().(CodeVersionedNativeMemory); ok && memory.NativeCodeVersions() && !direct {
+		entry, err = e.native.CompileCodeVersionedLoop(ops, e.arch.StateWords, count, memory.NativeContext())
+	} else {
+		entry, err = e.native.CompileLoopMode(ops, e.arch.StateWords, count, direct)
+	}
 	if err != nil {
 		e.Stats.CompileFailures++
 		return
@@ -165,4 +193,29 @@ func (e *Engine) prepareRegion(c CPU, block *compiledBlock) {
 	e.Stats.NativeBytes = e.native.Bytes
 	_ = e.native.NameEntry(entry, fmt.Sprintf("%s_%x_region_%d_instructions", e.arch.Name, pc, count))
 	e.Stats.ProfileErrors = e.native.SymbolErrors
+}
+
+// Only completed low-tier instructions provide observations. Native-region
+// discovery remains bounded and every selected edge is still guarded.
+func (e *Engine) observeEdge(ins Instruction, next uint64) {
+	if !ins.Flow.Known || !ins.Flow.Conditional || ins.Flow.Next == ins.Flow.Alternate {
+		return
+	}
+	edge := 0
+	if next == ins.Flow.Alternate {
+		edge = 1
+	} else if next != ins.Flow.Next {
+		return
+	}
+	if e.edgeCounts == nil {
+		e.edgeCounts = map[uint64][2]uint64{}
+	}
+	counts, exists := e.edgeCounts[ins.PC]
+	if !exists && len(e.edgeCounts) >= e.config.MaxBlocks {
+		return
+	}
+	if counts[0]+counts[1] < 65536 {
+		counts[edge]++
+		e.edgeCounts[ins.PC] = counts
+	}
 }

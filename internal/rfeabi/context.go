@@ -28,4 +28,6 @@ type Context struct {
 	Blocks                                     [1024]Descriptor
 	LoopExits, LoopIterations, PreparedTargets uint64
 	DescriptorBase, AdmissionEpoch             uint64
+	// Owned direct window; usable only by registered foreign fault sites.
+	DirectGuest, DirectHost, DirectSize uint64
 }

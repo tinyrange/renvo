@@ -1,0 +1,268 @@
+RFE 1
+
+-- rfe.json --
+{
+  "format": 1,
+  "name": "linux-amd64-user",
+  "import": "renvo.dev/emulators/amd64user",
+  "entry": "Main",
+  "requires": [
+    {
+      "name": "amd64"
+    }
+  ]
+}
+
+-- process.go --
+package amd64user
+
+import (
+	"crypto/rand"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"renvo.dev/emulators/amd64"
+	"renvo.dev/internal/rfe/engine"
+	"renvo.dev/internal/rfe/linuxuser"
+	"time"
+)
+
+type Process struct {
+	*linuxuser.Process
+	CPU    amd64.CPU
+	Config engine.EngineConfig
+	Stats  engine.Stats
+}
+
+func Load(image []byte, args []string) (*Process, error) {
+	return LoadWithDirectMemory(image, args, false)
+}
+
+// LoadWithDirectMemory opts into the experimental fault-assisted backend.
+// Unsupported hosts retain checked memory. Close the process after all engines
+// have stopped to release its mapped guest views.
+func LoadWithDirectMemory(image []byte, args []string, direct bool) (*Process, error) {
+	p, err := linuxuser.Load(image, args, linuxuser.ELFABI{Machine: 62, EntryAlignment: 1, EntryBytes: 1, DirectMemory: direct}, func(b []byte) error { _, err := rand.Read(b); return err })
+	if err != nil {
+		return nil, err
+	}
+	start := time.Now()
+	p.Clock = func(clock uint64) (int64, int64, bool) {
+		if clock == 0 {
+			n := time.Now()
+			return n.Unix(), int64(n.Nanosecond()), true
+		}
+		if clock == 1 {
+			n := time.Since(start)
+			return int64(n / time.Second), int64(n % time.Second), true
+		}
+		return 0, 0, false
+	}
+	result := &Process{Process: p, Config: engine.DefaultEngineConfig()}
+	result.Config.Mode = "interpreter"
+	result.CPU = amd64.CPU{Memory: p.Memory, PC: p.Entry, Flags: 2}
+	result.CPU.R[amd64.RSP] = p.StackPointer
+	return result, nil
+}
+
+// Translate only explicitly supported Linux x86-64 calls. Unknown numbers
+// cannot accidentally select a service from the common service numbering.
+func service(number uint64) uint64 {
+	switch number {
+	case 1:
+		return 64
+	case 60:
+		return 93
+	case 231:
+		return 94
+	case 228:
+		return 113
+	case 39:
+		return 172
+	case 186:
+		return 178
+	case 12:
+		return 214
+	case 9:
+		return 222
+	case 11:
+		return 215
+	case 10:
+		return 226
+	}
+	return ^uint64(0)
+}
+func (p *Process) Run(limit uint64, output, diagnostics io.Writer) (int, error) {
+	c := &p.CPU
+	var e *engine.Engine
+	var adapter *amd64.Adapter
+	if p.Config.Mode != "interpreter" {
+		var err error
+		e, err = engine.New(p.Config, amd64.Architecture())
+		if err != nil {
+			return 0, err
+		}
+		adapter = amd64.NewAdapter(c)
+		defer func() { p.Stats = e.Stats; e.Close() }()
+	}
+	for c.Retired < limit {
+		var err error
+		if e == nil {
+			err = c.Step()
+			p.Stats.Interpreted = c.Retired
+		} else {
+			err = e.RunQuanta(adapter, limit-c.Retired)
+			adapter.Export()
+		}
+
+		if err == amd64.Syscall {
+			args := [6]uint64{c.R[7], c.R[6], c.R[2], c.R[10], c.R[8], c.R[9]}
+			result, exited, code := p.Process.Syscall(service(c.R[0]), args, output, diagnostics)
+			if exited {
+				return code, nil
+			}
+			c.R[0] = result
+			if adapter != nil {
+				adapter.Import()
+			}
+		} else if err != nil {
+			return 0, err
+		}
+	}
+	return 0, fmt.Errorf("instruction budget exhausted after %d instructions", c.Retired)
+}
+func Main(args []string) int {
+	flags := flag.NewFlagSet("linux-amd64-user", flag.ContinueOnError)
+	mode := flags.String("engine", "native", "interpreter, ir, or native")
+	steps := flags.Uint64("steps", 100000000, "absolute guest instruction limit")
+	stats := flags.Bool("stats", false, "print retirement statistics")
+	direct := flags.Bool("direct-memory", false, "experimental fault-assisted memory (Linux/amd64 with cgo)")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if *mode != "interpreter" && *mode != "ir" && *mode != "native" {
+		fmt.Fprintln(os.Stderr, "unknown execution engine")
+		return 2
+	}
+	if flags.NArg() == 0 {
+		fmt.Fprintln(os.Stderr, "usage: linux-amd64-user [-steps n] [-direct-memory] static-elf [args...]")
+		return 2
+	}
+	file, err := os.Open(flags.Arg(0))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	image, err := io.ReadAll(io.LimitReader(file, (64<<20)+1))
+	closeErr := file.Close()
+	if err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	p, err := LoadWithDirectMemory(image, flags.Args(), *direct)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer p.Close()
+	p.Config.Mode = *mode
+	p.Config.ProfileNative = *stats
+	code, err := p.Run(*steps, os.Stdout, os.Stderr)
+	if *stats {
+		fmt.Fprintf(os.Stderr, "retired=%d stats=%+v\n", p.CPU.Retired, p.Stats)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	return code
+}
+
+-- process_test.go --
+package amd64user
+
+import (
+	"bytes"
+	"encoding/binary"
+	"testing"
+)
+
+func tinyELF() []byte {
+	image := make([]byte, 0x200)
+	copy(image, []byte{0x7f, 'E', 'L', 'F', 2, 1, 1})
+	put16, put32, put64 := binary.LittleEndian.PutUint16, binary.LittleEndian.PutUint32, binary.LittleEndian.PutUint64
+	put16(image[16:], 2)
+	put16(image[18:], 62)
+	put32(image[20:], 1)
+	put64(image[24:], 0x400100)
+	put64(image[32:], 64)
+	put16(image[52:], 64)
+	put16(image[54:], 56)
+	put16(image[56:], 1)
+	put32(image[64:], 1)
+	put32(image[68:], 5)
+	put64(image[80:], 0x400000)
+	put64(image[96:], uint64(len(image)))
+	put64(image[104:], uint64(len(image)))
+	put64(image[112:], 4096)
+	// write(1,"ok\n",3); exit(7).
+	copy(image[0x100:], []byte{0xb8, 1, 0, 0, 0, 0xbf, 1, 0, 0, 0, 0xbe, 0x80, 1, 0x40, 0, 0xba, 3, 0, 0, 0, 0x0f, 5, 0xbf, 7, 0, 0, 0, 0xb8, 60, 0, 0, 0, 0x0f, 5})
+	copy(image[0x180:], "ok\n")
+	return image
+}
+func TestELFWriteExitAndAbsoluteBudget(t *testing.T) {
+	for _, mode := range []string{"interpreter", "ir", "native"} {
+		p, err := Load(tinyELF(), []string{"test"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		p.Config.Mode = mode
+		p.Config.IRThreshold = 1
+		p.Config.NativeThreshold = 1
+		var out bytes.Buffer
+		_, err = p.Run(4, &out, nil)
+		if err == nil || p.CPU.Retired != 4 || out.Len() != 0 {
+			t.Fatal("absolute budget before syscall", mode, err, p.CPU.Retired)
+		}
+		code, err := p.Run(8, &out, nil)
+		if err != nil || code != 7 || out.String() != "ok\n" || p.CPU.Retired != 8 {
+			t.Fatal("write/exit", mode, code, err, out.String(), p.CPU.Retired)
+		}
+	}
+	bad := tinyELF()
+	binary.LittleEndian.PutUint16(bad[18:], 183)
+	if _, err := Load(bad, nil); err == nil {
+		t.Fatal("accepted wrong guest machine")
+	}
+}
+func TestUnknownSyscallCannotAliasServiceNumbers(t *testing.T) {
+	for _, n := range []uint64{64, 93, 94, 113, 172, 178, 214, 222, 215, 226} {
+		if service(n) != ^uint64(0) {
+			t.Fatal("guest number aliases common service", n)
+		}
+	}
+}
+
+func TestDirectMemoryELFWriteExit(t *testing.T) {
+	for _, mode := range []string{"interpreter", "ir", "native"} {
+		p, err := LoadWithDirectMemory(tinyELF(), []string{"test"}, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p.Config.Mode = mode
+		p.Config.IRThreshold = 1
+		p.Config.NativeThreshold = 1
+		var out bytes.Buffer
+		code, err := p.Run(8, &out, nil)
+		if err != nil || code != 7 || out.String() != "ok\n" || p.CPU.Retired != 8 {
+			t.Fatal(mode, code, err, out.String(), p.CPU.Retired)
+		}
+		if err = p.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
