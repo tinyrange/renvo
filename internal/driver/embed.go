@@ -46,6 +46,7 @@ func expandSourceEmbeds(fs SourceFS, path string, moduleRoot string, src []byte)
 	if !embedSourceContainsDirective(src) {
 		return src, true, 0, ""
 	}
+	scratchStart := arena.Mark()
 	directives, directivesOK, directiveError := parseSourceEmbedDirectives(src)
 	if !directivesOK {
 		return src, false, directiveError, "go:embed"
@@ -118,6 +119,18 @@ func expandSourceEmbeds(fs SourceFS, path string, moduleRoot string, src []byte)
 		last = edits[i].at
 	}
 	out = append(out, src[last:]...)
+	// Only the expanded source escapes a successful expansion. Embedded file
+	// contents, parsed declarations and initializer fragments are scratch.
+	// Retain the result across a reset so those buffers do not accumulate
+	// through the later parse, check and link phases in the fixed arena.
+	if scratchStart != 0 {
+		persistStart := arena.PersistMark()
+		retained := arena.PersistBytes(out)
+		arena.Reset(scratchStart)
+		out = make([]byte, len(retained))
+		copy(out, retained)
+		arena.PersistReset(persistStart)
+	}
 	return out, true, 0, ""
 }
 

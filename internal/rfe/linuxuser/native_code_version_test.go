@@ -230,16 +230,22 @@ func TestCodeVersionedInvariantLoopAtExhaustedClock(t *testing.T) {
 		ctx.PublishLink(0, entry, 1, [17]uint8{})
 		m.versions.epoch = ^uint64(0)
 		for _, budget := range []uint64{1, 2, 63, 64, 127} {
+			// Hosts without the foreign-session boundary execute one bounded
+			// compatibility call, preserving the unspent caller budget.
+			retired := budget
+			if !emu.NativeSessionsAvailable() && retired > 64 {
+				retired = 64
+			}
 			state := []uint64{4096, 10, 0}
 			if err = n.RunLinkedSession(state, ctx, budget); err != nil {
 				t.Fatal(err)
 			}
 			got, e := m.Read(4096, 8, false)
-			if e != nil || got != 10+(budget-1)*2 || state[1] != 10+budget*2 || ctx.Status != 0 || ctx.Total != budget || ctx.MemoryTotal != budget || ctx.Remaining != 0 || m.versions.epoch != ^uint64(0) || m.pages[1].epoch != 1 {
+			if e != nil || got != 10+(retired-1)*2 || state[1] != 10+retired*2 || ctx.Status != 0 || ctx.Total != retired || ctx.MemoryTotal != retired || ctx.Remaining != budget-retired || m.versions.epoch != ^uint64(0) || m.pages[1].epoch != 1 {
 				t.Fatal("invariant loop progress/generation", pair, budget, state, got, e, ctx.Status, ctx.Total, ctx.MemoryTotal)
 			}
 			if pair {
-				if got, e = m.Read(4104, 8, false); e != nil || got != 11+(budget-1)*2 {
+				if got, e = m.Read(4104, 8, false); e != nil || got != 11+(retired-1)*2 {
 					t.Fatal(got, e)
 				}
 			}
