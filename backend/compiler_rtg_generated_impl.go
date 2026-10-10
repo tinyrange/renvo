@@ -5205,12 +5205,11 @@ if renvoFixedTarget != 0 {
 		}
 		r := renvoAsmReserves{code: 2097152, labels: 24576, relocs: 81920, absRelocs: 12288, data: 65536}
 		if a.c.optimizeRuntime {
-			// Large inputs commonly include substantial static byte data. Reserve
-			// it before function scratch marks to avoid pinning parser scratch
-			// each time the persistent data buffer grows during literal emission.
-			r.data = 1048576
-			r.code = 3670016
-			r.labels, r.relocs, r.absRelocs = 40960, 163840, 32768
+			r.data = 131072
+			// Reserve output buffers before function scratch marks. Mid-function
+			// growth retains both the old buffer and that function's scratch.
+			r.code = 4194304
+			r.labels, r.relocs, r.absRelocs = 65536, 262144, 65536
 		}
 		if !a.c.stripSymbols || renvoAsmNeedsFunctionSymbols(a) {
 			r.symbols = 4096
