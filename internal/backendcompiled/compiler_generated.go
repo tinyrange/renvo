@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "5328ce1b79b7ddf0538c88a48933e3328275df506d8f6d85dbdb62d4cef27c33"
+const CompilerSourceDigest = "e9a70cedd12889db7c062af65782cfc822134a545ab1a65445114a75928041da"
 
 // source: backend/compiler_common_impl.go
 
@@ -550,12 +550,13 @@ objectExternals  []renvoObjectExternal
 staticCallWordLocations []int
 staticCallStackBytes    int
 
-rfeFrameBias     int
-rfeNarrowSources []int
-rfeDirectMemory  bool
-rfeCodeVersions  bool
-rfeFaultLabels   []int
-rfeDirectSlows   []renvoRFEDirectSlow
+rfeFrameBias          int
+rfeNarrowSources      []int
+rfeDirectMemory       bool
+rfeCodeVersions       bool
+rfeLoopRegisterResult bool
+rfeFaultLabels        []int
+rfeDirectSlows        []renvoRFEDirectSlow
 }
 
 
@@ -27732,6 +27733,12 @@ renvoRFERegStore(a, secondary, frameReg, -112, 8)
 
 renvoRFERegLoad(a, temporary, context, RenvoRFEAdmissionEpoch, 8)
 renvoRFERegStore(a, temporary, frameReg, -120, 8)
+if !arm64 {
+
+
+renvoRFERegImm(a, temporary, 0)
+renvoRFERegStore(a, temporary, frameReg, -128, 8)
+}
 loop, exit, bad, pure, account, slow := renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a)
 ordinary, loopResult, loopSlow := renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a)
 loopSideExit := renvoAsmNewLabel(a)
@@ -27741,6 +27748,7 @@ genericSelect, callTarget := renvoAsmNewLabel(a), renvoAsmNewLabel(a)
 preparedLoop, preparedMemory, preparedPure := renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a)
 memoryResult := renvoAsmNewLabel(a)
 validatePrepared := renvoAsmNewLabel(a)
+cachedLoop, cachedNext, cachedMiss, compatibleLoop := renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a)
 renvoAsmMarkLabel(a, loop)
 renvoRFEJumpZero(a, remaining, exit)
 renvoAsmMarkLabel(a, selectTarget)
@@ -27873,8 +27881,14 @@ renvoRFEJump(a, 1, exit)
 renvoAsmMarkLabel(a, admitted)
 
 
+legacyBody := renvoAsmNewLabel(a)
+if !arm64 {
+renvoRFERegLoad(a, temporary, frameReg, -48, 8)
+renvoRFEJumpMasked(a, temporary, target, 512, true, legacyBody)
+}
 renvoRFERegLoad(a, temporary, secondary, 4, 4)
 renvoRFERegBinary(a, 3, primary, temporary)
+renvoAsmMarkLabel(a, legacyBody)
 renvoRFERegLoad(a, target, context, RenvoRFECodeView, 8)
 renvoRFEJumpZero(a, target, exit)
 renvoRFERegBinary(a, 3, target, primary)
@@ -27962,6 +27976,108 @@ renvoRFERegBinary(a, 3, secondary, temporary)
 renvoRFERegStore(a, secondary, context, RenvoRFEMemoryTotal, 8)
 renvoAsmJmpLabel(a, exit)
 renvoAsmMarkLabel(a, preparedLoop)
+if !arm64 {
+
+
+renvoRFEJumpMasked(a, temporary, secondary, 512, false, compatibleLoop)
+renvoRFERegLoad(a, temporary, frameReg, -120, 8)
+renvoRFEJumpZero(a, temporary, compatibleLoop)
+
+
+trained := renvoAsmNewLabel(a)
+renvoRFERegLoad(a, temporary, frameReg, -128, 8)
+renvoRFEJumpZero(a, temporary, trained)
+renvoRFERegLoad(a, secondary, context, RenvoRFEPreparedTargets, 8)
+renvoRFERegMove(a, descriptor, target)
+renvoRFERegBinary(a, 4, descriptor, secondary)
+renvoRFERegImmediate(a, 3, descriptor, 1)
+renvoRFERegStore(a, descriptor, temporary, 48, 8)
+renvoRFERegImm(a, secondary, 0)
+renvoRFERegStore(a, secondary, frameReg, -128, 8)
+renvoAsmMarkLabel(a, trained)
+renvoAsmMarkLabel(a, cachedLoop)
+renvoRFERegMove(a, descriptor, target)
+renvoRFERegLoad(a, target, context, RenvoRFECodeView, 8)
+renvoRFEJumpZero(a, target, exit)
+renvoRFERegBinary(a, 3, target, primary)
+
+
+
+renvoAsmEmit3(a, 0x41, 0xff, 0xd0)
+cachedSlow, cachedSideExit, cachedPublish := renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a)
+
+
+
+
+renvoRFEJump(a, 1, cachedSlow)
+renvoRFERegBinary(a, 100, primary, remaining)
+renvoRFEJump(a, 4, bad)
+renvoRFERegBinary(a, 100, primary, count)
+renvoRFEJump(a, 2, bad)
+renvoRFERegBinary(a, 4, remaining, primary)
+if arm64 {
+renvoAsmJmpLabel(a, loop)
+} else {
+renvoRFEJump(a, 1, cachedNext)
+renvoAsmJmpLabel(a, cachedPublish)
+}
+renvoAsmMarkLabel(a, cachedSlow)
+renvoRFERegStore(a, primary, context, 0, 8)
+renvoRFERegStore(a, secondary, context, 8, 8)
+renvoRFERegImmediate(a, 100, secondary, 4)
+renvoRFEJump(a, 0, cachedSideExit)
+renvoRFERegImmediate(a, 100, secondary, 2)
+renvoRFEJump(a, 4, bad)
+renvoRFERegBinary(a, 100, primary, remaining)
+renvoRFEJump(a, 3, bad)
+renvoRFERegBinary(a, 4, remaining, primary)
+renvoAsmJmpLabel(a, cachedPublish)
+renvoAsmMarkLabel(a, cachedSideExit)
+renvoRFEJumpZero(a, primary, bad)
+renvoRFERegBinary(a, 100, primary, remaining)
+renvoRFEJump(a, 3, bad)
+renvoRFERegImm(a, secondary, 0)
+renvoRFERegStore(a, secondary, context, 8, 8)
+renvoRFERegBinary(a, 4, remaining, primary)
+if arm64 {
+renvoAsmJmpLabel(a, loop)
+} else {
+renvoRFEJump(a, 1, cachedNext)
+renvoAsmJmpLabel(a, cachedPublish)
+}
+renvoAsmMarkLabel(a, cachedNext)
+renvoRFERegLoad(a, target, descriptor, 48, 8)
+renvoRFEJumpZero(a, target, cachedMiss)
+renvoRFERegImmediate(a, 4, target, 1)
+renvoRFERegLoad(a, temporary, context, RenvoRFEPreparedTargets, 8)
+renvoRFERegBinary(a, 3, target, temporary)
+renvoRFERegLoad(a, secondary, state, pcSlot*8, 8)
+renvoRFECompareMemory(a, secondary, target, 0, temporary)
+renvoRFEJump(a, 1, cachedMiss)
+renvoRFERegLoad(a, temporary, frameReg, -120, 8)
+renvoRFECompareMemory(a, temporary, target, 32, secondary)
+renvoRFEJump(a, 1, cachedMiss)
+renvoRFERegLoad(a, count, target, 16, 8)
+renvoRFERegBinary(a, 100, count, remaining)
+renvoRFEJump(a, 4, cachedPublish)
+renvoRFERegLoad(a, temporary, target, 28, 4)
+renvoRFEJumpMasked(a, temporary, secondary, 512, false, cachedMiss)
+renvoRFERegLoad(a, primary, target, 24, 4)
+renvoAsmJmpLabel(a, cachedLoop)
+renvoAsmMarkLabel(a, cachedPublish)
+renvoRFERegStore(a, primary, context, 0, 8)
+renvoAsmJmpLabel(a, exit)
+renvoAsmMarkLabel(a, cachedMiss)
+renvoRFERegStore(a, primary, context, 0, 8)
+renvoRFERegStore(a, descriptor, frameReg, -128, 8)
+renvoAsmJmpLabel(a, selectTarget)
+renvoAsmMarkLabel(a, compatibleLoop)
+legacyLoop := renvoAsmNewLabel(a)
+renvoRFERegLoad(a, temporary, target, 28, 4)
+renvoRFEJumpMasked(a, temporary, secondary, 512, false, legacyLoop)
+renvoRFERegImmediate(a, 4, primary, 16)
+renvoAsmMarkLabel(a, legacyLoop)
+}
 renvoRFERegLoad(a, target, context, RenvoRFECodeView, 8)
 renvoRFEJumpZero(a, target, exit)
 renvoRFERegBinary(a, 3, target, primary)
@@ -28713,7 +28829,10 @@ return renvoEmitLoopBlockABI(records, stateWords, instructions, arm64, true)
 }
 
 func renvoEmitLoopBlockABI(records []int, stateWords int, instructions int, arm64 bool, shared bool) ([]byte, bool) {
-code, _, ok := renvoEmitLoopBlockMode(records, stateWords, instructions, arm64, shared, false, false)
+code, _, ok := renvoEmitLoopBlockMode(records, stateWords, instructions, arm64, shared, false, false, shared && !arm64)
+if ok && shared && !arm64 {
+code = renvoRFELoopCompatibilityEntry(code)
+}
 return code, ok
 }
 
@@ -28721,7 +28840,10 @@ return code, ok
 
 
 func RenvoEmitCodeVersionedLoopBlock(records []int, stateWords int, instructions int, arm64 bool) ([]byte, bool) {
-code, _, ok := renvoEmitLoopBlockMode(records, stateWords, instructions, arm64, true, false, true)
+code, _, ok := renvoEmitLoopBlockMode(records, stateWords, instructions, arm64, true, false, true, !arm64)
+if ok && !arm64 {
+code = renvoRFELoopCompatibilityEntry(code)
+}
 return code, ok
 }
 
@@ -28729,11 +28851,11 @@ return code, ok
 
 
 func RenvoEmitDirectLoopBlock(records []int, stateWords int, instructions int) ([]byte, []int, bool) {
-checked, _, ok := renvoEmitLoopBlockMode(records, stateWords, instructions, false, true, false, false)
+checked, _, ok := renvoEmitLoopBlockMode(records, stateWords, instructions, false, true, false, false, false)
 if !ok {
 return nil, nil, false
 }
-fast, faults, ok := renvoEmitLoopBlockMode(records, stateWords, instructions, false, true, true, false)
+fast, faults, ok := renvoEmitLoopBlockMode(records, stateWords, instructions, false, true, true, false, false)
 if !ok {
 return nil, nil, false
 }
@@ -28758,7 +28880,30 @@ faults[i+1] += offset
 return a.code, faults, !a.patchFailed
 }
 
-func renvoEmitLoopBlockMode(records []int, stateWords int, instructions int, arm64 bool, shared bool, direct bool, codeVersions bool) ([]byte, []int, bool) {
+
+
+
+
+func renvoRFELoopCompatibilityEntry(body []byte) []byte {
+cc := &renvoCompileContext{renvoTargetArch: renvoArchAmd64, renvoTargetOS: renvoOSLinux, renvoNativeIntSize: 8}
+a := &renvoAsm{c: cc}
+renvoAsmEmit8(a, 0xe9)
+renvoAsmEmit32(a, len(body)+11)
+for padding := 0; padding < 11; padding++ {
+renvoAsmEmit8(a, 0x90)
+}
+a.code = append(a.code, body...)
+renvoRFECounterImmediate(a, 2, 8, 0, false)
+renvoAsmEmit8(a, 0xe8)
+renvoAsmEmit32(a, 16-(len(a.code)+4))
+renvoRFERegLoad(a, 1, 5, -(renvoRFESharedPrefix + 16), 8)
+renvoRFERegStore(a, 0, 1, 0, 8)
+renvoRFERegStore(a, 2, 1, 8, 8)
+renvoAsmRet(a)
+return a.code
+}
+
+func renvoEmitLoopBlockMode(records []int, stateWords int, instructions int, arm64 bool, shared bool, direct bool, codeVersions bool, registerResult bool) ([]byte, []int, bool) {
 if instructions < 1 || instructions > 256 || len(records) < 8 || len(records)%4 != 0 || len(records) > 8192 {
 return nil, nil, false
 }
@@ -28998,6 +29143,17 @@ if coldInputs[value] {
 last[value] = -1
 }
 }
+readSpans := []renvoRFEReadSpan{}
+if !arm64 && !oneShot && !direct && !storesMemory && instructions <= 16 {
+readSpans = renvoRFELoopReadSpans(records, stateMap, foldedAddresses)
+}
+for _, span := range readSpans {
+
+
+if last[span.index] < span.load {
+last[span.index] = span.load
+}
+}
 locations, spills := renvoRFELoopAllocate(records, last, registers, spillBase, !oneShot, inputs, stateMap)
 for value, cold := range coldInputs {
 if cold {
@@ -29059,6 +29215,14 @@ capturedLocations[value] = -(spillBase + spills*8)
 spills++
 }
 }
+for i := range readSpans {
+readSpans[i].offset = -(spillBase + spills*8)
+spills++
+}
+spanEnd := -(spillBase + spills*8)
+if len(readSpans) != 0 {
+spills++
+}
 cc := &renvoCompileContext{renvoTargetArch: arch, renvoTargetOS: renvoOSLinux, renvoNativeIntSize: 8, stripSymbols: true}
 g := renvoLinearGen{c: cc, stackPeak: spillBase + spills*8}
 g.asm.c = cc
@@ -29066,6 +29230,7 @@ a := &g.asm
 a.rfeNarrowSources = narrow
 a.rfeDirectMemory = direct
 a.rfeCodeVersions = codeVersions
+a.rfeLoopRegisterResult = registerResult
 frame := -1
 if shared {
 if g.stackPeak+renvoRFESharedPrefix > renvoRFESharedFrameSize {
@@ -29106,8 +29271,15 @@ renvoRFERegLoad(a, 1, frameReg, -144, 8)
 renvoRFERegBinary(a, 4, 0, 1)
 renvoRFERegStore(a, 0, frameReg, -152, 8)
 }
+
+
+
+if !registerResult {
 renvoRFERegImm(a, 0, 0)
 renvoRFERegStore(a, 0, contextReg, 8, 8)
+} else if cached != 0 {
+renvoRFERegImm(a, 0, 0)
+}
 for _, offset := range cacheOffsets {
 if offset != 0 {
 renvoRFERegStore(a, 0, frameReg, offset, 8)
@@ -29143,11 +29315,36 @@ passes := 1
 if !arm64 && !oneShot && memory != 0 && !direct {
 passes = 2
 }
+fastLoop, checkedEntry, spanEntry := renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a)
+renvoAsmMarkLabel(a, spanEntry)
+if len(readSpans) != 0 {
+
+
+renvoRFERegImmediate(a, 100, budget, instructions*2)
+renvoRFEJump(a, 2, checkedEntry)
+for _, span := range readSpans {
+renvoRFEGuardReadSpan(a, records, locations, span, 16, checkedEntry)
+}
+spanFloorReady := renvoAsmNewLabel(a)
+renvoRFERegImm(a, 0, instructions)
+renvoRFERegImmediate(a, 100, budget, 16*instructions)
+renvoRFEJump(a, 2, spanFloorReady)
+renvoRFERegMove(a, 0, budget)
+renvoRFERegImmediate(a, 4, 0, 15*instructions)
+renvoAsmMarkLabel(a, spanFloorReady)
+renvoRFERegStore(a, 0, frameReg, spanEnd, 8)
+renvoAsmJmpLabel(a, fastLoop)
+passes++
+}
+renvoAsmMarkLabel(a, checkedEntry)
 
 
 
 for pass := 0; pass < passes; pass++ {
-if pass == passes-1 {
+fast := len(readSpans) != 0 && pass == passes-1
+if fast {
+renvoAsmMarkLabel(a, fastLoop)
+} else if pass == 1 || passes == 1 {
 renvoAsmMarkLabel(a, loop)
 }
 exitIndex := 0
@@ -29163,6 +29360,30 @@ break
 }
 if !renvoMemoryEffectOnly(op) && op != 13 && locations[i] == 0 {
 continue
+}
+if fast {
+skipped := false
+for _, span := range readSpans {
+if i == span.address {
+skipped = true
+}
+if i == span.load {
+result := 0
+if locations[i] > 0 {
+result = locations[i] - 1
+}
+renvoRFESpanLoad(a, records, locations, span.index, 1, true)
+renvoRFERegLoad(a, 6, frameReg, span.offset, 8)
+renvoRFEScaledGuestLoad(a, result, 6, 1, span.shift, immediate, signedWidths[i])
+if result == 0 {
+renvoRFESaveValue(a, locations, i)
+}
+skipped = true
+}
+}
+if skipped {
+continue
+}
 }
 if op == 13 || op == 14 || op == 37 || op == 16 || op == 26 {
 failure := snapshots[exitIndex].label
@@ -29262,6 +29483,16 @@ renvoAsmJmpLabel(a, branchExit)
 renvoRFELoopPredicateJump(a, records, locations, deferred, condition, false, branchExit)
 }
 if !oneShot {
+if fast {
+
+
+boundary := renvoAsmNewLabel(a)
+renvoRFECompareMemory(a, budget, frameReg, spanEnd, 0)
+renvoRFEJump(a, 2, boundary)
+renvoRFELoopPhiMoves(a, records, locations, inputs, stateMap)
+renvoAsmJmpLabel(a, fastLoop)
+renvoAsmMarkLabel(a, boundary)
+}
 renvoRFERegImmediate(a, 100, budget, instructions)
 renvoRFEJump(a, 2, finish)
 
@@ -29278,7 +29509,9 @@ renvoRFERegStore(a, source, frameReg, capturedLocations[value], 8)
 }
 }
 renvoRFELoopPhiMoves(a, records, locations, inputs, stateMap)
-if pass == passes-1 {
+if fast {
+renvoAsmJmpLabel(a, spanEntry)
+} else if pass != 0 || passes == 1 {
 renvoAsmJmpLabel(a, loop)
 }
 }
@@ -29841,14 +30074,27 @@ renvoRFERegStore(a, source, 11, slot*8, 8)
 
 func renvoRFEAcyclicProgress(a *renvoAsm, frameReg int, contextReg int, retired int, memory int, status int, completed int) {
 renvoRFERegLoad(a, contextReg, frameReg, -16, 8)
+if !a.rfeLoopRegisterResult {
 renvoRFECounterImmediate(a, contextReg, 0, retired, false)
+}
 if memory != 0 {
 renvoRFECounterImmediate(a, contextReg, RenvoRFEMemoryTotal, memory, true)
 }
 if completed != 0 {
 renvoRFECounterImmediate(a, contextReg, RenvoRFELoopIterations, completed, true)
 }
+if !a.rfeLoopRegisterResult {
 renvoRFECounterImmediate(a, contextReg, 8, status, false)
+}
+if a.rfeLoopRegisterResult {
+renvoRFERegImm(a, 0, retired)
+
+
+renvoAsmEmit2(a, 0x31, 0xd2)
+if status != 0 {
+renvoAsmEmit3(a, 0x83, 0xc2, status)
+}
+}
 }
 
 func renvoRFELoopProgress(a *renvoAsm, frameReg int, contextReg int, iterations int, instructions int, memory int, prefix int, memoryPrefix int, status int) {
@@ -29860,25 +30106,41 @@ renvoRFELoopMultiply(a, 0, instructions)
 if prefix != 0 {
 renvoRFERegImmediate(a, 3, 0, prefix)
 }
+if !a.rfeLoopRegisterResult {
 renvoRFERegStore(a, 0, contextReg, 0, 8)
+}
+memoryResult := 0
+if a.rfeLoopRegisterResult {
+memoryResult = 1
+}
 if memory != 0 || memoryPrefix != 0 {
-renvoRFERegMove(a, 0, iterations)
+renvoRFERegMove(a, memoryResult, iterations)
 if memory == 0 {
-renvoRFERegImm(a, 0, 0)
+renvoRFERegImm(a, memoryResult, 0)
 } else if memory != 1 {
-renvoRFELoopMultiply(a, 0, memory)
+renvoRFELoopMultiply(a, memoryResult, memory)
 }
 if memoryPrefix != 0 {
-renvoRFERegImmediate(a, 3, 0, memoryPrefix)
+renvoRFERegImmediate(a, 3, memoryResult, memoryPrefix)
 }
 temp := 1
 if renvoRFEArm(a) {
 temp = 2
 }
-renvoRFECounterAdd(a, contextReg, RenvoRFEMemoryTotal, 0, temp)
+renvoRFECounterAdd(a, contextReg, RenvoRFEMemoryTotal, memoryResult, temp)
 }
 renvoRFECounterAdd(a, contextReg, RenvoRFELoopIterations, iterations, 0)
+if !a.rfeLoopRegisterResult {
 renvoRFECounterImmediate(a, contextReg, 8, status, false)
+}
+if a.rfeLoopRegisterResult {
+
+
+renvoAsmEmit2(a, 0x31, 0xd2)
+if status != 0 {
+renvoAsmEmit3(a, 0x83, 0xc2, status)
+}
+}
 }
 func renvoRFELoopMultiply(a *renvoAsm, dst int, value int) {
 if !renvoRFEDirectImmediate(a, 12, dst, value) {
@@ -30738,12 +31000,31 @@ secondary = 1
 if op == 24 {
 renvoRFELoopColdValueOnce(a, records, locations, cold, predicateDone, right)
 }
+if !renvoRFEArm(a) && op == 24 && sub && (imm&127 == 32 || imm&127 == 64) {
+
+
+
+lhs, rhs := 0, secondary
+if records[left*4] != 0 && locations[left] > 0 {
+lhs = locations[left] - 1
+} else {
+renvoRFELoadValue(a, records, locations, left, lhs)
+}
+if records[right*4] != 0 && locations[right] > 0 {
+rhs = locations[right] - 1
+} else {
+renvoRFELoadValue(a, records, locations, right, rhs)
+}
+renvoRFERex(a, rhs, lhs, imm&127 == 64)
+renvoAsmEmit2(a, 0x39, 0xc0|((rhs&7)<<3)|(lhs&7))
+} else {
 renvoRFELoadValue(a, records, locations, left, 0)
 if op != 24 || records[right*4] != 0 || !renvoRFEFlagsImmediate(a, op, imm, records[right*4+3]) {
 if op == 24 {
 renvoRFELoadValue(a, records, locations, right, secondary)
 }
 renvoRFEFlagsOperation(a, op-2, imm)
+}
 }
 if !truth {
 condition ^= 1
@@ -31332,6 +31613,10 @@ renvoAsmEmit32(a, value)
 
 
 func renvoRFEIndexedGuestLoad(a *renvoAsm, dst int, base int, index int, size int, signedWidth int) {
+renvoRFEScaledGuestLoad(a, dst, base, index, 0, size, signedWidth)
+}
+
+func renvoRFEScaledGuestLoad(a *renvoAsm, dst int, base int, index int, scale int, size int, signedWidth int) {
 rex := 0x40 | ((dst >> 3) << 2) | ((index >> 3) << 1) | (base >> 3)
 if size == 8 || signedWidth == 64 {
 rex |= 8
@@ -31349,7 +31634,7 @@ renvoAsmEmit8(a, 0x63)
 renvoAsmEmit8(a, 0x8b)
 }
 renvoAsmEmit8(a, 4|((dst&7)<<3))
-renvoAsmEmit8(a, ((index&7)<<3)|(base&7))
+renvoAsmEmit8(a, (scale<<6)|((index&7)<<3)|(base&7))
 }
 
 func renvoRFEIndexedGuestStore(a *renvoAsm, source int, base int, index int, size int) {
@@ -31368,6 +31653,178 @@ opcode = 0x88
 renvoAsmEmit8(a, opcode)
 renvoAsmEmit8(a, 4|((source&7)<<3))
 renvoAsmEmit8(a, ((index&7)<<3)|(base&7))
+}
+
+
+
+type renvoRFEReadSpan struct {
+load, address, base, index, step, shift, offset int
+}
+
+func renvoRFELowWordInput(records []int, value int) int {
+if records[value*4] == 5 {
+mask := records[value*4+2]
+if records[mask*4] == 0 && records[mask*4+3] == 4294967295 {
+return records[value*4+1]
+}
+}
+return -1
+}
+
+func renvoRFESpanInvariant(records []int, final []int, value int) bool {
+if records[value*4] == 0 {
+return true
+}
+if records[value*4] != 1 || final[records[value*4+3]] != value {
+return false
+}
+
+for i := 0; i < len(records)/4; i++ {
+if records[i*4] == 2 && records[i*4+3] == records[value*4+3] && records[i*4+1] != value {
+return false
+}
+}
+return true
+}
+
+func renvoRFELoopReadSpans(records []int, final []int, folded []int) []renvoRFEReadSpan {
+spans := []renvoRFEReadSpan{}
+uses := make([]int, len(records)/4)
+for i := 0; i < len(uses); i++ {
+op := records[i*4]
+if op == 14 || op == 37 || op == 16 || op == 26 {
+return nil
+}
+if renvoRFEHasLeft(op) {
+uses[records[i*4+1]]++
+}
+if renvoRFEHasRight(op) {
+uses[records[i*4+2]]++
+}
+if third := renvoRFEThirdOperand(op, records[i*4+3]); third >= 0 {
+uses[third]++
+}
+}
+for i := 0; i < len(uses); i++ {
+if records[i*4] != 13 {
+continue
+}
+address := records[i*4+1]
+shift := folded[address]
+if records[i*4+3] > 8 || shift < 0 || uses[address] != 1 {
+return nil
+}
+base := records[address*4+1]
+index := renvoRFELowWordInput(records, records[shift*4+1])
+if index < 0 || records[index*4] != 1 || !renvoRFESpanInvariant(records, final, base) {
+return nil
+}
+next := renvoRFELowWordInput(records, final[records[index*4+3]])
+if next < 0 || records[next*4] != 3 {
+return nil
+}
+old, step := records[next*4+1], records[next*4+2]
+if projected := renvoRFELowWordInput(records, old); projected >= 0 {
+old = projected
+}
+if old != index {
+return nil
+}
+stepInput := step
+if projected := renvoRFELowWordInput(records, step); projected >= 0 {
+stepInput = projected
+}
+if !renvoRFESpanInvariant(records, final, stepInput) {
+return nil
+}
+spans = append(spans, renvoRFEReadSpan{load: i, address: address, base: base, index: index, step: step, shift: records[shift*4+3]})
+if len(spans) > 4 {
+return nil
+}
+}
+return spans
+}
+
+func renvoRFESpanLoad(a *renvoAsm, records []int, locations []int, value int, reg int, low bool) {
+if projected := renvoRFELowWordInput(records, value); projected >= 0 {
+value, low = projected, true
+}
+if !low || records[value*4] == 0 {
+renvoRFELoadValue(a, records, locations, value, reg)
+if low {
+renvoRFEDirectImmediate(a, 5, reg, 4294967295)
+}
+} else if locations[value] > 0 {
+source := locations[value] - 1
+renvoRFERex(a, source, reg, false)
+renvoAsmEmit2(a, 0x89, 0xc0|((source&7)<<3)|(reg&7))
+} else if locations[value] == 0 {
+renvoRFERegLoad(a, reg, 11, records[value*4+3]*8, 4)
+} else {
+renvoRFERegLoad(a, reg, 5, locations[value], 4)
+}
+}
+
+
+
+
+func renvoRFEGuardReadSpan(a *renvoAsm, records []int, locations []int, span renvoRFEReadSpan, maximum int, fallback int) {
+size := records[span.load*4+3]
+renvoRFESpanLoad(a, records, locations, span.step, 2, false)
+renvoRFERegImmediate(a, 100, 2, (4096-size)/((maximum-1)<<span.shift))
+renvoRFEJump(a, 4, fallback)
+renvoRFELoopMultiply(a, 2, maximum-1)
+renvoRFESpanLoad(a, records, locations, span.index, 1, true)
+renvoRFERegMove(a, 0, 1)
+renvoRFERegBinary(a, 3, 0, 2)
+renvoRFERegShift(a, 0, 9, 32)
+renvoRFERegBinary(a, 101, 0, 0)
+renvoRFEJump(a, 1, fallback)
+renvoRFESpanLoad(a, records, locations, span.base, 0, false)
+renvoRFERegAddress(a, 0, 0, 1, span.shift, 0)
+
+
+renvoRFERegMove(a, 1, 0)
+renvoRFERegShift(a, 1, 9, 48)
+renvoRFERegBinary(a, 101, 1, 1)
+renvoRFEJump(a, 1, fallback)
+renvoRFERegShift(a, 2, 8, span.shift)
+renvoRFERegMove(a, 1, 0)
+renvoRFERegImmediate(a, 5, 1, 4095)
+renvoRFERegBinary(a, 3, 2, 1)
+renvoRFERegImmediate(a, 100, 2, 4096-size)
+renvoRFEJump(a, 4, fallback)
+lookup, ready := renvoAsmNewLabel(a), renvoAsmNewLabel(a)
+renvoRFERegMove(a, 1, 0)
+renvoRFEMemoryFactSubtract(a, 1, -96)
+renvoRFERegImmediate(a, 100, 1, 4096-size)
+renvoRFEJump(a, 4, lookup)
+renvoRFEMemoryFactLoad(a, 6, -104)
+renvoRFEJumpZero(a, 6, lookup)
+renvoAsmJmpLabel(a, ready)
+renvoAsmMarkLabel(a, lookup)
+renvoRFERegMove(a, 1, 0)
+renvoRFERegShift(a, 1, 9, 12)
+renvoRFERegMove(a, 7, 1)
+renvoRFERegImmediate(a, 5, 7, 63)
+renvoRFERegShift(a, 7, 8, 5)
+renvoRFERegLoad(a, 0, 5, -16, 8)
+renvoRFERegBinary(a, 3, 7, 0)
+renvoRFERegImmediate(a, 3, 7, RenvoRFEPages)
+renvoRFECompareMemory(a, 1, 7, 0, 0)
+renvoRFEJump(a, 1, fallback)
+renvoRFERegLoad(a, 6, 7, RenvoRFEPageData, 8)
+renvoRFEJumpZero(a, 6, fallback)
+renvoRFERegLoad(a, 0, 7, RenvoRFEPagePermissions, 8)
+renvoRFERegImmediate(a, 5, 0, 1)
+renvoRFEJumpZero(a, 0, fallback)
+renvoRFERegShift(a, 1, 8, 12)
+renvoRFERegBinary(a, 4, 6, 1)
+renvoAsmMarkLabel(a, ready)
+
+renvoRFESpanLoad(a, records, locations, span.base, 0, false)
+renvoRFERegBinary(a, 3, 6, 0)
+renvoRFERegStore(a, 6, 5, span.offset, 8)
 }
 
 // source: backend/compiler_object_cache_impl.go

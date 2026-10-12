@@ -19,7 +19,13 @@ func (n *Native) RunLinkedSession(state []uint64, m *MemoryContext, budget uint6
 		m.CodeView, m.PreparedTargets, m.DescriptorBase, m.AdmissionEpoch = [4]uint64{}, 0, 0, 0
 	}
 	if m == nil || !n.CanLinkMemory(m) || m.linkOwner != n || n.linkWords == 0 || len(state) != n.linkWords || budget == 0 || budget > NativeSessionLimit {
+		if n.linkCall != nil {
+			n.linkCall.ReleaseOwnedSessionPins()
+		}
 		return fmt.Errorf("invalid native linked session")
+	}
+	if n.codeVersionedContexts != nil && n.codeVersionedContexts[m] {
+		return n.linkCall.CallOwnedSession(state, (*runimage.LinkedContextABI)(unsafe.Pointer(m)), budget)
 	}
 	return n.linkCall.CallSession(state, (*runimage.LinkedContextABI)(unsafe.Pointer(m)), budget)
 }
