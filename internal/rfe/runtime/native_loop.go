@@ -93,6 +93,8 @@ func (n *Native) compileLoopMode(ops []Op, words, instructions int, direct bool,
 	var err error
 	if len(faults) != 0 {
 		entry, err = n.arena.InstallFaultLoopBlock(code, words, instructions, faults)
+	} else if runtime.GOARCH == "amd64" && !direct {
+		entry, err = n.arena.InstallRegisterLoopBlock(code, words, instructions)
 	} else {
 		entry, err = n.arena.InstallLoopBlock(code, words, instructions)
 	}

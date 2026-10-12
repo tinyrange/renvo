@@ -19,6 +19,7 @@ func clearLinkedBorrow(view *[4]uint64, targets *uint64) {
 	}
 }
 func (a *CodeArena) borrowLinked(view *[4]uint64, targets *uint64) {
+	a.releaseOwnedPinsLocked() // compatibility calls do not retain owned leases
 	*view = a.linkedView
 	if targets != nil {
 		*targets = uint64(uintptr(unsafe.Pointer(&a.targets[0])))
@@ -81,7 +82,7 @@ func (a *CodeArena) AdmitLinkedBlock(entry, words, instructions int) error {
 	if metadata == 0 || metadata == 65535 || metadata&16384 != 0 || int(metadata&511) != words || metadata&8192 != 0 && int(record.Instructions) != instructions || metadata&8192 == 0 && instructions > 16 {
 		return fmt.Errorf("invalid linked block admission")
 	}
-	key := (metadata & 40960) | uint16(words)
+	key := (metadata & 41472) | uint16(words)
 	if record.Linked != 0 && (record.Linked != key || int(record.AdmittedCount) != instructions) {
 		return fmt.Errorf("linked block admission changed")
 	}
@@ -201,9 +202,10 @@ func (c *LinkedCall) CallBatchWithTargets(state []uint64, context unsafe.Pointer
 // low word and ABI-family bits in its high word. It never retains a raw entry.
 type linkedTarget struct {
 	PC, Entry, Instructions, BodyFlags uint64
-	CheckedSession                     uint64    // public descriptor checked only in this non-aliasing session
-	DescriptorOffset                   uint64    // checked public way, relative to the current descriptor base
-	_                                  [2]uint64 // power-of-two stride
+	CheckedSession                     uint64 // public descriptor checked only in this non-aliasing session
+	DescriptorOffset                   uint64 // checked public way, relative to the current descriptor base
+	SuccessorOffset                    uint64 // private predicted proof offset + 1, never admission authority
+	_                                  uint64 // power-of-two stride
 }
 
 // PrepareTarget is cold work, separate from execution. Replacing an indexed
@@ -230,7 +232,7 @@ func (c *LinkedCall) PrepareTarget(pc uint64, entry, instructions int) error {
 	if body >= uint64(a.used) || body >= uint64(a.size) {
 		return fmt.Errorf("invalid prepared target body")
 	}
-	flags := uint64(r.Words & 40960)
+	flags := uint64(r.Words & 41472)
 	base, slot := ((pc>>2)^(pc>>12))&255, uint64(0)
 	found := false
 	for way := uint64(0); way < 4; way++ {

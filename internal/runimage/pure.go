@@ -31,6 +31,7 @@ type CodeArena struct {
 	targets      [1024]linkedTarget         // opaque prepared proofs; no executable pointers
 	sessionEpoch uint64                     // arena-serialized generation, never reused without clearing proofs
 	sessionImage *[sessionImageWords]uint64 // dedicated pointer-free foreign ABI storage
+	ownedPins    *ownedSessionPins          // at most one owned pointer graph, refreshed before use
 	sessionState *[256]uint64               // independent of enclosing Go owner allocations
 }
 
@@ -84,6 +85,18 @@ func (a *CodeArena) InstallLoopBlock(code []byte, words, instructions int) (int,
 	return a.installLoop(code, uint16(words)|32768|8192, instructions)
 }
 
+// InstallRegisterLoopBlock tags a compiler-emitted AMD64 shared loop that
+// has a compatibility entry and a private body returning retirement in RAX and
+// status in RDX with ZF iff status is zero. The private body preserves its
+// resident R11 state base and uses the dispatcher's shared context. Legacy and
+// signal-recovery entries must not use this tag.
+func (a *CodeArena) InstallRegisterLoopBlock(code []byte, words, instructions int) (int, error) {
+	if runtime.GOARCH != "amd64" || words < 1 || words > 256 || instructions < 1 || instructions > 256 {
+		return 0, fmt.Errorf("invalid register-result loop dimensions or host")
+	}
+	return a.installRecord(code, uint16(words)|32768|8192|512, 16, instructions)
+}
+
 // InstallContextBlock requires a non-nil trusted host context on every call.
 func (a *CodeArena) InstallContextBlock(code []byte, words int) (int, error) {
 	if words < 1 || words > 256 {
@@ -120,6 +133,7 @@ func (a *CodeArena) InstallFaultLoopBlock(code []byte, words, instructions int, 
 func (a *CodeArena) installFaultRecord(code []byte, words uint16, body, instructions int, faults []int) (int, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.releaseOwnedPinsLocked() // entries/fault slices may change during installation
 	at := (a.used + 15) &^ 15
 	if a.base == 0 || a.broken || len(code) == 0 || len(code) > a.size-at || body < 0 || body >= len(code) {
 		return 0, fmt.Errorf("native code arena full or closed")
@@ -167,6 +181,7 @@ func (a *CodeArena) CallContext(entry int, state []uint64, context unsafe.Pointe
 	return a.callLocked(entry, state, context)
 }
 func (a *CodeArena) callLocked(entry int, state []uint64, context unsafe.Pointer) error {
+	a.releaseOwnedPinsLocked()
 	if a.base == 0 || a.broken || entry < 0 || entry&15 != 0 || entry>>4 >= len(a.entries) || len(state) == 0 {
 		return fmt.Errorf("invalid native block entry")
 	}
@@ -188,6 +203,7 @@ func (a *CodeArena) callLocked(entry int, state []uint64, context unsafe.Pointer
 func (a *CodeArena) Close() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.releaseOwnedPinsLocked()
 	if a.base == 0 {
 		return nil
 	}

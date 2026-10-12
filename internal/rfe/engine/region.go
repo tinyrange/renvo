@@ -33,6 +33,11 @@ func (e *Engine) regionParts(c CPU, first *compiledBlock) []regionPart {
 	attempts := 0
 	best := []regionPart(nil)
 	bestScore := float64(0)
+	bestCycle := []regionPart(nil)
+	bestCycleScore := float64(0)
+	// A region avoids a dispatcher transition per reached block, not per
+	// guest instruction. Weight each additional block by observed reach;
+	// instruction count remains solely the unchanged static admission bound.
 	var search func(int, float64, float64) []regionPart
 	search = func(total int, score, probability float64) []regionPart {
 		if len(parts) > 1 && score > bestScore {
@@ -68,15 +73,6 @@ func (e *Engine) regionParts(c CPU, first *compiledBlock) []regionPart {
 			if attempts > 256 {
 				return nil
 			}
-			if target == root {
-				return append([]regionPart(nil), parts...)
-			}
-			candidate := e.blocks[target]
-			if seen[target] || candidate == nil || !candidate.native || candidate.context != stamp || len(candidate.dependencies) == 0 || len(candidate.instructions) == 0 || total+len(candidate.instructions) > e.config.MaxRegionInstructions {
-				continue
-			}
-			seen[target] = true
-			parts = append(parts, regionPart{target, candidate})
 			reach := probability
 			if conditional && counts[0]+counts[1] != 0 {
 				edge := 0
@@ -85,7 +81,27 @@ func (e *Engine) regionParts(c CPU, first *compiledBlock) []regionPart {
 				}
 				reach *= float64(counts[edge]+1) / float64(counts[0]+counts[1]+2)
 			}
-			result := search(total+len(candidate.instructions), score+reach*float64(len(candidate.instructions)), reach)
+			if target == root {
+				// Compare expected block visits before the first side exit, including
+				// repeated iterations. A rare backedge must not defeat a hot
+				// acyclic trace merely because it is a cycle.
+				if reach == 1 {
+					return append([]regionPart(nil), parts...)
+				}
+				cycleScore := score / (1 - reach)
+				if cycleScore > bestCycleScore {
+					bestCycle = append([]regionPart(nil), parts...)
+					bestCycleScore = cycleScore
+				}
+				continue
+			}
+			candidate := e.blocks[target]
+			if seen[target] || candidate == nil || !candidate.native || candidate.context != stamp || len(candidate.dependencies) == 0 || len(candidate.instructions) == 0 || total+len(candidate.instructions) > e.config.MaxRegionInstructions {
+				continue
+			}
+			seen[target] = true
+			parts = append(parts, regionPart{target, candidate})
+			result := search(total+len(candidate.instructions), score+reach, reach)
 			parts = parts[:len(parts)-1]
 			delete(seen, target)
 			if len(result) != 0 {
@@ -94,8 +110,11 @@ func (e *Engine) regionParts(c CPU, first *compiledBlock) []regionPart {
 		}
 		return nil
 	}
-	if cycle := search(len(first.instructions), float64(len(first.instructions)), 1); len(cycle) != 0 {
+	if cycle := search(len(first.instructions), 1, 1); len(cycle) != 0 {
 		return cycle
+	}
+	if bestCycleScore >= bestScore && len(bestCycle) != 0 {
+		return bestCycle
 	}
 	return best
 }
