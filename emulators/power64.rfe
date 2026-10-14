@@ -36,6 +36,7 @@ type CPU struct {
 	CR                    uint32
 	SPR                   [1024]uint64
 	SLB                   [64]SLB
+	SLBVersion            uint64
 	Bus                   rt.Bus
 	Tick                  uint64
 	InterruptLE           bool
@@ -198,13 +199,14 @@ func (c *CPU) base(r uint32) uint64 {
 }
 func sext(v uint64, n uint) uint64 { return uint64(int64(v<<(64-n)) >> (64 - n)) }
 func mask(mb, me uint, width uint) uint64 {
-	var m uint64
-	for i := uint(0); i < width; i++ {
-		if (mb <= me && i >= mb && i <= me) || (mb > me && (i >= mb || i <= me)) {
-			m |= 1 << (width - 1 - i)
-		}
+	// POWER numbers mask bits from the most significant end. Two edge masks
+	// also cover a wrapping interval, without a loop over every bit.
+	all := ^uint64(0) >> (64 - width)
+	left, right := all>>mb, all<<(width-1-me)&all
+	if mb <= me {
+		return left & right
 	}
-	return m
+	return left | right
 }
 func (c *CPU) branch(bo, bi uint32, decrement bool) bool {
 	countOK := true
@@ -1035,15 +1037,18 @@ func (c *CPU) extended(op uint32, pc uint64) error {
 		}
 		return nil
 	case 402:
+		c.SLBVersion++
 		index := int(b & 63)
 		c.SLB[index] = SLB{ESID: b, VSID: s}
 		return nil
 	case 434:
+		c.SLBVersion++
 		for i := 1; i < len(c.SLB); i++ {
 			c.SLB[i] = SLB{}
 		}
 		return nil
 	case 498:
+		c.SLBVersion++
 		esid := b &^ uint64(0xfffffff)
 		for i := range c.SLB {
 			if c.SLB[i].ESID&^uint64(0xfffffff) == esid {
@@ -1198,6 +1203,32 @@ func (c *CPU) extended(op uint32, pc uint64) error {
 		c.record(result)
 	}
 	return nil
+}
+
+-- mask_test.go --
+package power64
+
+import "testing"
+
+func TestRotateMaskAllIntervals(t *testing.T) {
+	for _, width := range []uint{32, 64} {
+		for mb := uint(0); mb < width; mb++ {
+			for me := uint(0); me < width; me++ {
+				// Walk the architectural circular interval; independent of the two-edge
+				// shift implementation, including full-width, single-bit and wrap masks.
+				var want uint64
+				for bit := mb; ; bit = (bit + 1) % width {
+					want |= uint64(1) << (width - 1 - bit)
+					if bit == me {
+						break
+					}
+				}
+				if got := mask(mb, me, width); got != want {
+					t.Fatalf("width=%d mb=%d me=%d got=%x want=%x", width, mb, me, got, want)
+				}
+			}
+		}
+	}
 }
 
 -- population_test.go --

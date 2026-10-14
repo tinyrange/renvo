@@ -119,10 +119,15 @@ sandbox/power64-linux/machine -kernel /path/to/linux/vmlinux \
   -init-elf /absolute/path/to/coremark.elf -clock realtime
 RENVO_POWER_LINUX_KERNEL=/path/to/linux/vmlinux \
 RENVO_POWER_COREMARK_ELF=/absolute/path/to/coremark.elf \
+RENVO_POWER_COREMARK_ITERATIONS=2000 \
   go run ./cmd/renvoemu test -run TestLinuxCoreMark emulators/linux-power64-machine.rfe
 ```
 
-The automated reference profile is 1,000 iterations. It checks all five CRCs
+The automated references support 1,000 and 2,000 iterations. Build the current
+performance fixture with `-DITERATIONS=2000`, and supply the explicit iteration
+environment variable above; the historical 1,000-iteration fixture may be too
+short on a faster host. Never change the duration check or use deterministic
+time to obtain a score. The gate checks all five CRCs
 for each seed, ordered START/STOP markers, guest and host durations of at least
 ten seconds, agreement within 5% or 100 ms, and orderly guest poweroff. It
 rejects bad final CRCs, short runs, duplicate/incomplete output and false-success
@@ -133,6 +138,52 @@ work. `-clock realtime` uses the shared monotonic oscillator independently of
 retirement; TB reads, decrementer expiry and H_CEDE all use that same clock.
 Instruction/resource limits remain independent. The synthetic DTB processor
 frequency must not be used for CoreMark/MHz or physical hardware comparisons.
+
+## Measured interpreter improvement
+
+A sequential, unprofiled comparison on the same one-CPU Linux/amd64 development
+sandbox used the identical 2,000-iteration ELF, Linux kernel, 256 MiB partition,
+Go 1.26.0 and GCC 13.4.0 toolchain, with realtime clock mode:
+
+| Seed | Before (`cf3860a3`) | Fast paths | Throughput before → after | Speedup |
+| --- | ---: | ---: | ---: | ---: |
+| Performance | 50.874347 s | 19.254827 s | 39.31 → 103.87 iterations/s | 2.64× |
+| Validation | 53.025505 s | 19.286204 s | 37.72 → 103.70 iterations/s | 2.75× |
+
+Both complete guest runs validated and powered off. The identical ELF under
+QEMU POWER8 independently matched every seed/list/matrix/state/final CRC,
+including the 2,000-iteration final CRCs `4983` / `0cac`. That QEMU run was below
+ten seconds and is **only a CRC control**, not a performance score. The fresh
+RFE gate also checks host/guest elapsed-time agreement and the ten-second
+minimum, with the original two-billion-instruction limit unchanged.
+
+`power64-interpreter-performance.json` records the comparison and fixture
+hashes. These results are for the hosted interpreter, not physical POWER
+hardware or parity with the ARM64/x86 native tiers. The original 1,000-iteration
+measurement above remains historical evidence, not the before side of this
+comparison.
+
+## Interpreter fast paths and profiling
+
+Realtime interrupt polling is bounded by 64 attempted instructions. A transition
+that enables MSR.EE refreshes the oscillator before the next interruptible
+instruction; timebase/decrementer reads and writes and H_CEDE sample it
+synchronously. Polling does not create elapsed time or advance the oscillator
+from instruction retirement. The deterministic mode is unchanged.
+
+A bounded positive translation cache skips repeated SLB/PTEG searches, not
+protection checks. Every hit checks the selected live SLB/HPTE and mutation
+epochs, then uses live privilege, key, PP0/PP, NX, RPN and reference/change bits.
+SLB instructions and hash-table hypercalls invalidate lookup precedence. RAM
+accesses remain checked, cross-page accesses retain precise translation faults,
+and fetches read current instruction bytes (there is no decoded-code cache).
+Rotate masks use constant-time edge masks instead of per-bit loops.
+
+`-cpuprofile OUTPUT` optionally writes a Go CPU profile of guest execution. For
+example, add it to the realtime command above, then inspect the standalone
+profile with `go tool pprof -top /path/to/machine OUTPUT`. Profiling runs are
+**diagnostics**, not before/after performance comparisons: compare identical
+ELFs, kernel, clock mode, host and toolchain with profiling disabled.
 
 ## Current boundaries
 

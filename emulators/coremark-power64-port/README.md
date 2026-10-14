@@ -26,7 +26,7 @@ files into its `port/` subdirectory. From that source directory:
 powerpc64le-linux-gnu-gcc-13 -O2 -static -nostdlib -fno-builtin \
   -fno-stack-protector -fno-pie -no-pie -mcpu=power8 -mno-altivec \
   -mno-vsx -msoft-float -fno-tree-vectorize -I. -Iport \
-  -DITERATIONS=1000 -DPERFORMANCE_RUN=1 -Wl,-e,_start \
+  -DITERATIONS=2000 -DPERFORMANCE_RUN=1 -Wl,-e,_start \
   -Wl,--build-id=none core_list_join.c core_main.c core_matrix.c \
   core_state.c core_util.c port/core_portme.c port/start.S -o coremark.elf
 ```
@@ -61,6 +61,13 @@ Expected seed/list/matrix/state CRCs are:
 
 - Performance: `e9f5 / e714 / 1fd7 / 8e3a`.
 - Validation: `18f2 / e3c1 / 0747 / 8d84`.
+
+The current interpreter performance fixture uses 2,000 iterations per seed,
+with final CRCs `4983` / `0cac` independently verified under QEMU on the identical
+ELF. The historical 1,000-iteration profile has final CRCs `d340` / `26c2`.
+Set `RENVO_POWER_COREMARK_ITERATIONS=2000` alongside the explicit ELF/kernel
+paths when running `TestLinuxCoreMark`; its two-billion-instruction bound and
+ten-second host/guest duration checks remain unchanged.
 
 The final CRC depends on iterations. Compare it using the identical ELF under
 an independent emulator, without rebuilding between runs. Keep independent

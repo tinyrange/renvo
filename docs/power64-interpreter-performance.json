@@ -1,0 +1,76 @@
+{
+  "architecture": "ppc64le",
+  "baseline_revision": "cf3860a3be591d24b48f63108f84d510f92cfa3a",
+  "benchmark_elf_sha256": "a2a8968ba5db483f8dabc1a30c20cb5198bc7a8f9ef9fc2c1e298ee79abb2144",
+  "both_rfe_runs": {
+    "orderly_poweroff": true,
+    "profiling": false,
+    "validated": true
+  },
+  "clock": "host-monotonic realtime, 1000000 Hz",
+  "comparison": "sequential unprofiled fresh partitions in the same one-CPU Linux/amd64 development sandbox",
+  "compiler": "GCC 13.4.0",
+  "compiler_flags": "-O2 -static -nostdlib -fno-builtin -fno-stack-protector -fno-pie -no-pie -mcpu=power8 -mno-altivec -mno-vsx -msoft-float -fno-tree-vectorize -I. -Iport -DITERATIONS=2000 -DPERFORMANCE_RUN=1 -Wl,-e,_start -Wl,--build-id=none",
+  "contexts": 1,
+  "coremark_revision": "d5fad6bd094899101a4e5fd53af7298160ced6ab",
+  "engine": "POWER64 RFE interpreter",
+  "final_source_gates": {
+    "format": "passed",
+    "fresh_deterministic_linux_init": "passed",
+    "fresh_realtime_linux_coremark2000": "passed",
+    "host_guest_agreement": "within max(100ms, 5%)",
+    "minimum_host_and_guest_seconds": 10,
+    "preflight": "passed",
+    "source_package_tests": "passed"
+  },
+  "guest": "Linux 6.6.1",
+  "host_toolchain": "go1.26.0 linux/amd64",
+  "independent_control": {
+    "all_crcs_match": true,
+    "emulator": "QEMU 10.2.1 POWER8 pseries",
+    "identical_elf": true,
+    "performance_score": false,
+    "reason": "0.315016/0.311672 second CRC controls fail unchanged ten-second duration validation; no QEMU score is claimed"
+  },
+  "initramfs_sha256": "04b08c7fbaa6c95401e8571da641bd808500de647270dcc9a559d6690ac7328d",
+  "instruction_budget": 2000000000,
+  "iterations_per_seed": 2000,
+  "kernel_sha256": "6dbb5b8ea3b7c8510fea3e54e11f3433335c416d17b51708c189889fb66c4641",
+  "linux_source_sha256": "da1ed7d47c97ed72c9354091628740aa3c40a3c9cd7382871f3cedbd60588234",
+  "optimized_revision": "interpreter fast paths in this change; final source separately revalidated",
+  "ram_mib": 256,
+  "runs": [
+    {
+      "after_guest_microseconds": 19254827,
+      "after_iterations_per_guest_second": 103.8700581417844,
+      "before_guest_microseconds": 50874347,
+      "before_iterations_per_guest_second": 39.31254390351192,
+      "crcs": [
+        "e9f5",
+        "e714",
+        "1fd7",
+        "8e3a",
+        "4983"
+      ],
+      "seed": "performance",
+      "speedup": 2.6421606904076573
+    },
+    {
+      "after_guest_microseconds": 19286204,
+      "after_iterations_per_guest_second": 103.70107046466998,
+      "before_guest_microseconds": 53025505,
+      "before_iterations_per_guest_second": 37.71769830386339,
+      "crcs": [
+        "18f2",
+        "e3c1",
+        "0747",
+        "8d84",
+        "0cac"
+      ],
+      "seed": "validation",
+      "speedup": 2.7494008152148552
+    }
+  ],
+  "scope": "Hosted interpreter plus guest Linux overhead, not physical POWER hardware, EEMBC certification, CoreMark/MHz, or parity with native ARM64/x86 tiers.",
+  "total_dataset_bytes": 2000
+}
