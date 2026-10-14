@@ -18,13 +18,14 @@ type Memory interface {
 // Decoded, when set, must be an immutable comparable value. Byte-validation
 // buses compare it along with the instruction extent and control-flow metadata.
 type Instruction struct {
-	Decoded                         any
-	PC                              uint64
-	Bits                            uint64
-	Length                          uint8
-	Class                           uint8
-	InterpretOnly, Memory, Terminal bool
-	Flow                            Successors
+	NativeThreshold                                   uint64 // optional cost hint; never changes instruction semantics
+	Decoded                                           any
+	PC                                                uint64
+	Bits                                              uint64
+	Length                                            uint8
+	Class                                             uint8
+	InterpretOnly, Memory, Terminal, ScheduleBoundary bool
+	Flow                                              Successors
 }
 
 type Successors struct {
@@ -93,4 +94,12 @@ type NativeMemory interface {
 type CodeVersionedNativeMemory interface {
 	NativeMemory
 	NativeCodeVersions() bool
+}
+
+// NativeBackingMemory optionally supplies the single contiguous byte allocation
+// owning its data pages. Execution still validates every pointer and permission;
+// this capability only avoids duplicate GC pins for interior pointers.
+type NativeBackingMemory interface {
+	CodeVersionedNativeMemory
+	NativeBacking() []byte
 }

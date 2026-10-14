@@ -17,6 +17,12 @@ func (e *Engine) RunQuanta(c CPU, remaining uint64) error {
 }
 
 func (e *Engine) run(c CPU, remaining uint64, quanta int) error {
+	if e.config.ProfileNative {
+		e.recordDispatchProfile(c)
+	}
+	if err := e.recycle(c); err != nil {
+		return err
+	}
 	if err := e.validateCPU(c); err != nil {
 		return err
 	}
@@ -24,7 +30,7 @@ func (e *Engine) run(c CPU, remaining uint64, quanta int) error {
 		return e.Step(c, remaining)
 	}
 	first := e.block(c)
-	if first == nil || !first.native || uint64(len(first.instructions)) > remaining {
+	if first == nil || !first.native || first.instructions[0].ScheduleBoundary || uint64(len(first.instructions)) > remaining {
 		return e.stepBlock(c, remaining, first)
 	}
 	if memory, ok := c.MemoryBus().(NativeMemory); ok {
@@ -71,7 +77,7 @@ func (e *Engine) run(c CPU, remaining uint64, quanta int) error {
 			if block == nil {
 				block = e.block(c)
 			}
-			if block == nil || uint64(len(block.instructions)) > budget {
+			if block == nil || block.instructions[0].ScheduleBoundary || uint64(len(block.instructions)) > budget {
 				return 0, false, nil
 			}
 			if block.interpretOnly {

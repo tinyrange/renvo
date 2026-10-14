@@ -1,0 +1,220 @@
+#!/usr/bin/env python3
+"""Prepare pinned Alpine boot fixtures. Network access requires --download."""
+
+import argparse
+import gzip
+import hashlib
+import io
+import json
+from pathlib import Path, PurePosixPath
+import shutil
+import stat
+import struct
+import subprocess
+import tarfile
+import tempfile
+import urllib.request
+import zlib
+
+
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parent.parent
+MAX_ROOTFS = 128 << 20
+
+
+def digest(path):
+    with path.open("rb") as source:
+        return hashlib.file_digest(source, "sha256").hexdigest()
+
+
+def obtain(path, url, expected, download):
+    if not path.exists():
+        if not download:
+            raise ValueError(f"missing {path}; rerun with --download to fetch pinned inputs")
+        print(f"Downloading {url}", flush=True)
+        temporary = path.with_suffix(path.suffix + ".part")
+        try:
+            with urllib.request.urlopen(url, timeout=60) as source, temporary.open("wb") as target:
+                shutil.copyfileobj(source, target)
+            if digest(temporary) != expected:
+                raise ValueError(f"SHA-256 mismatch: {url}")
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
+    if digest(path) != expected:
+        raise ValueError(f"SHA-256 mismatch: {path}")
+
+
+def clean_path(name):
+    if "\x00" in name or name.startswith("/") or ".." in PurePosixPath(name).parts:
+        raise ValueError(f"unsafe archive path {name!r}")
+    return str(PurePosixPath(name))
+
+
+def rootfs_entries(archive):
+    entries = {}
+    total = 0
+    with tarfile.open(archive, "r:gz") as source:
+        for member in source:
+            name = clean_path(member.name)
+            if name in entries:
+                raise ValueError(f"duplicate archive path {name!r}")
+            entry = {"mode": member.mode & 0o7777, "uid": member.uid, "gid": member.gid,
+                     "data": b"", "major": 0, "minor": 0}
+            if member.isfile():
+                total += member.size
+                if total > MAX_ROOTFS:
+                    raise ValueError("rootfs exceeds 128 MiB")
+                entry["mode"] |= stat.S_IFREG
+                entry["data"] = source.extractfile(member).read()
+            elif member.isdir():
+                entry["mode"] |= stat.S_IFDIR
+            elif member.issym():
+                entry["mode"] |= stat.S_IFLNK
+                entry["data"] = member.linkname.encode("utf-8")
+            elif member.islnk():
+                entry["mode"] |= stat.S_IFREG
+                entry["target"] = clean_path(member.linkname)
+            elif member.ischr() or member.isblk():
+                entry["mode"] |= stat.S_IFCHR if member.ischr() else stat.S_IFBLK
+                entry["major"], entry["minor"] = member.devmajor, member.devminor
+            elif member.isfifo():
+                entry["mode"] |= stat.S_IFIFO
+            else:
+                raise ValueError(f"unsupported tar member {name!r}")
+            entries[name] = entry
+    for name in list(entries):
+        for parent in PurePosixPath(name).parents:
+            parent = str(parent)
+            if parent not in entries:
+                entries[parent] = node(stat.S_IFDIR | 0o755)
+            if not stat.S_ISDIR(entries[parent]["mode"]):
+                raise ValueError(f"archive path has non-directory parent: {name}")
+    return entries
+
+
+def node(mode, data=b"", major=0, minor=0):
+    return {"mode": mode, "uid": 0, "gid": 0, "data": data, "major": major, "minor": minor}
+
+
+def cpio(entries):
+    """Write sorted Linux newc with fixed timestamps, device IDs and inodes."""
+    groups = {}
+    for name in sorted(entries):
+        target, seen = name, set()
+        while "target" in entries[target]:
+            if target in seen:
+                raise ValueError(f"hardlink cycle: {name}")
+            seen.add(target)
+            target = entries[target]["target"]
+            if target not in entries:
+                raise ValueError(f"missing hardlink target: {target}")
+        if "target" in entries[name] and not stat.S_ISREG(entries[target]["mode"]):
+            raise ValueError(f"hardlink target is not a regular file: {target}")
+        groups.setdefault(target, []).append(name)
+    records = {}
+    for inode, target in enumerate(sorted(groups), 1):
+        names = groups[target]
+        entry = entries[target]
+        for name in names:
+            # Linux expects hardlink contents in the final member of the group.
+            records[name] = (inode, len(names), entry, entry["data"] if name == names[-1] else b"")
+    result = io.BytesIO()
+    for name in sorted(records) + ["TRAILER!!!"]:
+        inode, links, entry, data = records.get(name, (0, 1, node(0), b""))
+        encoded = name.encode("utf-8") + b"\0"
+        fields = [inode, entry["mode"], entry["uid"], entry["gid"], links, 0, len(data),
+                  0, 0, entry["major"], entry["minor"], len(encoded), 0]
+        if any(value < 0 or value > 0xffffffff for value in fields):
+            raise ValueError("CPIO field exceeds 32 bits")
+        result.write(b"070701" + b"".join(f"{value:08x}".encode() for value in fields))
+        result.write(encoded)
+        result.write(b"\0" * (-result.tell() % 4))
+        result.write(data)
+        result.write(b"\0" * (-result.tell() % 4))
+    result.write(b"\0" * (-result.tell() % 512))
+    return result.getvalue()
+
+
+def arm64_image(data):
+    if data[56:60] == b"ARM\x64":
+        return data
+    if data[:8] == b"MZ\0\0zimg":
+        offset, size = struct.unpack_from("<II", data, 8)
+        if data[24:29] != b"gzip\0" or offset < 64 or size > len(data) - offset:
+            raise ValueError("unsupported or truncated ARM64 EFI zboot payload")
+        data = data[offset:offset + size]
+    if data[:3] != b"\x1f\x8b\x08":
+        raise ValueError("ISO kernel has no raw/gzip ARM64 Image or gzip EFI zboot header")
+    decoder = zlib.decompressobj(31)
+    image = decoder.decompress(data, (256 << 20) + 1)
+    if len(image) > 256 << 20 or not decoder.eof or image[56:60] != b"ARM\x64":
+        raise ValueError("invalid or oversized compressed ARM64 Image")
+    return image
+
+
+def prepare(arch, out, download):
+    lock = json.loads((HERE / "inputs.json").read_text())
+    pins = lock["architectures"][arch]
+    version = lock["version"]
+    cache = out / "downloads"
+    dest = out / arch
+    cache.mkdir(parents=True, exist_ok=True)
+    dest.mkdir(parents=True, exist_ok=True)
+    rootfs_name = f"alpine-minirootfs-{version}-{arch}.tar.gz"
+    iso_name = f"alpine-virt-{version}-{arch}.iso"
+    base = f"{lock['base']}/{arch}"
+    obtain(cache / rootfs_name, f"{base}/{rootfs_name}", pins["rootfs_sha256"], download)
+    obtain(cache / iso_name, f"{base}/{iso_name}", pins["iso_sha256"], download)
+    if not shutil.which("xorriso"):
+        raise ValueError("xorriso is required to extract the pinned ISO kernel")
+    with tempfile.TemporaryDirectory(dir=dest) as temporary:
+        kernel = Path(temporary) / "kernel"
+        subprocess.run(["xorriso", "-osirrox", "on", "-indev", str(cache / iso_name),
+                        "-extract", "/boot/vmlinuz-virt", str(kernel)],
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        data = kernel.read_bytes()
+        kernel.replace(dest / "kernel.original")
+        if arch == "aarch64":
+            data = arm64_image(data)
+        if arch == "x86_64" and data[0x202:0x206] != b"HdrS":
+            raise ValueError("ISO kernel has no x86 bzImage header")
+        kernel.write_bytes(data)
+        kernel.replace(dest / "kernel")
+    entries = rootfs_entries(cache / rootfs_name)
+    for name in ("dev", "proc", "sys", "run", "tmp"):
+        entries[name] = node(stat.S_IFDIR | (0o1777 if name == "tmp" else 0o755))
+    entries["dev/console"] = node(stat.S_IFCHR | 0o600, major=5, minor=1)
+    entries["dev/null"] = node(stat.S_IFCHR | 0o666, major=1, minor=3)
+    entries["init"] = node(stat.S_IFREG | 0o755, (HERE / "init").read_bytes())
+    archive = cpio(entries)
+    # GzipFile fixes both the mtime and optional filename fields.
+    with (dest / "initramfs.cpio.gz").open("wb") as target:
+        with gzip.GzipFile(filename="", fileobj=target, mode="wb", mtime=0, compresslevel=9) as compressed:
+            compressed.write(archive)
+    console = "ttyAMA0" if arch == "aarch64" else "ttyS0"
+    cmdline = f"console={console},115200 rdinit=/init panic=-1 nokaslr"
+    (dest / "cmdline").write_text(cmdline + "\n")
+    manifest = {"architecture": arch, "alpine": version, "inputs": pins,
+                "kernel_sha256": digest(dest / "kernel"),
+                "initramfs_sha256": digest(dest / "initramfs.cpio.gz"),
+                "command_line": cmdline, "expected": "RENVO-RFE-LINUX: PASS"}
+    (dest / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    print(f"Prepared {dest}", flush=True)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("architecture", choices=["aarch64", "x86_64", "all"])
+    parser.add_argument("--download", action="store_true", help="fetch missing pinned inputs")
+    parser.add_argument("--out", type=Path, default=ROOT / "sandbox/rfe-linux")
+    args = parser.parse_args()
+    for arch in (["aarch64", "x86_64"] if args.architecture == "all" else [args.architecture]):
+        prepare(arch, args.out.resolve(), args.download)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError, zlib.error, subprocess.CalledProcessError) as error:
+        raise SystemExit(f"rfe-linux: {error}")

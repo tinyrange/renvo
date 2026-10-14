@@ -1,13 +1,25 @@
 package engine
 
-import emu "renvo.dev/internal/rfe/runtime"
+import (
+	"fmt"
+	emu "renvo.dev/internal/rfe/runtime"
+)
 
 // Only blocks validated in the current code context are published. Native
 // non-executable stores preserve that context. All other memory operations exit
 // before returning to Go, so no code-context change can occur within this loop.
 func (e *Engine) runLinked(c CPU, remaining uint64, first *compiledBlock, memory NativeMemory, context *emu.MemoryContext, stamp CodeStamp, quanta int) error {
-	if context.ClaimLinks(e.native) || e.linkContext != stamp {
+	claimed := context.ClaimLinks(e.native)
+	if e.linkContexts == nil {
+		e.linkContexts = make(map[*emu.MemoryContext]CodeStamp)
+	}
+	if _, known := e.linkContexts[context]; !known && len(e.linkContexts) >= 64 {
+		clear(e.linkContexts)
+	}
+	if claimed || e.linkContexts[context] != stamp {
 		context.ClearLinks()
+		e.Stats.LinkContextChanges++
+		e.linkContexts[context] = stamp
 		e.linkContext = stamp
 	}
 	if !e.linkReady {
@@ -27,6 +39,11 @@ func (e *Engine) runLinked(c CPU, remaining uint64, first *compiledBlock, memory
 	// An engine may be reused with another address space. Specialized regions
 	// never confer their owner's contract on a generic context; its ordinary
 	// checked leaves remain usable without entering the specialized dispatcher.
+	if owner, ok := memory.(CodeVersionedNativeMemory); ok && owner.NativeCodeVersions() {
+		if !e.native.AdmitCodeVersionedContext(context) {
+			return e.stepBlock(c, remaining, first)
+		}
+	}
 	if !e.native.CanLinkMemory(context) {
 		return e.stepBlock(c, remaining, first)
 	}
@@ -39,10 +56,13 @@ func (e *Engine) runLinked(c CPU, remaining uint64, first *compiledBlock, memory
 	link := context.LookupLink(pc)
 	// A block entry and its prefix are immutable in the append-only arena.
 	// Avoid revalidating/copying a publication already in this exact context.
+	// The private proof table has its own bounded replacement order. A public
+	// descriptor surviving another context does not prove its private target
+	// is still resident. Refresh the selected immutable admission independently.
+	if err := e.native.PrepareTargetLink(pc, entry, e.arch.StateWords, instructions); err != nil {
+		return err
+	}
 	if link == nil || link.Entry != uint64(entry) || link.Instructions != uint64(instructions) {
-		if err := e.native.PrepareTargetLink(pc, entry, e.arch.StateWords, instructions); err != nil {
-			return err
-		}
 		if region {
 			context.PublishLink(pc, entry, instructions, first.regionPrefix)
 		} else {
@@ -67,9 +87,13 @@ func (e *Engine) runLinked(c CPU, remaining uint64, first *compiledBlock, memory
 	}
 	var err error
 	if e.config.MaxNativeInstructions > 64 {
-		err = e.native.RunLinkedSession(c.Registers(), context, budget)
+		if owner, ok := memory.(NativeBackingMemory); ok && owner.NativeCodeVersions() {
+			err = e.native.RunLinkedBackingSession(c.Registers(), context, budget, owner.NativeBacking())
+		} else {
+			err = e.native.RunLinkedSession(c.Registers(), context, budget)
+		}
 		if err != nil {
-			return err
+			return fmt.Errorf("%w: pc=%#x budget=%d total=%d remaining=%d memory=%d status=%d retired=%d", err, c.Registers()[e.arch.PC], budget, context.Total, context.Remaining, context.MemoryTotal, context.Status, context.Retired)
 		}
 	} else if quanta == 1 || e.config.MaxNativeInstructions < 64 {
 		err = e.native.CallLinked(c.Registers(), context, budget)
@@ -88,6 +112,9 @@ func (e *Engine) runLinked(c CPU, remaining uint64, first *compiledBlock, memory
 		link := context.LookupLink(pc)
 		if link == nil {
 			e.Stats.LinkMissStops++
+			if e.config.ProfileNative {
+				e.recordLinkMiss(pc)
+			}
 		} else if link.Instructions > context.Remaining {
 			e.Stats.BudgetStops++
 		} else {
@@ -109,6 +136,9 @@ func (e *Engine) runLinked(c CPU, remaining uint64, first *compiledBlock, memory
 	}
 	if context.Status != 0 {
 		e.Stats.MemoryExits++
+		if e.config.ProfileNative {
+			e.recordMemoryExit(c.Registers()[e.arch.PC], context)
+		}
 		if context.Status == 1 {
 			memory.NativeRefill(context.Address)
 		}

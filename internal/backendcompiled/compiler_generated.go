@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "e9a70cedd12889db7c062af65782cfc822134a545ab1a65445114a75928041da"
+const CompilerSourceDigest = "ccdc0c6e4a8b2374fce6d8f30fc27a9d246bc91926dbe783f8f8f336ab818219"
 
 // source: backend/compiler_common_impl.go
 
@@ -70,7 +70,7 @@ RenvoRFEContextSize      = RenvoRFEDirectSize + RenvoRFEWordBytes
 
 func renvoRFEHasLeft(op int) bool { return op >= 2 && op != 15 }
 func renvoRFEHasRight(op int) bool {
-return op >= 3 && op != 8 && op != 9 && op != 13 && op != 36 && op != 15 && op != 16 && op != 26 && op != 35
+return op >= 3 && op != 8 && op != 9 && op != 13 && op != 36 && op != 15 && op != 16 && op != 26 && op != 35 && op != 45
 }
 func renvoRFEThirdOperand(op int, immediate int) int {
 if op == 21 {
@@ -87,9 +87,12 @@ if stateWords < 1 || stateWords > 256 || len(records) == 0 || len(records)%4 != 
 return false
 }
 count := len(records) / 4
-maxOperation := 44
+maxOperation := 45
 for i := 0; i < count; i++ {
 op, left, right, immediate := records[i*4], records[i*4+1], records[i*4+2], records[i*4+3]
+if op == 45 && (!memory || right < 1 || right > 1024 || immediate < 0 || immediate > 256) {
+return false
+}
 if op == 44 && immediate != 8 && immediate != 16 && immediate != 32 && immediate != 64 && immediate != 136 && immediate != 144 && immediate != 160 && immediate != 192 {
 return false
 }
@@ -147,7 +150,7 @@ return false
 if (op >= 17 && op <= 20 || op >= 38 && op <= 41) && immediate != 32 && immediate != 64 {
 return false
 }
-if op == 15 && (immediate < 0 || immediate > 256) {
+if op == 15 && (immediate < 0 || immediate > 256 || right < 0 || right > 1) {
 return false
 }
 }
@@ -164,6 +167,12 @@ if !renvoRFEValidateRecords(records, stateWords, memory) {
 return nil, 0, false
 }
 count, base := len(records)/4, 2
+hasElapsed := false
+for i := 0; i < count; i++ {
+if records[i*4] == 45 {
+hasElapsed = true
+}
+}
 if memory || shared {
 base = 3
 }
@@ -172,6 +181,10 @@ scratch := (spills + base) * 8
 peak := scratch - 8
 if memory {
 peak = scratch
+}
+elapsedSlot := -scratch - 8
+if hasElapsed {
+peak += 8
 }
 tertiary := 1
 if context.renvoTargetArch == renvoArchAarch64 {
@@ -199,7 +212,26 @@ renvoRFESetContext(a)
 a.rfeFrameBias = 0
 renvoRFEInitSharedFacts(a)
 }
+if hasElapsed {
+frameReg, remainingReg := 5, 3
+if renvoRFEArm(a) {
+frameReg, remainingReg = 29, 23
+}
+
+
+renvoRFERegStore(a, remainingReg, frameReg, -40, 8)
+renvoRFERegImm(a, remainingReg, 0)
+renvoRFERegStore(a, remainingReg, frameReg, -56, 8)
+renvoRFERegStore(a, remainingReg, frameReg, -112, 8)
+}
 renvoAsmCallLabel(a, body)
+if hasElapsed {
+frameReg, remainingReg := 5, 3
+if renvoRFEArm(a) {
+frameReg, remainingReg = 29, 23
+}
+renvoRFERegLoad(a, remainingReg, frameReg, -40, 8)
+}
 renvoEmitGlobalInitFrameEnd(&g, frame)
 renvoAsmRet(a)
 renvoAsmMarkLabel(a, body)
@@ -212,6 +244,9 @@ if !shared {
 renvoRFERegMove(a, 11, 0)
 }
 
+if hasElapsed {
+renvoRFECaptureElapsed(a, elapsedSlot, shared)
+}
 exit, progress := -1, 0
 slowLabels, slowRecords, slowProgress, slowStatus := []int{}, []int{}, []int{}, []int{}
 if memory {
@@ -275,6 +310,10 @@ renvoRFESavePairHigh(a, locations, i+1)
 }
 renvoRFESaveValue(a, locations, i)
 }
+continue
+}
+if op == 45 {
+renvoRFEEmitElapsed(a, records, locations, i, -1, 0, elapsedSlot)
 continue
 }
 if renvoRFEEmitDirectRecord(a, records, locations, i) {
@@ -28908,6 +28947,12 @@ if instructions < 1 || instructions > 256 || len(records) < 8 || len(records)%4 
 return nil, nil, false
 }
 count := len(records) / 4
+hasElapsed := false
+for i := 0; i < count; i++ {
+if records[i*4] == 45 {
+hasElapsed = true
+}
+}
 if records[(count-1)*4] != 35 || records[(count-1)*4+1] < 0 || records[(count-1)*4+1] >= count-1 || renvoMemoryEffectOnly(records[records[(count-1)*4+1]*4]) {
 return nil, nil, false
 }
@@ -28936,9 +28981,23 @@ inputs[slot], stateMap[slot] = i, i
 }
 snapshots := []renvoRFELoopExit{}
 progress, memory := 0, 0
+memoryMode := -1
+for i := 0; i < count; i++ {
+if records[i*4] == 15 {
+if memoryMode >= 0 && memoryMode != records[i*4+2] {
+return nil, nil, false
+}
+memoryMode = records[i*4+2]
+}
+}
+groupedMemory := memoryMode == 1
+pendingMemory := false
 storesMemory := false
 for i := 0; i < count; i++ {
 op, left, right, immediate := records[i*4], records[i*4+1], records[i*4+2], records[i*4+3]
+if op == 45 && immediate > instructions {
+return nil, nil, false
+}
 if renvoRFEHasLeft(op) {
 last[left] = i
 }
@@ -28954,6 +29013,15 @@ stateMap[immediate] = left
 if op == 15 {
 if immediate < progress || immediate > instructions {
 return nil, nil, false
+}
+if groupedMemory && immediate > progress {
+
+
+
+if pendingMemory {
+memory++
+}
+pendingMemory = false
 }
 progress = immediate
 }
@@ -28980,9 +29048,13 @@ if op == 13 || op == 14 || op == 37 {
 if op == 14 || op == 37 {
 storesMemory = true
 }
+if groupedMemory {
+pendingMemory = true
+} else {
 memory++
 if memory > instructions {
 return nil, nil, false
+}
 }
 }
 }
@@ -29259,6 +29331,15 @@ contextReg, dispatcherBudget = 1, 23
 if !shared {
 renvoRFERegStore(a, contextReg, frameReg, -16, 8)
 }
+if hasElapsed {
+renvoRFECaptureElapsed(a, -40, shared)
+if arm64 && shared {
+
+
+
+renvoRFERegLoad(a, contextReg, frameReg, -16, 8)
+}
+}
 if !oneShot {
 renvoRFERegMove(a, budget, dispatcherBudget)
 renvoRFERegImm(a, iterations, 0)
@@ -29451,6 +29532,14 @@ if result == 0 {
 renvoRFESaveValue(a, locations, i)
 }
 }
+continue
+}
+if op == 45 {
+iterationReg := iterations
+if oneShot {
+iterationReg = -1
+}
+renvoRFEEmitElapsed(a, records, locations, i, iterationReg, instructions, -40)
 continue
 }
 if foldedAddresses[i] >= 0 {
@@ -29882,8 +29971,16 @@ op, left, right, imm := records[i*4], records[i*4+1], records[i*4+2], records[i*
 if op == 0 || op == 1 {
 continue
 }
-left, right = aliases[left], aliases[right]
-records[i*4+1], records[i*4+2] = left, right
+
+
+if renvoRFEHasLeft(op) {
+left = aliases[left]
+records[i*4+1] = left
+}
+if renvoRFEHasRight(op) {
+right = aliases[right]
+records[i*4+2] = right
+}
 if op == 21 {
 imm = aliases[imm]
 records[i*4+3] = imm
@@ -30236,7 +30333,9 @@ target = destinations[selected] - 1
 if destinations[selected] < 0 && sources[selected] > 0 {
 target = sources[selected] - 1
 } else if sources[selected] == 0 {
-renvoRFERegImm(a, target, records[sourceValues[selected]*4+3])
+
+
+renvoRFELoadValue(a, records, locations, sourceValues[selected], target)
 } else {
 renvoRFELoopReadLocation(a, sources[selected], target)
 }
@@ -31093,6 +31192,59 @@ frame, secondary = 29, 1
 }
 renvoRFERegStore(a, secondary, frame, -16, 8)
 }
+
+
+
+
+
+
+
+func renvoRFECaptureElapsed(a *renvoAsm, slot int, shared bool) {
+frameReg, remainingReg := 5, 3
+if renvoRFEArm(a) {
+frameReg, remainingReg = 29, 23
+}
+if shared {
+bias := a.rfeFrameBias
+a.rfeFrameBias = 0
+renvoRFERegLoad(a, 0, frameReg, -56, 8)
+renvoRFERegBinary(a, 4, 0, remainingReg)
+renvoRFERegLoad(a, 1, frameReg, -112, 8)
+renvoRFERegBinary(a, 3, 0, 1)
+a.rfeFrameBias = bias
+} else {
+renvoRFERegImm(a, 0, 0)
+}
+renvoRFERegStore(a, 0, frameReg, slot, 8)
+}
+
+func renvoRFEEmitElapsed(a *renvoAsm, records []int, locations []int, i int, iterationReg int, instructions int, elapsedSlot int) {
+left, scale, prefix := records[i*4+1], records[i*4+2], records[i*4+3]
+frameReg := 5
+if renvoRFEArm(a) {
+frameReg = 29
+}
+renvoRFERegLoad(a, 0, frameReg, elapsedSlot, 8)
+if iterationReg >= 0 {
+renvoRFERegMove(a, 1, iterationReg)
+if instructions != 1 {
+renvoRFERegImm(a, 2, instructions)
+renvoRFERegBinary(a, 12, 1, 2)
+}
+renvoRFERegBinary(a, 3, 0, 1)
+}
+if prefix != 0 {
+renvoRFERegImmediate(a, 3, 0, prefix)
+}
+if scale != 1 {
+renvoRFERegImm(a, 1, scale)
+renvoRFERegBinary(a, 12, 0, 1)
+}
+renvoRFELoadValue(a, records, locations, left, 1)
+renvoRFERegBinary(a, 3, 0, 1)
+renvoRFESaveValue(a, locations, i)
+}
+
 func renvoRFEGetContext(a *renvoAsm) {
 frame, secondary := 5, 2
 if renvoRFEArm(a) {

@@ -1,0 +1,95 @@
+{
+  "architecture": "x86_64",
+  "baseline_median": 1065.0813038492122,
+  "clock_diagnostic": [
+    "clock mode=realtime translation_paused_ns=17913666015",
+    "clock ticks=14040740915 tsc=1404074091500 tsc_offset=0 tsc_writes=0 pit_edges=107953 pit_delivered=107672 pit_coalesced=280"
+  ],
+  "clocksource": "tsc\ntsc",
+  "crc_valid": true,
+  "error": null,
+  "exit_code": 0,
+  "host_logical_cpu": 0,
+  "host_score_eligible": true,
+  "host_total_seconds": 135.87771872105077,
+  "inputs_unchanged": true,
+  "irq_deltas": {
+    "0": 47718,
+    "2": 0,
+    "4": 232,
+    "8": 0,
+    "CAL": 0,
+    "ERR": 0,
+    "IWI": 0,
+    "LOC": 0,
+    "MIS": 0,
+    "NMI": 0,
+    "NPI": 0,
+    "PIN": 0,
+    "PIW": 0,
+    "PMI": 0,
+    "RES": 0,
+    "RTR": 0,
+    "SPU": 0,
+    "TLB": 0,
+    "TRM": 0
+  },
+  "run_directory": "sandbox/rfe-linux/coremark-system-compare-v1/x86_64/iterations-100000/runs/rfe-current-1791939705282191717",
+  "runner_sha256": "5db4768f759a7e2c78a39dc3c8e4b9de5fd379ea02b23d430b903a403cdcc25b",
+  "seed_reports": [
+    {
+      "crc_valid": true,
+      "crcfinal": [
+        "d340"
+      ],
+      "crcs": [
+        "e9f5",
+        "e714",
+        "1fd7",
+        "8e3a"
+      ],
+      "guest_duration_seconds": 23.260945,
+      "host_duration_seconds": 23.881850919220597,
+      "iterations": 100000,
+      "iterations_per_host_second": 4187.2801374669825,
+      "seed": "PERF"
+    },
+    {
+      "crc_valid": true,
+      "crcfinal": [
+        "5c66"
+      ],
+      "crcs": [
+        "18f2",
+        "e3c1",
+        "0747",
+        "8d84"
+      ],
+      "guest_duration_seconds": 23.356027,
+      "host_duration_seconds": 23.87223708909005,
+      "iterations": 100000,
+      "iterations_per_host_second": 4188.966439416833,
+      "seed": "VALID"
+    }
+  ],
+  "serial_events": [
+    {
+      "host_monotonic_seconds": 2.554723548813712e+06,
+      "marker": "RENVO-COREMARK: START PERF"
+    },
+    {
+      "host_monotonic_seconds": 2.554747430664631e+06,
+      "marker": "RENVO-COREMARK: STOP PERF"
+    },
+    {
+      "host_monotonic_seconds": 2.55474751233134e+06,
+      "marker": "RENVO-COREMARK: START VALID"
+    },
+    {
+      "host_monotonic_seconds": 2.554771384568429e+06,
+      "marker": "RENVO-COREMARK: STOP VALID"
+    }
+  ],
+  "speedup": 3.9314183080053318,
+  "success": true
+}

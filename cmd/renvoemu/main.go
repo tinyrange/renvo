@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"renvo.dev/internal/rfe"
+	"runtime"
 	"strings"
 )
 
@@ -108,9 +109,15 @@ func run(args []string) error {
 		}
 		command = []string{"build", "-trimpath", "-o", *output, "./cmd"}
 	}
-	cmd := exec.Command("go", command...)
+	// Use the toolchain which built this CLI. A Go launcher on PATH may try to
+	// download/verify another toolchain after the offline workspace changes cwd.
+	goName := "go"
+	if runtime.GOOS == "windows" {
+		goName += ".exe"
+	}
+	cmd := exec.Command(filepath.Join(runtime.GOROOT(), "bin", goName), command...)
 	cmd.Dir = workspace
-	cmd.Env = append(os.Environ(), "GOWORK=off", "GOPROXY=off", "GOSUMDB=off")
+	cmd.Env = append(os.Environ(), "GOWORK=off", "GOPROXY=off", "GOSUMDB=off", "GOTOOLCHAIN=local")
 	if *target != "" {
 		parts := strings.Split(*target, "/")
 		if len(parts) != 2 {

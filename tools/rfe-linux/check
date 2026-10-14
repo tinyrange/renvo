@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$repository_root"
+fixtures="${RENVO_RFE_LINUX_FIXTURES:-$repository_root/sandbox/rfe-linux}"
+boot_timeout="${RENVO_RFE_LINUX_TIMEOUT:-300s}"
+steps="${RENVO_RFE_LINUX_STEPS:-2000000000}"
+
+if (($# != 0)); then
+	printf 'Usage: tools/rfe-linux/check\n' >&2
+	exit 2
+fi
+if [[ ! "$steps" =~ ^[1-9][0-9]*$ ]]; then
+	printf 'RENVO_RFE_LINUX_STEPS must be a positive integer\n' >&2
+	exit 2
+fi
+for tool in go python3 xorriso timeout sha256sum; do
+	if ! command -v "$tool" >/dev/null 2>&1; then
+		printf 'RFE Linux boot checks require %s\n' "$tool" >&2
+		exit 2
+	fi
+done
+
+# Downloads are explicit and confined to this opt-in integration gate. Ordinary
+# package/preflight tests exercise synthetic CPU and machine fixtures offline.
+"$repository_root/tools/rfe-linux/prepare" all --download --out "$fixtures"
+mkdir -p "$fixtures/bin"
+go build -o "$fixtures/bin/renvoemu" ./cmd/renvoemu
+
+for arch in aarch64 x86_64; do
+	case "$arch" in
+		aarch64) source=linux-arm64-machine ;;
+		x86_64) source=linux-amd64-machine ;;
+	esac
+	image_dir="$fixtures/$arch"
+	binary="$fixtures/bin/$source"
+	log="$image_dir/rfe-boot.log"
+	"$fixtures/bin/renvoemu" build -o "$binary" "emulators/$source.rfe"
+	before="$(sha256sum "$image_dir/kernel" "$image_dir/initramfs.cpio.gz")"
+	command_line="$(cat "$image_dir/cmdline")"
+	printf 'Booting Alpine in %s; serial log: %s\n' "$source" "$log"
+	status=0
+	timeout --signal=TERM --kill-after=5s "$boot_timeout" \
+		"$binary" -kernel "$image_dir/kernel" -initrd "$image_dir/initramfs.cpio.gz" \
+		-memory 256 -steps "$steps" -append "$command_line" >"$log" 2>&1 || status=$?
+	after="$(sha256sum "$image_dir/kernel" "$image_dir/initramfs.cpio.gz")"
+	if [[ "$before" != "$after" ]]; then
+		printf '%s changed its kernel or initramfs input\n' "$source" >&2
+		exit 1
+	fi
+	if ((status != 0)); then
+		printf '%s failed with status %d\n' "$source" "$status" >&2
+		tail -n 80 "$log" >&2
+		exit 1
+	fi
+	# Ignore only serial CRLF framing. No QEMU/host output is accepted as guest
+	# evidence: these logs come solely from the built RFE machine above.
+	python3 - "$arch" "$log" <<'PY'
+import pathlib
+import re
+import sys
+
+arch, path = sys.argv[1:]
+text = pathlib.Path(path).read_text(errors="replace").replace("\r\n", "\n")
+lines = text.splitlines()
+markers = ["INIT", "EXEC PASS", "FILE PASS", "PIPE PASS", "PASS"]
+expected = ["RENVO-RFE-LINUX: " + marker for marker in markers]
+positions = [lines.index(marker) if marker in lines else -1 for marker in expected]
+if (any(position < 0 for position in positions)
+        or positions != sorted(positions)
+        or "RENVO-RFE-LINUX: FAIL" in lines
+        or not re.search(r"(?:^|\] )Linux version \S+", text, re.M)
+        or "Run /init as init process" not in text
+        or not re.search(r"^Alpine 3\.24\.2, Linux \S+, " + re.escape(arch) + r"$", text, re.M)):
+    print(text[-12000:], file=sys.stderr)
+    raise SystemExit(f"{arch}: missing or inconsistent Alpine guest execution evidence in {path}")
+print(f"PASS: {arch} Alpine kernel boot, child exec, file I/O, pipeline and shutdown")
+PY
+done

@@ -21,9 +21,10 @@ var perfSymbols struct {
 	jit          *runimage.JITDump
 	jitErr       error
 	jitAttempted bool
+	jitMonotonic bool
 }
 
-func (n *Native) EnablePerfMap() error {
+func (n *Native) EnablePerfMap(monotonic ...bool) error {
 	perfSymbols.Lock()
 	defer perfSymbols.Unlock()
 	n.profileMu.Lock()
@@ -40,7 +41,17 @@ func (n *Native) EnablePerfMap() error {
 	if os.Getenv("RENVO_RFE_JITDUMP") == "1" {
 		if !perfSymbols.jitAttempted {
 			perfSymbols.jitAttempted = true
-			perfSymbols.jit, perfSymbols.jitErr = runimage.NewJITDump(fmt.Sprintf("jit-%d.dump", os.Getpid()))
+			perfSymbols.jitMonotonic = len(monotonic) != 0 && monotonic[0]
+			path := fmt.Sprintf("jit-%d.dump", os.Getpid())
+			if perfSymbols.jitMonotonic {
+				perfSymbols.jit, perfSymbols.jitErr = runimage.NewJITDumpMonotonic(path)
+			} else {
+				perfSymbols.jit, perfSymbols.jitErr = runimage.NewJITDump(path)
+			}
+		}
+		if perfSymbols.jitMonotonic != (len(monotonic) != 0 && monotonic[0]) {
+			n.SymbolErrors++
+			return fmt.Errorf("JIT dump clock domain changed within process")
 		}
 		if perfSymbols.jitErr != nil {
 			n.SymbolErrors++

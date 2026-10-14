@@ -26,7 +26,7 @@ func applyVirtualPackages(document *Document) {
 		return
 	}
 	for i := 0; i < len(document.Declarations); i++ {
-		filename, _ := documentPosition(*document, document.Declarations[i].Start)
+		filename, _, _ := documentSource(*document, document.Declarations[i].Start)
 		document.Declarations[i].Package = virtualPackageName(filename)
 		addVirtualPackage(document, filename, document.Declarations[i].Package)
 	}

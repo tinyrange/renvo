@@ -387,7 +387,7 @@ func (p *documentParser) validateGoName(wrapped []byte, token syntax.Token, body
 	}
 	scope := ""
 	if len(p.document.sourceMap) != 0 {
-		filename, _ := documentPosition(*p.document, offset)
+		filename, _, _ := documentSource(*p.document, offset)
 		scope = virtualPackageName(filename)
 	}
 	scopedName := scope + "\x00" + name

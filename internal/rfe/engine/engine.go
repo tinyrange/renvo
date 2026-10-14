@@ -6,15 +6,19 @@ import (
 )
 
 type EngineConfig struct {
-	Mode                  string // interpreter, ir, native; native includes both lower tiers
-	IRThreshold           uint64
-	NativeThreshold       uint64
-	MaxBlocks             int
-	MaxInstructions       int // cold block discovery width
-	MaxRegionInstructions int // independently optimized region width
-	MaxNativeInstructions int // bounded uninterrupted scheduling slice
-	NativeBytes           int
-	ProfileNative         bool // emit Linux perf-map symbols; enabled by CLI -stats
+	Mode                   string // interpreter, ir, native; native includes both lower tiers
+	DiscoveryThreshold     uint64 // optional bounded cold-PC observation before decoding
+	RecycleNative          bool   // reclaim a full arena only at quiescent dispatch entry
+	EvictCold              bool   // recycle decoded-cache slots; native arena stays bounded/append-only
+	IRThreshold            uint64
+	NativeThreshold        uint64
+	MaxBlocks              int
+	MaxInstructions        int // cold block discovery width
+	MaxRegionInstructions  int // independently optimized region width
+	MaxNativeInstructions  int // bounded uninterrupted scheduling slice
+	NativeBytes            int
+	ProfileNativeMonotonic bool // use CLOCK_MONOTONIC for sampling profiles
+	ProfileNative          bool // emit Linux perf-map symbols; enabled by CLI -stats
 }
 
 func DefaultEngineConfig() EngineConfig {
@@ -22,8 +26,12 @@ func DefaultEngineConfig() EngineConfig {
 }
 
 type Stats struct {
-	LoopIterations                                         uint64 // native loop iterations, without a Go transition
-	NativeSessions, LinkMissStops, BudgetStops, OtherStops uint64
+	ArenaResets                                                                   uint64 // quiescent native arena replacements within the same byte cap
+	Evictions                                                                     uint64 // decoded cache replacements, not native arena reclamation
+	LoopIterations                                                                uint64 // native loop iterations, without a Go transition
+	NativeSessions, LinkMissStops, BudgetStops, OtherStops                        uint64
+	LinkContextChanges                                                            uint64
+	ProfileMissAbsent, ProfileMissInterpreted, ProfileMissCold, ProfileMissNative uint64
 
 	Regions, RegionExits                               uint64 // bounded cyclic regions and successful side exits
 	ProfileErrors                                      uint64
@@ -36,6 +44,8 @@ type Stats struct {
 }
 
 type compiledBlock struct {
+	cacheSlot                       int
+	recent                          uint8
 	regionAttempted, region         bool
 	regionGeneration                uint64 // retry only after another native promotion
 	regionEntry, regionInstructions int
@@ -58,17 +68,29 @@ type dispatchEntry struct {
 	block *compiledBlock
 }
 
+type hotObservation struct{ pc, visits uint64 }
+
 type Engine struct {
-	arch        Architecture
-	config      EngineConfig
-	blocks      map[uint64]*compiledBlock
-	dispatch    [1024]dispatchEntry
-	ir          emu.IRMachine
-	native      *emu.Native
-	Stats       Stats
-	linkContext CodeStamp
-	edgeCounts  map[uint64][2]uint64 // bounded by discovered conditional instructions
-	linkReady   bool                 // immutable state ABI, prepared once for this native engine
+	hot             [4096]hotObservation
+	hotVictim       uint64
+	cacheOrder      []dispatchEntry
+	cacheNext       int
+	arch            Architecture
+	config          EngineConfig
+	blocks          map[uint64]*compiledBlock
+	dispatch        [1024]dispatchEntry
+	ir              emu.IRMachine
+	native          *emu.Native
+	Stats           Stats
+	linkContext     CodeStamp
+	linkContexts    map[*emu.MemoryContext]CodeStamp
+	profileMisses   *[1024]LinkMissSample
+	profileMemory   *[256]DispatchMemorySample
+	profileTicks    uint64
+	profileLastNS   uint64
+	profileTimeline []DispatchProfileSample
+	edgeCounts      map[uint64][2]uint64 // bounded by discovered conditional instructions
+	linkReady       bool                 // immutable state ABI, prepared once for this native engine
 }
 
 func New(config EngineConfig, arch Architecture) (*Engine, error) {
@@ -91,6 +113,9 @@ func New(config EngineConfig, arch Architecture) (*Engine, error) {
 		return nil, fmt.Errorf("invalid engine budget")
 	}
 	e := &Engine{arch: arch, config: config, blocks: map[uint64]*compiledBlock{}}
+	if config.EvictCold {
+		e.cacheOrder = make([]dispatchEntry, config.MaxBlocks)
+	}
 	if config.Mode == "native" {
 		n, err := emu.NewNative(config.NativeBytes)
 		if err != nil {
@@ -98,7 +123,7 @@ func New(config EngineConfig, arch Architecture) (*Engine, error) {
 		} else {
 			e.native = n
 			if config.ProfileNative {
-				_ = n.EnablePerfMap()
+				_ = n.EnablePerfMap(config.ProfileNativeMonotonic)
 				e.Stats.ProfileErrors = n.SymbolErrors
 			}
 		}
@@ -146,6 +171,10 @@ func (e *Engine) block(c CPU) *compiledBlock {
 		e.Stats.Invalidations++
 		return nil
 	}
+	old.recent = 1
+	if old.native {
+		old.recent = 2
+	}
 	// A direct hit already contains exactly this pointer; do not rewrite its
 	// GC-tracked slot on every executed block. Map hits still repair collisions.
 	if !direct {
@@ -157,10 +186,20 @@ func (e *Engine) block(c CPU) *compiledBlock {
 // Keep decoding, allocation and the large instruction descriptor out of the
 // guarded lookup's frame; none of these are needed for a hot block entry.
 func (e *Engine) discoverBlock(c CPU, pc uint64, cache *dispatchEntry) *compiledBlock {
-	if len(e.blocks) >= e.config.MaxBlocks {
+	defer pauseTranslationClock(c)()
+	if e.config.DiscoveryThreshold > 1 {
+		observation := e.discoveryObservation(pc, true)
+		if observation.visits < e.config.DiscoveryThreshold {
+			observation.visits++
+		}
+		if observation.visits < e.config.DiscoveryThreshold {
+			return nil
+		}
+	}
+	if len(e.blocks) >= e.config.MaxBlocks && !e.config.EvictCold {
 		return nil
 	}
-	block := &compiledBlock{}
+	block := &compiledBlock{cacheSlot: -1, recent: 1}
 	nativeMemory, capable := c.MemoryBus().(NativeMemory)
 	allowMemory := capable && e.native != nil && nativeMemory.NativeContext() != nil
 	addr := pc
@@ -169,6 +208,9 @@ func (e *Engine) discoverBlock(c CPU, pc uint64, cache *dispatchEntry) *compiled
 		e.Stats.CodeReads++
 		if err != nil || ins.PC != addr || ins.Length == 0 || ins.Length > 15 || uint64(ins.Length) > ^uint64(0)-addr || uint64(ins.Length)%e.arch.Alignment != 0 {
 			break
+		}
+		if ins.ScheduleBoundary && len(block.instructions) != 0 {
+			break // Clock/device scheduling reads own their host boundary.
 		}
 		if ins.InterpretOnly || ins.Memory && !allowMemory {
 			if len(block.instructions) == 0 {
@@ -184,7 +226,7 @@ func (e *Engine) discoverBlock(c CPU, pc uint64, cache *dispatchEntry) *compiled
 			block.effects = true
 			block.memoryPrefix[count]++
 		}
-		if ins.Terminal {
+		if ins.Terminal || ins.ScheduleBoundary {
 			break
 		}
 		addr += uint64(ins.Length)
@@ -193,7 +235,18 @@ func (e *Engine) discoverBlock(c CPU, pc uint64, cache *dispatchEntry) *compiled
 		return nil
 	}
 	e.dependencies(c, pc, block)
+	if e.config.EvictCold {
+		e.admit(pc, block)
+	}
 	e.blocks[pc] = block
+	// An evicted PC must establish fresh heat, rather than retaining a
+	// permanent discovery ticket and repeatedly decoding during cache churn.
+	if e.config.DiscoveryThreshold > 1 {
+		observation := e.discoveryObservation(pc, false)
+		if observation != nil {
+			observation.visits = 0
+		}
+	}
 	*cache = dispatchEntry{pc, block}
 	e.Stats.Blocks++
 	return block
@@ -201,7 +254,7 @@ func (e *Engine) discoverBlock(c CPU, pc uint64, cache *dispatchEntry) *compiled
 
 // Step retires at most remaining instructions. Code page stamps (or bytes for
 // unversioned memories) and execute permission are checked on every block entry.
-// Code cache exhaustion always falls back; invalid native entries are never
+// Native arena exhaustion always falls back; invalid native entries are never
 // reused or reclaimed underneath a call.
 func (e *Engine) Step(c CPU, remaining uint64) error {
 	if err := e.validateCPU(c); err != nil {
@@ -238,40 +291,8 @@ func (e *Engine) stepBlock(c CPU, remaining uint64, block *compiledBlock) error 
 	if block.visits < e.config.IRThreshold {
 		return e.interpret(c)
 	}
-	if block.ops == nil {
-		var b emu.Builder
-		// This translation is reachable only through its guarded PC key.
-		// Specialize PC-relative values and sequential PC updates at build time.
-		b.Store(e.arch.PC, b.Constant(c.Registers()[e.arch.PC]))
-		for i, ins := range block.instructions {
-			if !e.arch.Lower(&b, ins, i) {
-				e.Stats.CompileFailures++
-				e.discard(c.Registers()[e.arch.PC])
-				return e.interpret(c)
-			}
-		}
-		block.ops = b.Finish(e.arch.StateWords)
-		prepared, err := emu.Prepare(block.ops, e.arch.StateWords)
-		if err != nil {
-			e.Stats.CompileFailures++
-			e.discard(c.Registers()[e.arch.PC])
-			return e.interpret(c)
-		}
-		block.prepared = prepared
-	}
-	if e.native != nil && !block.attempted && block.visits >= e.config.NativeThreshold {
-		block.attempted = true
-		entry, err := e.native.Compile(block.ops, e.arch.StateWords)
-		if err != nil {
-			e.Stats.CompileFailures++
-		} else {
-			block.entry = entry
-			_ = e.native.NameEntry(entry, fmt.Sprintf("%s_%x_pure_%d_ops", e.arch.Name, c.Registers()[e.arch.PC], len(block.ops)))
-			e.Stats.ProfileErrors = e.native.SymbolErrors
-			block.native = true
-			e.Stats.Promotions++
-		}
-		e.Stats.NativeBytes = e.native.Bytes
+	if !e.preparePureBlock(c, block) {
+		return e.interpret(c)
 	}
 	var err error
 	if block.native && e.native != nil {
@@ -312,4 +333,47 @@ func (e *Engine) validateCPU(c CPU) error {
 		return fmt.Errorf("guest state does not match architecture")
 	}
 	return nil
+}
+
+func (e *Engine) preparePureBlock(c CPU, block *compiledBlock) bool {
+	if block.ops != nil && (e.native == nil || block.attempted || block.visits < e.nativeThreshold(block)) {
+		return true
+	}
+	defer pauseTranslationClock(c)()
+	if block.ops == nil {
+		var b emu.Builder
+		// This translation is reachable only through its guarded PC key.
+		// Specialize PC-relative values and sequential PC updates at build time.
+		b.Store(e.arch.PC, b.Constant(c.Registers()[e.arch.PC]))
+		for i, ins := range block.instructions {
+			if !e.arch.Lower(&b, ins, i) {
+				e.Stats.CompileFailures++
+				e.discard(c.Registers()[e.arch.PC])
+				return false
+			}
+		}
+		block.ops = b.Finish(e.arch.StateWords)
+		prepared, err := emu.Prepare(block.ops, e.arch.StateWords)
+		if err != nil {
+			e.Stats.CompileFailures++
+			e.discard(c.Registers()[e.arch.PC])
+			return false
+		}
+		block.prepared = prepared
+	}
+	if e.native != nil && !block.attempted && block.visits >= e.nativeThreshold(block) {
+		block.attempted = true
+		entry, err := e.native.Compile(block.ops, e.arch.StateWords)
+		if err != nil {
+			e.Stats.CompileFailures++
+		} else {
+			block.entry = entry
+			_ = e.native.NameEntry(entry, fmt.Sprintf("%s_%x_pure_%d_ops", e.arch.Name, c.Registers()[e.arch.PC], len(block.ops)))
+			e.Stats.ProfileErrors = e.native.SymbolErrors
+			block.native = true
+			e.Stats.Promotions++
+		}
+		e.Stats.NativeBytes = e.native.Bytes
+	}
+	return true
 }

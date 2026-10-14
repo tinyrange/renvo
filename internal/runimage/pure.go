@@ -31,6 +31,7 @@ type CodeArena struct {
 	targets      [1024]linkedTarget         // opaque prepared proofs; no executable pointers
 	sessionEpoch uint64                     // arena-serialized generation, never reused without clearing proofs
 	sessionImage *[sessionImageWords]uint64 // dedicated pointer-free foreign ABI storage
+	sparePins    *ownedSessionPins          // unpinned, cleared storage only; never a live pointer graph
 	ownedPins    *ownedSessionPins          // at most one owned pointer graph, refreshed before use
 	sessionState *[256]uint64               // independent of enclosing Go owner allocations
 }

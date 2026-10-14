@@ -1,0 +1,12 @@
+linux/arm: bootstrap base
+linux/arm: bootstrap candidate
+base warm-up workload
+candidate warm-up workload
+linux/arm base sample 1: CPU=15.061947s wall=15.15849954s memory=220631040 (peak_rss) artifact=5892829 VM steps=0
+linux/arm candidate sample 1: CPU=17.445408s wall=17.484210139s memory=224059392 (peak_rss) artifact=6316187 VM steps=0
+linux/arm candidate sample 2: CPU=17.420312s wall=17.456634038s memory=226078720 (peak_rss) artifact=6316187 VM steps=0
+linux/arm base sample 2: CPU=14.991825s wall=15.019559995s memory=221552640 (peak_rss) artifact=5892829 VM steps=0
+linux/arm base sample 3: CPU=15.158159s wall=15.18670455s memory=220905472 (peak_rss) artifact=5892829 VM steps=0
+linux/arm candidate sample 3: CPU=17.645402s wall=17.682310522s memory=224038912 (peak_rss) artifact=6316187 VM steps=0
+Performance report: /tmp/tempdir1817362624/publication-system-clock-page-table-repair/sandbox/agent-profiles/arm-gate.json
+PASS: compiler performance (selfhost)

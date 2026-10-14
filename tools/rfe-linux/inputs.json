@@ -1,0 +1,14 @@
+{
+  "version": "3.24.2",
+  "base": "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases",
+  "architectures": {
+    "aarch64": {
+      "rootfs_sha256": "9bf70a7f18ea44094cbb5f70c58f9af129c8214745743db0e68e5502cc2ce773",
+      "iso_sha256": "a57ba668b5f6b17a670fcf8e799d5d7fe43766ed086d6ce2927b0625bf43dbf6"
+    },
+    "x86_64": {
+      "rootfs_sha256": "c5ca053cfe1d85c5b96dff8b9bc57045f7f184a30ffb6b65776409ca90388677",
+      "iso_sha256": "3ab424762af704b2c2a9e57df1dc37f982af260071504d977f2fb96822e7130b"
+    }
+  }
+}

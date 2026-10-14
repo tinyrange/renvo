@@ -13,9 +13,15 @@ type regionPart struct {
 }
 
 func (e *Engine) regionParts(c CPU, first *compiledBlock) []regionPart {
+	if first.instructions[0].ScheduleBoundary {
+		return nil
+	}
 	root := c.Registers()[e.arch.PC]
 	flow := first.instructions[len(first.instructions)-1].Flow
-	if flow.Known && flow.Next == root {
+	if !flow.Known || flow.Next == root {
+		// Indirect/call/return leaves cannot grow a statically discovered
+		// trace, but can still use the owned one-shot region compiler. Their
+		// dynamic successor is published/validated by the ordinary dispatcher.
 		return []regionPart{{root, first}}
 	}
 	memory, ok := c.MemoryBus().(CodeContextMemory)
@@ -96,7 +102,7 @@ func (e *Engine) regionParts(c CPU, first *compiledBlock) []regionPart {
 				continue
 			}
 			candidate := e.blocks[target]
-			if seen[target] || candidate == nil || !candidate.native || candidate.context != stamp || len(candidate.dependencies) == 0 || len(candidate.instructions) == 0 || total+len(candidate.instructions) > e.config.MaxRegionInstructions {
+			if seen[target] || candidate == nil || !candidate.native || candidate.context != stamp || len(candidate.dependencies) == 0 || len(candidate.instructions) == 0 || candidate.instructions[0].ScheduleBoundary || total+len(candidate.instructions) > e.config.MaxRegionInstructions {
 				continue
 			}
 			seen[target] = true
@@ -123,6 +129,7 @@ func (e *Engine) prepareRegion(c CPU, block *compiledBlock) {
 	if !block.native || e.native == nil || block.regionAttempted && block.regionGeneration == e.Stats.Promotions {
 		return
 	}
+	defer pauseTranslationClock(c)()
 	block.regionAttempted = true
 	block.regionGeneration = e.Stats.Promotions
 	parts := e.regionParts(c, block)
@@ -136,7 +143,7 @@ func (e *Engine) prepareRegion(c CPU, block *compiledBlock) {
 	if count > e.config.MaxRegionInstructions || block.region && count <= block.regionInstructions {
 		return
 	}
-	var b emu.Builder
+	b := emu.Builder{MemoryInstructionProgress: true}
 	pc := c.Registers()[e.arch.PC]
 	b.Store(e.arch.PC, b.Constant(pc))
 	completed := 0
@@ -160,12 +167,12 @@ func (e *Engine) prepareRegion(c CPU, block *compiledBlock) {
 		}
 	}
 	b.Checkpoint(e.arch.StateWords, count)
-	// If neither legal direct successor can return to the root, this is
-	// provably a one-shot trace. Preserve the generic cyclic path for indirect
-	// branches and calls whose targets the guest adapter does not model.
+	// Direct cycles stay in the bounded body. An unknown indirect successor
+	// executes exactly once and returns to the same checked dispatcher, even
+	// when its dynamic target happens to equal the root; no target is guessed.
 	lastPart := parts[len(parts)-1]
 	flow := lastPart.block.instructions[len(lastPart.block.instructions)-1].Flow
-	oneShot := flow.Known && flow.Next != pc && (!flow.Conditional || flow.Alternate != pc)
+	oneShot := !flow.Known || flow.Next != pc && (!flow.Conditional || flow.Alternate != pc)
 	if oneShot {
 		b.LoopContinue(b.Constant(0))
 	} else {
@@ -179,8 +186,12 @@ func (e *Engine) prepareRegion(c CPU, block *compiledBlock) {
 	ops := b.FinishMemory(e.arch.StateWords)
 	var entry int
 	var err error
-	if memory, ok := c.MemoryBus().(CodeVersionedNativeMemory); ok && memory.NativeCodeVersions() && !direct {
-		entry, err = e.native.CompileCodeVersionedLoop(ops, e.arch.StateWords, count, memory.NativeContext())
+	if memory, ok := c.MemoryBus().(CodeVersionedNativeMemory); ok && memory.NativeCodeVersions() {
+		if direct {
+			entry, err = e.native.CompileOwnedDirectLoop(ops, e.arch.StateWords, count, memory.NativeContext())
+		} else {
+			entry, err = e.native.CompileCodeVersionedLoop(ops, e.arch.StateWords, count, memory.NativeContext())
+		}
 	} else {
 		entry, err = e.native.CompileLoopMode(ops, e.arch.StateWords, count, direct)
 	}

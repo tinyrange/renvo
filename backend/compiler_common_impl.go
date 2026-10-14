@@ -63,7 +63,7 @@ const (
 // the low byte of immediate flags. LoopContinue has only a left operand.
 func renvoRFEHasLeft(op int) bool { return op >= 2 && op != 15 }
 func renvoRFEHasRight(op int) bool {
-	return op >= 3 && op != 8 && op != 9 && op != 13 && op != 36 && op != 15 && op != 16 && op != 26 && op != 35
+	return op >= 3 && op != 8 && op != 9 && op != 13 && op != 36 && op != 15 && op != 16 && op != 26 && op != 35 && op != 45
 }
 func renvoRFEThirdOperand(op int, immediate int) int {
 	if op == 21 {
@@ -80,9 +80,12 @@ func renvoRFEValidateRecords(records []int, stateWords int, memory bool) bool {
 		return false
 	}
 	count := len(records) / 4
-	maxOperation := 44
+	maxOperation := 45
 	for i := 0; i < count; i++ {
 		op, left, right, immediate := records[i*4], records[i*4+1], records[i*4+2], records[i*4+3]
+		if op == 45 && (!memory || right < 1 || right > 1024 || immediate < 0 || immediate > 256) {
+			return false
+		}
 		if op == 44 && immediate != 8 && immediate != 16 && immediate != 32 && immediate != 64 && immediate != 136 && immediate != 144 && immediate != 160 && immediate != 192 {
 			return false
 		}
@@ -140,7 +143,7 @@ func renvoRFEValidateRecords(records []int, stateWords int, memory bool) bool {
 		if (op >= 17 && op <= 20 || op >= 38 && op <= 41) && immediate != 32 && immediate != 64 {
 			return false
 		}
-		if op == 15 && (immediate < 0 || immediate > 256) {
+		if op == 15 && (immediate < 0 || immediate > 256 || right < 0 || right > 1) {
 			return false
 		}
 	}
@@ -157,6 +160,12 @@ func renvoEmitStateBlockABI(records []int, stateWords int, context *renvoCompile
 		return nil, 0, false
 	}
 	count, base := len(records)/4, 2
+	hasElapsed := false
+	for i := 0; i < count; i++ {
+		if records[i*4] == 45 {
+			hasElapsed = true
+		}
+	}
 	if memory || shared {
 		base = 3
 	}
@@ -165,6 +174,10 @@ func renvoEmitStateBlockABI(records []int, stateWords int, context *renvoCompile
 	peak := scratch - 8
 	if memory {
 		peak = scratch
+	}
+	elapsedSlot := -scratch - 8
+	if hasElapsed {
+		peak += 8
 	}
 	tertiary := 1
 	if context.renvoTargetArch == renvoArchAarch64 {
@@ -192,7 +205,26 @@ func renvoEmitStateBlockABI(records []int, stateWords int, context *renvoCompile
 			a.rfeFrameBias = 0
 			renvoRFEInitSharedFacts(a)
 		}
+		if hasElapsed {
+			frameReg, remainingReg := 5, 3
+			if renvoRFEArm(a) {
+				frameReg, remainingReg = 29, 23
+			}
+			// Standalone wrapper supplies the same zero-prefix time contract
+			// as a fresh dispatcher entry, preserving its caller's register.
+			renvoRFERegStore(a, remainingReg, frameReg, -40, 8)
+			renvoRFERegImm(a, remainingReg, 0)
+			renvoRFERegStore(a, remainingReg, frameReg, -56, 8)
+			renvoRFERegStore(a, remainingReg, frameReg, -112, 8)
+		}
 		renvoAsmCallLabel(a, body)
+		if hasElapsed {
+			frameReg, remainingReg := 5, 3
+			if renvoRFEArm(a) {
+				frameReg, remainingReg = 29, 23
+			}
+			renvoRFERegLoad(a, remainingReg, frameReg, -40, 8)
+		}
 		renvoEmitGlobalInitFrameEnd(&g, frame)
 		renvoAsmRet(a)
 		renvoAsmMarkLabel(a, body)
@@ -205,6 +237,9 @@ func renvoEmitStateBlockABI(records []int, stateWords int, context *renvoCompile
 		renvoRFERegMove(a, 11, 0)
 	}
 
+	if hasElapsed {
+		renvoRFECaptureElapsed(a, elapsedSlot, shared)
+	}
 	exit, progress := -1, 0
 	slowLabels, slowRecords, slowProgress, slowStatus := []int{}, []int{}, []int{}, []int{}
 	if memory {
@@ -268,6 +303,10 @@ func renvoEmitStateBlockABI(records []int, stateWords int, context *renvoCompile
 				}
 				renvoRFESaveValue(a, locations, i)
 			}
+			continue
+		}
+		if op == 45 {
+			renvoRFEEmitElapsed(a, records, locations, i, -1, 0, elapsedSlot)
 			continue
 		}
 		if renvoRFEEmitDirectRecord(a, records, locations, i) {
@@ -28901,6 +28940,12 @@ func renvoEmitLoopBlockMode(records []int, stateWords int, instructions int, arm
 		return nil, nil, false
 	}
 	count := len(records) / 4
+	hasElapsed := false
+	for i := 0; i < count; i++ {
+		if records[i*4] == 45 {
+			hasElapsed = true
+		}
+	}
 	if records[(count-1)*4] != 35 || records[(count-1)*4+1] < 0 || records[(count-1)*4+1] >= count-1 || renvoMemoryEffectOnly(records[records[(count-1)*4+1]*4]) {
 		return nil, nil, false
 	}
@@ -28929,9 +28974,23 @@ func renvoEmitLoopBlockMode(records []int, stateWords int, instructions int, arm
 	}
 	snapshots := []renvoRFELoopExit{}
 	progress, memory := 0, 0
+	memoryMode := -1
+	for i := 0; i < count; i++ {
+		if records[i*4] == 15 {
+			if memoryMode >= 0 && memoryMode != records[i*4+2] {
+				return nil, nil, false
+			}
+			memoryMode = records[i*4+2]
+		}
+	}
+	groupedMemory := memoryMode == 1
+	pendingMemory := false
 	storesMemory := false
 	for i := 0; i < count; i++ {
 		op, left, right, immediate := records[i*4], records[i*4+1], records[i*4+2], records[i*4+3]
+		if op == 45 && immediate > instructions {
+			return nil, nil, false
+		}
 		if renvoRFEHasLeft(op) {
 			last[left] = i
 		}
@@ -28947,6 +29006,15 @@ func renvoEmitLoopBlockMode(records []int, stateWords int, instructions int, arm
 		if op == 15 {
 			if immediate < progress || immediate > instructions {
 				return nil, nil, false
+			}
+			if groupedMemory && immediate > progress {
+				// Multiple accesses between architectural checkpoints (for
+				// example x86 read-modify-write) retire one memory instruction.
+				// Fault/guard snapshots before this checkpoint retire none of it.
+				if pendingMemory {
+					memory++
+				}
+				pendingMemory = false
 			}
 			progress = immediate
 		}
@@ -28973,9 +29041,13 @@ func renvoEmitLoopBlockMode(records []int, stateWords int, instructions int, arm
 				if op == 14 || op == 37 {
 					storesMemory = true
 				}
-				memory++
-				if memory > instructions {
-					return nil, nil, false
+				if groupedMemory {
+					pendingMemory = true
+				} else {
+					memory++
+					if memory > instructions {
+						return nil, nil, false
+					}
 				}
 			}
 		}
@@ -29252,6 +29324,15 @@ func renvoEmitLoopBlockMode(records []int, stateWords int, instructions int, arm
 	if !shared {
 		renvoRFERegStore(a, contextReg, frameReg, -16, 8)
 	}
+	if hasElapsed {
+		renvoRFECaptureElapsed(a, -40, shared)
+		if arm64 && shared {
+			// Elapsed capture uses X1 as scratch, but ARM's context ABI also
+			// keeps the memory owner in X1. Restore it before any status store
+			// or memory access; the shared frame already roots this pointer.
+			renvoRFERegLoad(a, contextReg, frameReg, -16, 8)
+		}
+	}
 	if !oneShot {
 		renvoRFERegMove(a, budget, dispatcherBudget)
 		renvoRFERegImm(a, iterations, 0)
@@ -29444,6 +29525,14 @@ func renvoEmitLoopBlockMode(records []int, stateWords int, instructions int, arm
 						renvoRFESaveValue(a, locations, i)
 					}
 				}
+				continue
+			}
+			if op == 45 {
+				iterationReg := iterations
+				if oneShot {
+					iterationReg = -1
+				}
+				renvoRFEEmitElapsed(a, records, locations, i, iterationReg, instructions, -40)
 				continue
 			}
 			if foldedAddresses[i] >= 0 {
@@ -29875,8 +29964,16 @@ func renvoRFEKnownExitValues(original []int, known int, truth int) ([]int, []int
 		if op == 0 || op == 1 {
 			continue
 		}
-		left, right = aliases[left], aliases[right]
-		records[i*4+1], records[i*4+2] = left, right
+		// Some record fields are scalar metadata (Progress mode, elapsed
+		// scale), not SSA indices. Use the same operand schema as validation.
+		if renvoRFEHasLeft(op) {
+			left = aliases[left]
+			records[i*4+1] = left
+		}
+		if renvoRFEHasRight(op) {
+			right = aliases[right]
+			records[i*4+2] = right
+		}
 		if op == 21 {
 			imm = aliases[imm]
 			records[i*4+3] = imm
@@ -30229,7 +30326,9 @@ func renvoRFELoopPhiMoves(a *renvoAsm, records []int, locations []int, inputs []
 		if destinations[selected] < 0 && sources[selected] > 0 {
 			target = sources[selected] - 1
 		} else if sources[selected] == 0 {
-			renvoRFERegImm(a, target, records[sourceValues[selected]*4+3])
+			// Zero location also denotes an unallocated invariant LoadState,
+			// not just Const. Preserve the value, never its slot-number immediate.
+			renvoRFELoadValue(a, records, locations, sourceValues[selected], target)
 		} else {
 			renvoRFELoopReadLocation(a, sources[selected], target)
 		}
@@ -31086,6 +31185,59 @@ func renvoRFESetContext(a *renvoAsm) {
 	}
 	renvoRFERegStore(a, secondary, frame, -16, 8)
 }
+
+// A contextual clock read observes preceding dispatcher retirement plus the
+// current loop iteration and architectural prefix. No host clock, syscall or
+// guest timer policy is embedded here: the caller supplies base and scale.
+// Dispatcher retirement lives in a preserved remaining-budget register, not
+// in the public Total field until return. Capture its entry value before this
+// body reuses preserved registers. Only time-reading bodies pay this cost.
+func renvoRFECaptureElapsed(a *renvoAsm, slot int, shared bool) {
+	frameReg, remainingReg := 5, 3
+	if renvoRFEArm(a) {
+		frameReg, remainingReg = 29, 23
+	}
+	if shared {
+		bias := a.rfeFrameBias
+		a.rfeFrameBias = 0
+		renvoRFERegLoad(a, 0, frameReg, -56, 8)
+		renvoRFERegBinary(a, 4, 0, remainingReg)
+		renvoRFERegLoad(a, 1, frameReg, -112, 8)
+		renvoRFERegBinary(a, 3, 0, 1)
+		a.rfeFrameBias = bias
+	} else {
+		renvoRFERegImm(a, 0, 0)
+	}
+	renvoRFERegStore(a, 0, frameReg, slot, 8)
+}
+
+func renvoRFEEmitElapsed(a *renvoAsm, records []int, locations []int, i int, iterationReg int, instructions int, elapsedSlot int) {
+	left, scale, prefix := records[i*4+1], records[i*4+2], records[i*4+3]
+	frameReg := 5
+	if renvoRFEArm(a) {
+		frameReg = 29
+	}
+	renvoRFERegLoad(a, 0, frameReg, elapsedSlot, 8)
+	if iterationReg >= 0 {
+		renvoRFERegMove(a, 1, iterationReg)
+		if instructions != 1 {
+			renvoRFERegImm(a, 2, instructions)
+			renvoRFERegBinary(a, 12, 1, 2)
+		}
+		renvoRFERegBinary(a, 3, 0, 1)
+	}
+	if prefix != 0 {
+		renvoRFERegImmediate(a, 3, 0, prefix)
+	}
+	if scale != 1 {
+		renvoRFERegImm(a, 1, scale)
+		renvoRFERegBinary(a, 12, 0, 1)
+	}
+	renvoRFELoadValue(a, records, locations, left, 1)
+	renvoRFERegBinary(a, 3, 0, 1)
+	renvoRFESaveValue(a, locations, i)
+}
+
 func renvoRFEGetContext(a *renvoAsm) {
 	frame, secondary := 5, 2
 	if renvoRFEArm(a) {

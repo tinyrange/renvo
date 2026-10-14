@@ -1,0 +1,130 @@
+
+==> checked-in generated source and tracked package suites
+ok  	renvo.dev	0.005s
+ok  	renvo.dev/driver	3.280s
+ok  	renvo.dev/internal/apk	0.058s
+?   	renvo.dev/internal/arena	[no test files]
+ok  	renvo.dev/internal/asmtext	0.002s
+ok  	renvo.dev/internal/asmunit	0.093s
+ok  	renvo.dev/internal/backendcompiled	0.051s
+ok  	renvo.dev/internal/backendcompiled/cmd/gen	0.004s
+?   	renvo.dev/internal/backenddef	[no test files]
+ok  	renvo.dev/internal/backendjit	17.881s
+ok  	renvo.dev/internal/bootstrap	0.006s
+ok  	renvo.dev/internal/build	0.023s
+ok  	renvo.dev/internal/c11	0.097s
+ok  	renvo.dev/internal/check	0.163s
+ok  	renvo.dev/internal/difftest	0.371s
+ok  	renvo.dev/internal/driver	2.627s
+ok  	renvo.dev/internal/elflink	0.002s
+ok  	renvo.dev/internal/espflash	0.002s
+ok  	renvo.dev/internal/languageservice	0.006s
+ok  	renvo.dev/internal/link	0.236s
+ok  	renvo.dev/internal/linkedimage	0.002s
+ok  	renvo.dev/internal/load	0.003s
+ok  	renvo.dev/internal/lower	0.002s
+ok  	renvo.dev/internal/makefile	0.003s
+ok  	renvo.dev/internal/perfgate	0.003s
+ok  	renvo.dev/internal/pipeline	0.004s
+ok  	renvo.dev/internal/rbe	0.003s
+ok  	renvo.dev/internal/repl	0.011s
+ok  	renvo.dev/internal/rfe	3.997s
+ok  	renvo.dev/internal/rfe/engine	0.013s
+ok  	renvo.dev/internal/rfe/linuxuser	0.044s
+ok  	renvo.dev/internal/rfe/runtime	2.777s
+ok  	renvo.dev/internal/rfe/systemclock	0.002s
+ok  	renvo.dev/internal/rfe/systemmemory	0.042s
+?   	renvo.dev/internal/rfeabi	[no test files]
+?   	renvo.dev/internal/rfenativebridge	[no test files]
+ok  	renvo.dev/internal/rtg	14.636s
+ok  	renvo.dev/internal/rtg/cmd/rtggen	0.002s
+ok  	renvo.dev/internal/rtgb	0.004s
+ok  	renvo.dev/internal/rtgformat	0.027s
+?   	renvo.dev/internal/rtgprofile	[no test files]
+ok  	renvo.dev/internal/runimage	0.122s
+ok  	renvo.dev/internal/syntax	0.293s
+?   	renvo.dev/internal/syntax/cmd/genunicode	[no test files]
+ok  	renvo.dev/internal/targetinfo	2.168s
+ok  	renvo.dev/internal/targetinfo/cmd/gentargets	2.523s
+ok  	renvo.dev/internal/testfront	0.945s
+ok  	renvo.dev/internal/testmeasure	0.930s
+?   	renvo.dev/internal/testmeasure/cmd/renvomeasure	[no test files]
+ok  	renvo.dev/internal/testprogress	0.003s
+ok  	renvo.dev/internal/unit	0.006s
+ok  	renvo.dev/std	5.646s
+ok  	renvo.dev/std/bytes	0.007s
+ok  	renvo.dev/std/embed	0.003s
+ok  	renvo.dev/std/encoding/base64	0.006s
+ok  	renvo.dev/std/encoding/binary	0.007s
+ok  	renvo.dev/std/encoding/json	0.051s
+ok  	renvo.dev/std/errors	0.009s
+ok  	renvo.dev/std/flag	0.014s
+ok  	renvo.dev/std/fmt	0.016s
+ok  	renvo.dev/std/graphics	0.012s
+?   	renvo.dev/std/graphics/gofont	[no test files]
+?   	renvo.dev/std/hash	[no test files]
+ok  	renvo.dev/std/hash/fnv	0.013s
+ok  	renvo.dev/std/io	0.004s
+ok  	renvo.dev/std/math	0.032s
+ok  	renvo.dev/std/math/big	0.097s
+ok  	renvo.dev/std/math/bits	0.009s
+ok  	renvo.dev/std/os	0.009s
+ok  	renvo.dev/std/path	0.007s
+?   	renvo.dev/std/process	[no test files]
+?   	renvo.dev/std/reflect	[no test files]
+ok  	renvo.dev/std/sort	0.006s
+ok  	renvo.dev/std/starlark	0.006s
+ok  	renvo.dev/std/strconv	0.006s
+ok  	renvo.dev/std/strings	0.004s
+ok  	renvo.dev/std/structs	0.005s
+ok  	renvo.dev/std/sync	0.006s
+ok  	renvo.dev/std/testing	0.006s
+ok  	renvo.dev/std/unicode	0.744s
+ok  	renvo.dev/std/unicode/utf16	0.002s
+ok  	renvo.dev/std/unicode/utf8	0.002s
+ok  	renvo.dev/std/unsafe	0.001s
+ok  	renvo.dev/std/vm	0.003s
+?   	renvo.dev/cmd/genstdunicode	[no test files]
+?   	renvo.dev/cmd/renvo	[no test files]
+ok  	renvo.dev/cmd/renvo-kernel-bindings	0.005s
+?   	renvo.dev/cmd/renvoapk	[no test files]
+?   	renvo.dev/cmd/renvobootstrap	[no test files]
+?   	renvo.dev/cmd/renvodiff	[no test files]
+?   	renvo.dev/cmd/renvodosqualify	[no test files]
+?   	renvo.dev/cmd/renvoemu	[no test files]
+ok  	renvo.dev/cmd/renvoexpect	0.128s
+?   	renvo.dev/cmd/renvoflash	[no test files]
+?   	renvo.dev/cmd/renvofmt	[no test files]
+?   	renvo.dev/cmd/renvoperf	[no test files]
+ok  	renvo.dev/cmd/renvopico-monitor	0.007s
+?   	renvo.dev/cmd/renvorepl	[no test files]
+ok  	renvo.dev/cmd/renvotest	0.004s
+?   	renvo.dev/cmd/renvowasi	[no test files]
+?   	renvo.dev/cmd/renvowasibackend	[no test files]
+ok  	renvo.dev/cmd/renvowasibackendjit	0.005s
+?   	renvo.dev/cmd/renvowasiformat	[no test files]
+?   	renvo.dev/cmd/renvowasilanguageservice	[no test files]
+?   	renvo.dev/cmd/renvowasilinker	[no test files]
+ok  	renvo.dev/cmd/renvowasivmbackend	0.009s
+ok  	renvo.dev/backend/unit	0.005s
+ok  	renvo.dev/backend/target	0.435s
+ok  	renvo.dev/backend/bringup	0.229s
+ok  	renvo.dev/backend/omnibus/resultabi	0.124s
+ok  	renvo.dev/backend/cmd/renvoboard	0.008s
+ok  	renvo.dev/backend/cmd/renvoc89	0.003s
+ok  	renvo.dev/backend/cmd/renvoresult	0.015s
+?   	renvo.dev/backend/cmd/renvoresultgen	[no test files]
+ok  	renvo.dev/backend/cmd/renvoschemagen	0.071s
+ok  	renvo.dev/backend/cmd/renvounitc	0.099s
+
+==> bundled driver and bootstrap
+
+==> backend and frontend test compilation
+ok  	renvo.dev	0.002s
+ok  	renvo.dev/backend	(cached) [no tests to run]
+ok  	renvo.dev/frontend_tests	(cached) [no tests to run]
+ok  	renvo.dev/driver	1.859s
+ok  	renvo.dev/internal/driver	1.275s
+?   	renvo.dev/cmd/renvobootstrap	[no test files]
+
+Preflight completed in 21s (budget: 60s)

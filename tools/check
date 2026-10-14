@@ -196,6 +196,11 @@ check_xv6() {
 		"$repository_root/tools/xv6/run"
 }
 
+check_rfe_linux() {
+	run_check "Alpine direct boot and guest programs in both RFE system emulators" \
+		"$repository_root/tools/rfe-linux/check"
+}
+
 usage() {
 	cat <<'EOF'
 Usage: ./tools/check MODE [CORPUS_FILTER]
@@ -216,6 +221,8 @@ Modes:
                optional regular expression runs matching positive corpus cases.
   linux-boot   Perform the clean, opt-in pinned Linux build and two deterministic
                bounded QEMU boots. This is intentionally outside preflight.
+  rfe-linux    Direct boot pinned Alpine in the AArch64 and x86-64 RFE machines
+               and check guest programs. Downloads fixtures; outside preflight.
   xv6          Build pinned xv6/i386 C sources with Renvo, boot QEMU, and run
                the complete xv6 usertests suite. This is outside preflight.
   full         Run complete performance, preflight, backend, and frontend checks.
@@ -269,6 +276,9 @@ case "$mode" in
 		;;
 	linux-boot)
 		check_linux_boot
+		;;
+	rfe-linux)
+		check_rfe_linux
 		;;
 	xv6)
 		check_xv6
