@@ -189,24 +189,32 @@ func documentDiagnostic(document Document, span Span, code string, message strin
 }
 
 func documentPosition(document Document, offset int) (string, Position) {
+	filename, source, sourceOffset := documentSource(document, offset)
+	return filename, position(source, sourceOffset)
+}
+
+// Namespace resolution needs only source identity. Keep it independent of
+// line/column calculation: rescanning a large imported prefix for every Go
+// declaration repeats quadratic prefix-scanning work during validation.
+func documentSource(document Document, offset int) (string, []byte, int) {
 	if len(document.sourceMap) == 0 {
-		return document.Filename, position(document.Source, offset)
+		return document.Filename, document.Source, offset
 	}
 	for i := 0; i < len(document.sourceMap); i++ {
 		segment := document.sourceMap[i]
 		if offset >= segment.logicalStart && offset < segment.logicalEnd {
 			sourceOffset := segment.sourceStart + offset - segment.logicalStart
-			return segment.filename, position(segment.source, sourceOffset)
+			return segment.filename, segment.source, sourceOffset
 		}
 	}
 	if offset == len(document.Source) {
 		for i := len(document.sourceMap) - 1; i >= 0; i-- {
 			segment := document.sourceMap[i]
 			if segment.logicalEnd == offset {
-				return segment.filename, position(segment.source,
-					segment.sourceStart+segment.logicalEnd-segment.logicalStart)
+				return segment.filename, segment.source,
+					segment.sourceStart + segment.logicalEnd - segment.logicalStart
 			}
 		}
 	}
-	return document.Filename, position(document.Source, offset)
+	return document.Filename, document.Source, offset
 }
