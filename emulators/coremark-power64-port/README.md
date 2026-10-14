@@ -55,7 +55,7 @@ The deterministic mode remains useful for small instruction/CRC diagnostics,
 not performance reporting. The DTB's synthetic processor-frequency property
 is not a host CPU frequency and must not be used to report CoreMark/MHz.
 The results measure this hosted interpreter plus guest kernel overhead, not
-physical POWER8 hardware or IBM i performance.
+physical POWER8 hardware.
 
 Expected seed/list/matrix/state CRCs are:
 

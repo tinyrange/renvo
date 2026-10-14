@@ -1,11 +1,10 @@
 # POWER64 Linux partition RFE
 
 `emulators/power64.rfe` is an architectural interpreter, shared by the
-`linux-power64-machine.rfe` single-vCPU PAPR-style partition. This is a new,
-incomplete implementation, not a complete POWER8 processor or an IBM i machine.
-Its first integration target is a small PPC64le Linux kernel with the hashed
-MMU, 4 KiB pages, and a freestanding ELFv2 PID 1. The CPU retains explicit
-big- and little-endian state; a big-endian Linux boot is not yet verified.
+`linux-power64-machine.rfe` single-vCPU PAPR-style partition. The verified
+configuration boots a PPC64le Linux kernel with the hashed MMU, 4 KiB pages,
+and a freestanding ELFv2 PID 1. The CPU retains explicit big- and little-endian
+state; a big-endian Linux boot is not yet verified.
 
 No QEMU execution is hidden behind the RFE. QEMU is an independent reference
 for the boot inputs only. The partition constructs the device tree, firmware
@@ -52,7 +51,8 @@ make -j2 ARCH=powerpc CROSS_COMPILE=powerpc64le-linux-gnu- \
 
 The configuration supports up to two CPUs because that is Linux's minimum for
 this SMP platform; the device tree exposes only CPU 0. Keep the generated
-`vmlinux` unmodified. No proprietary IBM media is used or required.
+`vmlinux` unmodified. The fixture uses only the documented Linux and guest-init
+sources.
 
 From the Renvo checkout, build the guest PID 1:
 
@@ -137,13 +137,10 @@ frequency must not be used for CoreMark/MHz or physical hardware comparisons.
 ## Current boundaries
 
 The initial CPU is interpreter-only: no IR/native acceleration, vector/VSX,
-floating point, transactional memory, or POWER-AS tagged-memory semantics.
+floating point, or transactional memory.
 The partition has a checked RAM bus, a hypervisor-owned hash page table,
 256 MiB segments with 4 KiB pages, terminal polling, selectable deterministic/realtime timebase
 and decrementer, and a small RTAS surface. It is not a general PowerVM
 implementation, multiprocessor machine, network/storage platform, or security
 sandbox. Unsupported partition calls report `H_FUNCTION`; unsupported CPU or
 MMU features stop explicitly rather than silently succeeding.
-
-IBM i 7.5 remains a separate acceptance target. Linux and CoreMark success do
-not demonstrate its firmware, platform, or POWER-AS tagged-memory semantics.

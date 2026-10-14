@@ -33,7 +33,7 @@
     "iterations_per_guest_second": 38.788378288158704
   },
   "rfe_exit_code": 0,
-  "scope": "Hosted interpreter plus Linux guest overhead. No CoreMark/MHz, hardware comparison, EEMBC certification, native lowering, BE Linux or IBM i claim.",
+  "scope": "Hosted interpreter plus Linux guest overhead. No CoreMark/MHz, hardware comparison, EEMBC certification, native lowering, or BE Linux claim.",
   "total_dataset_bytes": 2000,
   "validation": {
     "crcs": [

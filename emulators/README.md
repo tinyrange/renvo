@@ -119,7 +119,7 @@ and off by default. This is an incomplete scalar implementation, not a sandbox.
 ## POWER64 Linux partition
 
 See [fixture, usage, tests and supported scope](../docs/power64-linux.md).
-The initial implementation is interpreter-only and is not IBM i support.
+The POWER implementation is interpreter-only.
 It boots Linux 6.6.1 and validates both standard CoreMark seed sets in the real
 guest using the explicit realtime clock. The PPC64le port and fixture steps are
 in `coremark-power64-port/`.
