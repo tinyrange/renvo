@@ -11,6 +11,14 @@ import (
 )
 
 func TestNativeFoldedPagesAvoidThrashingAndKeepPreciseRevocation(t *testing.T) {
+	for _, compatibility := range []bool{false, true} {
+		t.Run(map[bool]string{false: "host-session", true: "compatibility-session"}[compatibility], func(t *testing.T) {
+			testNativeFoldedPages(t, compatibility)
+		})
+	}
+}
+
+func testNativeFoldedPages(t *testing.T, compatibility bool) {
 	const left, right = uint64(0x9000), uint64(0x49000)
 	writable, invalid := true, false
 	data := make([]byte, 3*4096)
@@ -60,10 +68,31 @@ func TestNativeFoldedPagesAvoidThrashingAndKeepPreciseRevocation(t *testing.T) {
 	refill()
 	runtime.GC()
 	state := []uint64{0, left, right, 999, 999}
-	if err := n.RunLinkedBackingSession(state, ctx, 300, data); err != nil {
-		t.Fatal(err)
+	if compatibility {
+		// An architectural-state alias forces the same conservative boundary
+		// even on hosts with a foreign bridge. No workload limit is changed.
+		ctx.Clock = &state[2]
 	}
-	if ctx.Status != 0 || ctx.Total != 300 || state[3] != 10 || state[4] != 119 || binary.LittleEndian.Uint64(data[4096:]) != 120 {
+	// Complete the same 100 iterations even on hosts retaining the
+	// conservative 64-instruction call limit. A refill/link miss remains a
+	// failure: only an independently bounded scheduling return is accepted.
+	completed := uint64(0)
+	for completed < 300 {
+		budget := uint64(300) - completed
+		if err := n.RunLinkedBackingSession(state, ctx, budget, data); err != nil {
+			t.Fatal(err)
+		}
+		want := budget
+		if (compatibility || !emu.NativeSessionsAvailable()) && want > 64 {
+			want = 64
+		}
+		want -= want % 3
+		if ctx.Status != 0 || ctx.Total != want || want == 0 || ctx.Remaining != budget-want {
+			t.Fatal("unexpected native exit", ctx.Status, ctx.Total, ctx.Remaining, want)
+		}
+		completed += ctx.Total
+	}
+	if ctx.Status != 0 || completed != 300 || state[3] != 10 || state[4] != 119 || binary.LittleEndian.Uint64(data[4096:]) != 120 {
 		t.Fatal("distant pages still thrash", state, ctx.Status, ctx.Total)
 	}
 	// New permissions revoke both tags; a native read succeeds but its store must

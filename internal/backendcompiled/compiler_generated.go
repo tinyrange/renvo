@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "c093def302b1e47abb27825625ff49ec0b170fe420832023dbf2625096989ea0"
+const CompilerSourceDigest = "ccdc0c6e4a8b2374fce6d8f30fc27a9d246bc91926dbe783f8f8f336ab818219"
 
 // source: backend/compiler_common_impl.go
 
@@ -29333,6 +29333,12 @@ renvoRFERegStore(a, contextReg, frameReg, -16, 8)
 }
 if hasElapsed {
 renvoRFECaptureElapsed(a, -40, shared)
+if arm64 && shared {
+
+
+
+renvoRFERegLoad(a, contextReg, frameReg, -16, 8)
+}
 }
 if !oneShot {
 renvoRFERegMove(a, budget, dispatcherBudget)

@@ -29326,6 +29326,12 @@ func renvoEmitLoopBlockMode(records []int, stateWords int, instructions int, arm
 	}
 	if hasElapsed {
 		renvoRFECaptureElapsed(a, -40, shared)
+		if arm64 && shared {
+			// Elapsed capture uses X1 as scratch, but ARM's context ABI also
+			// keeps the memory owner in X1. Restore it before any status store
+			// or memory access; the shared frame already roots this pointer.
+			renvoRFERegLoad(a, contextReg, frameReg, -16, 8)
+		}
 	}
 	if !oneShot {
 		renvoRFERegMove(a, budget, dispatcherBudget)

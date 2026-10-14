@@ -30,6 +30,14 @@ func (c *indirectCPU) ExecuteInstruction(ins Instruction) error {
 }
 
 func TestIndirectOneShotRegionKeepsDynamicTargetBudgetAndExecuteChecks(t *testing.T) {
+	for _, compatibility := range []bool{false, true} {
+		t.Run(map[bool]string{false: "host-session", true: "compatibility-session"}[compatibility], func(t *testing.T) {
+			testIndirectOneShotRegion(t, compatibility)
+		})
+	}
+}
+
+func testIndirectOneShotRegion(t *testing.T, compatibility bool) {
 	memory := new(ownedIndirectMemory)
 	if err := memory.Write(0, 2, 3); err != nil {
 		t.Fatal(err)
@@ -63,6 +71,10 @@ func TestIndirectOneShotRegionKeepsDynamicTargetBudgetAndExecuteChecks(t *testin
 		t.Skip("native unavailable")
 	}
 	c := &indirectCPU{stubCPU: stubCPU{memory: memory}}
+	if compatibility {
+		// State/clock aliases require compatibility even on bridge hosts.
+		memory.context.Clock = &c.state[0]
+	}
 	if err := e.RunQuanta(c, 1); err != nil {
 		t.Fatal(err)
 	}
@@ -74,6 +86,11 @@ func TestIndirectOneShotRegionKeepsDynamicTargetBudgetAndExecuteChecks(t *testin
 		want := budget
 		if want > 4096 {
 			want = 4096
+		}
+		// Hosts without the foreign-call bridge deliberately retain the
+		// original 64-instruction compatibility boundary.
+		if (compatibility || !emu.NativeSessionsAvailable()) && want > 64 {
+			want = 64
 		}
 		if c.retired-before != want || c.state[1] != 0 {
 			t.Fatal("indirect self target lost bounded progress", budget, c.retired-before, c.state)

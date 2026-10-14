@@ -98,6 +98,29 @@ and initramfs-placement underflow. Both inputs now return errors instead of
 panicking. Portable Renvo-built hosts also retain the new owned-direct-loop API
 as an unavailable-native fallback; stage0 and stage3 frontend checks pass.
 
+## Merge-group ARM64 correction
+
+The full merge-group suites exposed an ARM64-only native ABI bug that the
+Linux/amd64 preflight could not execute: contextual elapsed capture used X1 as
+scratch, although X1 also carried the loop's live memory-context pointer. The
+next status write used the captured retirement count as an address. Restore
+that pointer from the already-rooted shared frame before status initialization.
+`TestARM64ElapsedLoopEntryKeepsMemoryContext` independently interprets the
+emitted ARM64 entry prefix on every host; it failed before the fix with a store
+to address `0xf`, then passed. Existing elapsed tests exercise full native
+execution in the platform suites.
+
+Two new tests also incorrectly expected large sessions on hosts without the
+foreign-call bridge. They now retain exact progress checks at the original
+64-instruction compatibility boundary. The folded-page test completes the same
+100 iterations across those boundaries and still rejects refill/link misses.
+Both tests exercise an actual state/clock alias locally to select compatibility,
+in addition to the normal host-session path. No runtime limit or gate changed.
+
+Correction validation: affected suites and three prerequisite backend corpus
+programs pass; isolated preflight passes in 28 seconds / 60 seconds. Platform
+correctness and performance results remain subject to the final merge group.
+
 ## Scope and compatibility
 
 The validated performance configuration uses:
