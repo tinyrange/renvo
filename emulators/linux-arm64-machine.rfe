@@ -1484,14 +1484,19 @@ func TestUserJITMappingFlushRetainsUnmodifiedNativeCode(t *testing.T) {
 -- jit_slice_test.go --
 package arm64machine
 
-import "testing"
+import (
+	emu "renvo.dev/internal/rfe/runtime"
+	"testing"
+)
 
 func TestNativeSessionUsesBoundedCallerSlice(t *testing.T) {
 	m := jitMachine(t, "native")
 	jitRun(t, m, 8192)
 	before := m.CPU.Retired
 	used, err := m.RunQuantum(65536)
-	if err != nil || used > 65536 || m.CPU.Retired-before != used || used <= 1024 {
+	if err != nil || used > 65536 || m.CPU.Retired-before != used ||
+		emu.NativeSessionsAvailable() && used <= 1024 ||
+		!emu.NativeSessionsAvailable() && used != 64 {
 		t.Fatal("native session failed to amortize within caller/host bounds", used, err)
 	}
 }

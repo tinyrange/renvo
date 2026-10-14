@@ -1017,7 +1017,10 @@ func TestSystemJITSegmentsSwapGSAndAddress32(t *testing.T) {
 -- jit_slice_test.go --
 package amd64machine
 
-import "testing"
+import (
+	emu "renvo.dev/internal/rfe/runtime"
+	"testing"
+)
 
 func TestNativeSessionConsoleAndTimerSlice(t *testing.T) {
 	m := jitMachine(t, "native")
@@ -1030,8 +1033,12 @@ func TestNativeSessionConsoleAndTimerSlice(t *testing.T) {
 	}
 	m.Input = nil // The run loop makes this transition only after observing EOF.
 	before = m.CPU.Retired
-	if err := m.RunQuantum(65536); err != nil || m.CPU.Retired-before > 65536 || m.CPU.Retired-before <= 1024 {
-		t.Fatal("closed console failed to amortize native session", err, m.CPU.Retired-before)
+	err := m.RunQuantum(65536)
+	used := m.CPU.Retired - before
+	if err != nil || used > 65536 ||
+		emu.NativeSessionsAvailable() && used <= 1024 ||
+		!emu.NativeSessionsAvailable() && used != 64 {
+		t.Fatal("closed console violated its host session boundary", err, used)
 	}
 	m.nextTimer = m.ticks + 37
 	end := m.nextTimer

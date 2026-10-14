@@ -115,7 +115,10 @@ foreign-call bridge. They now retain exact progress checks at the original
 64-instruction compatibility boundary. The folded-page test completes the same
 100 iterations across those boundaries and still rejects refill/link misses.
 Both tests exercise an actual state/clock alias locally to select compatibility,
-in addition to the normal host-session path. No runtime limit or gate changed.
+in addition to the normal host-session path. The machine archives' console and
+caller-slice tests likewise require exactly 64 instructions on compatibility
+hosts, while retaining their larger-session assertions on bridge hosts and
+unchanged timer/console bounds. No runtime limit or gate changed.
 
 Correction validation: affected suites and three prerequisite backend corpus
 programs pass; isolated preflight passes in 28 seconds / 60 seconds. Platform
