@@ -1,0 +1,1304 @@
+RFE 1
+
+-- rfe.json --
+{
+  "format": 1,
+  "name": "power64",
+  "import": "renvo.dev/emulators/power64"
+}
+
+-- cpu.go --
+// POWER Book III-S integer interpreter. No host byte order is assumed.
+package power64
+
+import (
+	"fmt"
+	"math/bits"
+	rt "renvo.dev/internal/rfe/runtime"
+)
+
+const (
+	MSRSF uint64 = 1 << 63
+	MSREE uint64 = 1 << 15
+	MSRPR uint64 = 1 << 14
+	MSRIR uint64 = 1 << 5
+	MSRDR uint64 = 1 << 4
+	MSRLE uint64 = 1
+	XERSO uint64 = 1 << 31
+	XEROV uint64 = 1 << 30
+	XERCA uint64 = 1 << 29
+)
+
+type SLB struct{ ESID, VSID uint64 }
+type CPU struct {
+	GPR                   [32]uint64
+	PC, LR, CTR, MSR, XER uint64
+	CR                    uint32
+	SPR                   [1024]uint64
+	SLB                   [64]SLB
+	Bus                   rt.Bus
+	Tick                  uint64
+	InterruptLE           bool
+	Hypercall             func(*CPU) error
+	Translate             func(*CPU, uint64, rt.Access) (uint64, error)
+	SPRRead               func(uint32) (uint64, bool)
+	SPRWrite              func(uint32, uint64) bool
+	Reservation           uint64
+	Reserved              bool
+}
+type exception struct {
+	vector          uint64
+	address, status uint64
+}
+
+func (e *exception) Error() string { return fmt.Sprintf("exception %#x at %#x", e.vector, e.address) }
+func (c *CPU) Exception(vector, savedPC, status uint64) {
+	c.SPR[26], c.SPR[27] = savedPC, c.MSR|status
+	c.MSR = c.MSR & (MSRSF | 1<<12)
+	if c.InterruptLE {
+		c.MSR |= MSRLE
+	}
+	c.PC = vector
+	c.Reserved = false
+}
+func (c *CPU) physical(a uint64, access rt.Access) (uint64, error) {
+	if c.Translate != nil {
+		return c.Translate(c, a, access)
+	}
+	return a, nil
+}
+func swap(v uint64, w int) uint64 {
+	switch w {
+	case 2:
+		return uint64(bits.ReverseBytes16(uint16(v)))
+	case 4:
+		return uint64(bits.ReverseBytes32(uint32(v)))
+	case 8:
+		return bits.ReverseBytes64(v)
+	}
+	return v
+}
+func (c *CPU) read(a uint64, w int, access rt.Access) (uint64, error) {
+	if a&4095+uint64(w) > 4096 {
+		var v uint64
+		for i := 0; i < w; i++ {
+			x, e := c.read(a+uint64(i), 1, access)
+			if e != nil {
+				return 0, e
+			}
+			v |= x << uint(i*8)
+		}
+		if c.MSR&MSRLE == 0 {
+			v = swap(v, w)
+		}
+		return v, nil
+	}
+	p, e := c.physical(a, access)
+	if e != nil {
+		return 0, e
+	}
+	v, f := c.Bus.Load(p, w, access, c.Tick)
+	if f != nil {
+		return 0, f
+	}
+	if c.MSR&MSRLE == 0 {
+		v = swap(v, w)
+	}
+	return v, nil
+}
+func (c *CPU) write(a uint64, w int, v uint64) error {
+	if a&4095+uint64(w) > 4096 {
+		var physical [8]uint64
+		for i := 0; i < w; i++ {
+			p, e := c.physical(a+uint64(i), rt.Write)
+			if e != nil {
+				return e
+			}
+			physical[i] = p
+		}
+		if c.MSR&MSRLE == 0 {
+			v = swap(v, w)
+		}
+		for i := 0; i < w; i++ {
+			if f := c.Bus.Store(physical[i], 1, v>>uint(i*8), c.Tick); f != nil {
+				return f
+			}
+		}
+		c.Reserved = false
+		return nil
+	}
+	p, e := c.physical(a, rt.Write)
+	if e != nil {
+		return e
+	}
+	if c.MSR&MSRLE == 0 {
+		v = swap(v, w)
+	}
+	if f := c.Bus.Store(p, w, v, c.Tick); f != nil {
+		return f
+	}
+	c.Reserved = false
+	return nil
+}
+
+// TranslationMiss is an architectural exception, not an emulator stop.
+func TranslationMiss(a uint64, access rt.Access, segment bool, protection bool) error {
+	v := uint64(0x300)
+	s := uint64(1 << 30)
+	if protection {
+		s = 1 << 27
+	}
+	if access == rt.Write {
+		s |= 1 << 25
+	}
+	if access == rt.Execute {
+		v = 0x400
+	}
+	if segment {
+		v = 0x380
+		if access == rt.Execute {
+			v = 0x480
+		}
+	}
+	return &exception{v, a, s}
+}
+func (c *CPU) crfield(field int, value uint32) {
+	shift := uint(28 - field*4)
+	c.CR = (c.CR &^ (15 << shift)) | ((value & 15) << shift)
+}
+func (c *CPU) record(v uint64) {
+	r := uint32(2)
+	if int64(v) < 0 {
+		r = 8
+	} else if v > 0 {
+		r = 4
+	}
+	if c.XER&XERSO != 0 {
+		r |= 1
+	}
+	c.crfield(0, r)
+}
+func (c *CPU) carry(on bool) {
+	c.XER &^= XERCA
+	if on {
+		c.XER |= XERCA
+	}
+}
+func (c *CPU) overflow(on bool) {
+	c.XER &^= XEROV
+	if on {
+		c.XER |= XEROV | XERSO
+	}
+}
+func (c *CPU) base(r uint32) uint64 {
+	if r == 0 {
+		return 0
+	}
+	return c.GPR[r]
+}
+func sext(v uint64, n uint) uint64 { return uint64(int64(v<<(64-n)) >> (64 - n)) }
+func mask(mb, me uint, width uint) uint64 {
+	var m uint64
+	for i := uint(0); i < width; i++ {
+		if (mb <= me && i >= mb && i <= me) || (mb > me && (i >= mb || i <= me)) {
+			m |= 1 << (width - 1 - i)
+		}
+	}
+	return m
+}
+func (c *CPU) branch(bo, bi uint32, decrement bool) bool {
+	countOK := true
+	if decrement && bo&4 == 0 {
+		c.CTR--
+		countOK = (c.CTR != 0) != (bo&2 != 0)
+	}
+	conditionOK := bo&16 != 0 || ((c.CR>>(31-bi))&1 != 0) == (bo&8 != 0)
+	return countOK && conditionOK
+}
+func sprnum(op uint32) uint32 { return (op >> 16 & 31) | (op >> 6 & 0x3e0) }
+func (c *CPU) readSPR(s uint32) uint64 {
+	switch s {
+	case 1:
+		return c.XER
+	case 8:
+		return c.LR
+	case 9:
+		return c.CTR
+	}
+	if c.SPRRead != nil {
+		if v, ok := c.SPRRead(s); ok {
+			return v
+		}
+	}
+	return c.SPR[s]
+}
+func (c *CPU) writeSPR(s uint32, v uint64) {
+	switch s {
+	case 1:
+		c.XER = v
+		return
+	case 8:
+		c.LR = v
+		return
+	case 9:
+		c.CTR = v
+		return
+	}
+	if c.SPRWrite != nil && c.SPRWrite(s, v) {
+		return
+	}
+	c.SPR[s] = v
+}
+func (c *CPU) Step() error {
+	oldPC := c.PC
+	op, e := c.read(c.PC, 4, rt.Execute)
+	if e == nil {
+		c.PC += 4
+		e = c.execute(uint32(op), oldPC)
+	}
+	if x, ok := e.(*exception); ok {
+		if x.vector == 0x300 || x.vector == 0x380 {
+			c.SPR[19], c.SPR[18] = x.address, x.status
+			c.Exception(x.vector, oldPC, 0)
+		} else {
+			c.Exception(x.vector, oldPC, x.status)
+		}
+		return nil
+	}
+	if e != nil {
+		return fmt.Errorf("pc=%#x op=%08x msr=%#x: %w", oldPC, op, c.MSR, e)
+	}
+	c.Tick++
+	return nil
+}
+func (c *CPU) execute(op uint32, pc uint64) error {
+	if c.MSR&MSRPR != 0 && op>>26 == 19 {
+		xo := op >> 1 & 1023
+		if xo == 18 || xo == 50 {
+			return &exception{vector: 0x700, status: 1 << 18}
+		}
+	}
+	rtreg, ra, rb := op>>21&31, op>>16&31, op>>11&31
+	imm := sext(uint64(op&65535), 16)
+	a, b := c.GPR[ra], c.GPR[rb]
+	var result uint64
+	writeRT, writeRA, record := false, false, false
+	primary := op >> 26
+	switch primary {
+	case 2, 3: // tdi/twi
+		lhs, rhs := a, imm
+		if primary == 3 {
+			lhs, rhs = sext(uint64(uint32(a)), 32), sext(uint64(uint32(imm)), 32)
+		}
+		to := rtreg
+		if to&16 != 0 && int64(lhs) < int64(rhs) || to&8 != 0 && int64(lhs) > int64(rhs) || to&4 != 0 && lhs == rhs || to&2 != 0 && lhs < rhs || to&1 != 0 && lhs > rhs {
+			return &exception{vector: 0x700, status: 1 << 17}
+		}
+	case 7:
+		result = uint64(int64(a) * int64(imm))
+		writeRT = true
+	case 8:
+		result = imm - a
+		c.carry(imm >= a)
+		writeRT = true
+	case 10, 11:
+		lhs, rhs := a, imm
+		if primary == 10 {
+			rhs = uint64(op & 65535)
+		}
+		if op&(1<<21) == 0 {
+			if primary == 11 {
+				lhs, rhs = sext(uint64(uint32(lhs)), 32), sext(uint64(uint32(rhs)), 32)
+			} else {
+				lhs, rhs = uint64(uint32(lhs)), uint64(uint32(rhs))
+			}
+		}
+		r := uint32(2)
+		if primary == 11 {
+			if int64(lhs) < int64(rhs) {
+				r = 8
+			} else if int64(lhs) > int64(rhs) {
+				r = 4
+			}
+		} else {
+			if lhs < rhs {
+				r = 8
+			} else if lhs > rhs {
+				r = 4
+			}
+		}
+		if c.XER&XERSO != 0 {
+			r |= 1
+		}
+		c.crfield(int(op>>23&7), r)
+	case 12, 13:
+		result = a + imm
+		c.carry(result < a)
+		writeRT = true
+		record = primary == 13
+	case 14:
+		result = c.base(ra) + imm
+		writeRT = true
+	case 15:
+		result = c.base(ra) + (imm << 16)
+		writeRT = true
+	case 16:
+		if c.branch(rtreg, ra, true) {
+			target := pc + sext(uint64(op&0xfffc), 16)
+			if op&2 != 0 {
+				target = sext(uint64(op&0xfffc), 16)
+			}
+			c.PC = target
+		}
+		if op&1 != 0 {
+			c.LR = pc + 4
+		}
+	case 17:
+		if op>>5&127 == 1 {
+			if c.MSR&MSRPR != 0 {
+				return &exception{vector: 0x700, status: 1 << 18}
+			}
+			if c.Hypercall != nil {
+				return c.Hypercall(c)
+			}
+			return fmt.Errorf("hypercall without partition")
+		}
+		c.Exception(0xc00, pc+4, 0)
+	case 18:
+		target := sext(uint64(op&0x3fffffc), 26)
+		if op&2 == 0 {
+			target += pc
+		}
+		c.PC = target
+		if op&1 != 0 {
+			c.LR = pc + 4
+		}
+	case 19:
+		xo := op >> 1 & 1023
+		switch xo {
+		case 16, 528:
+			target := c.LR
+			if xo == 528 {
+				target = c.CTR
+			}
+			if c.branch(rtreg, ra, xo == 16) {
+				c.PC = target &^ 3
+			}
+			if op&1 != 0 {
+				c.LR = pc + 4
+			}
+		case 18, 50:
+			c.PC = c.SPR[26] &^ 3
+			c.MSR = c.SPR[27]
+		case 150: // isync
+		case 0:
+			c.crfield(int(op>>23&7), (c.CR>>uint(28-int(op>>18&7)*4))&15)
+		case 33, 129, 193, 225, 257, 289, 417, 449:
+			x, y := (c.CR>>(31-ra))&1, (c.CR>>(31-rb))&1
+			var v uint32
+			switch xo {
+			case 33:
+				v = ^(x | y)
+			case 129:
+				v = x &^ y
+			case 193:
+				v = x ^ y
+			case 225:
+				v = ^(x & y)
+			case 257:
+				v = x & y
+			case 289:
+				v = ^(x ^ y)
+			case 417:
+				v = x | ^y
+			case 449:
+				v = x | y
+			}
+			bit := uint(31 - rtreg)
+			c.CR = c.CR&^(1<<bit) | ((v & 1) << bit)
+		default:
+			return fmt.Errorf("unsupported XL opcode %d", xo)
+		}
+	case 20, 21, 23:
+		sh := rb
+		if primary == 23 {
+			sh = uint32(b) & 31
+		}
+		rot := uint64(bits.RotateLeft32(uint32(c.GPR[rtreg]), int(sh)))
+		m := mask(uint(op>>6&31), uint(op>>1&31), 32)
+		result = rot & m
+		if primary == 20 {
+			result |= a &^ m
+		}
+		writeRA = true
+		record = op&1 != 0
+	case 24, 25, 26, 27, 28, 29:
+		v := uint64(op & 65535)
+		if primary&1 != 0 {
+			v <<= 16
+		}
+		s := c.GPR[rtreg]
+		switch primary {
+		case 24, 25:
+			result = s | v
+		case 26, 27:
+			result = s ^ v
+		case 28, 29:
+			result = s & v
+			record = true
+		}
+		writeRA = true
+	case 30:
+		sh := uint(rb) | (uint(op>>1&1) << 5)
+		mb := uint(op>>6&31) | (uint(op & 32))
+		xo := op >> 2 & 7
+		s := c.GPR[rtreg]
+		r := bits.RotateLeft64(s, int(sh))
+		m := uint64(0)
+		switch xo {
+		case 0:
+			m = mask(mb, 63, 64)
+		case 1:
+			m = mask(0, mb, 64)
+		case 2, 3:
+			m = mask(mb, 63-sh, 64)
+		default:
+			sh = uint(b & 63)
+			r = bits.RotateLeft64(s, int(sh))
+			if op>>1&15 == 8 {
+				m = mask(mb, 63, 64)
+			} else if op>>1&15 == 9 {
+				m = mask(0, mb, 64)
+			} else {
+				return fmt.Errorf("unsupported MD opcode")
+			}
+		}
+		result = r & m
+		if xo == 3 {
+			result |= a &^ m
+		}
+		writeRA = true
+		record = op&1 != 0
+	case 31:
+		return c.extended(op, pc)
+	case 32, 33, 34, 35, 40, 41, 42, 43, 58:
+		address := c.base(ra) + imm
+		width := 4
+		update := primary&1 != 0
+		signed := primary == 42 || primary == 43
+		switch primary {
+		case 34, 35:
+			width = 1
+		case 40, 41, 42, 43:
+			width = 2
+		case 58:
+			address = c.base(ra) + sext(uint64(op&0xfffc), 16)
+			width = 8
+			update = op&3 == 1
+			signed = op&3 == 2
+			if signed {
+				width = 4
+			}
+			if op&3 == 3 {
+				return fmt.Errorf("reserved DS load")
+			}
+		}
+		v, e := c.read(address, width, rt.Read)
+		if e != nil {
+			return e
+		}
+		if signed {
+			v = sext(v, uint(width*8))
+		}
+		c.GPR[rtreg] = v
+		if update {
+			c.GPR[ra] = address
+		}
+	case 36, 37, 38, 39, 44, 45, 62:
+		address := c.base(ra) + imm
+		width := 4
+		update := primary&1 != 0
+		switch primary {
+		case 38, 39:
+			width = 1
+		case 44, 45:
+			width = 2
+		case 62:
+			address = c.base(ra) + sext(uint64(op&0xfffc), 16)
+			width = 8
+			update = op&3 == 1
+			if op&3 > 1 {
+				return fmt.Errorf("reserved DS store")
+			}
+		}
+		if e := c.write(address, width, c.GPR[rtreg]); e != nil {
+			return e
+		}
+		if update {
+			c.GPR[ra] = address
+		}
+	case 46, 47:
+		address := c.base(ra) + imm
+		for r := rtreg; r < 32; r++ {
+			if primary == 46 {
+				v, e := c.read(address, 4, rt.Read)
+				if e != nil {
+					return e
+				}
+				c.GPR[r] = v
+			} else {
+				if e := c.write(address, 4, c.GPR[r]); e != nil {
+					return e
+				}
+			}
+			address += 4
+		}
+	default:
+		return fmt.Errorf("unsupported primary opcode %d", primary)
+	}
+	if writeRT {
+		c.GPR[rtreg] = result
+	}
+	if writeRA {
+		c.GPR[ra] = result
+	}
+	if record {
+		c.record(result)
+	}
+	return nil
+}
+
+-- cpu_test.go --
+package power64
+
+import (
+	"encoding/binary"
+	rt "renvo.dev/internal/rfe/runtime"
+	"testing"
+)
+
+type memoryBus []byte
+
+func (m memoryBus) Load(a uint64, w int, access rt.Access, tick uint64) (uint64, *rt.Fault) {
+	if a > uint64(len(m)) || w < 1 || w > 8 || uint64(w) > uint64(len(m))-a {
+		return 0, &rt.Fault{Kind: rt.Boundary, Address: a, Width: w}
+	}
+	var v uint64
+	for i := 0; i < w; i++ {
+		v |= uint64(m[a+uint64(i)]) << uint(i*8)
+	}
+	return v, nil
+}
+func (m memoryBus) Store(a uint64, w int, v uint64, tick uint64) *rt.Fault {
+	if a > uint64(len(m)) || w < 1 || w > 8 || uint64(w) > uint64(len(m))-a {
+		return &rt.Fault{Kind: rt.Boundary, Address: a, Width: w}
+	}
+	for i := 0; i < w; i++ {
+		m[a+uint64(i)] = byte(v >> uint(i*8))
+	}
+	return nil
+}
+func (m memoryBus) Peek(a uint64, w int) (uint64, bool) {
+	v, f := m.Load(a, w, rt.Execute, 0)
+	return v, f == nil
+}
+func TestEndianLoadStore(t *testing.T) {
+	for _, le := range []bool{false, true} {
+		m := memoryBus(make([]byte, 256))
+		c := CPU{Bus: m, MSR: MSRSF}
+		var order binary.ByteOrder = binary.BigEndian
+		if le {
+			c.MSR |= MSRLE
+			order = binary.LittleEndian
+		}
+		order.PutUint32(m, 0x80600080)
+		order.PutUint32(m[4:], 0x90600088)
+		copy(m[128:], []byte{0x12, 0x34, 0x56, 0x78})
+		if e := c.Step(); e != nil {
+			t.Fatal(e)
+		}
+		expected := uint64(order.Uint32(m[128:]))
+		if c.GPR[3] != expected {
+			t.Fatalf("LE=%t: load=%x want=%x", le, c.GPR[3], expected)
+		}
+		if e := c.Step(); e != nil {
+			t.Fatal(e)
+		}
+		if order.Uint32(m[136:]) != uint32(expected) {
+			t.Fatal("store byte order")
+		}
+	}
+}
+func TestCarryOverflowAndRecord(t *testing.T) {
+	c := CPU{}
+	c.GPR[4] = ^uint64(0)
+	c.GPR[5] = 1
+	op := uint32(31<<26 | 3<<21 | 4<<16 | 5<<11 | 10<<1 | 1)
+	if e := c.execute(op, 0); e != nil {
+		t.Fatal(e)
+	}
+	if c.GPR[3] != 0 || c.XER&XERCA == 0 || c.CR>>28 != 2 {
+		t.Fatalf("addc: %#v", c)
+	}
+	c.GPR[4] = 0x7fffffffffffffff
+	c.GPR[5] = 1
+	op = 31<<26 | 3<<21 | 4<<16 | 5<<11 | 778<<1 | 1
+	if e := c.execute(op, 0); e != nil {
+		t.Fatal(e)
+	}
+	if c.XER&(XEROV|XERSO) != (XEROV|XERSO) || c.CR>>28 != 9 {
+		t.Fatal("addo record/overflow")
+	}
+}
+func TestBranchUsesOldLR(t *testing.T) {
+	c := CPU{LR: 0x80}
+	if e := c.execute(0x4e800021, 0x40); e != nil {
+		t.Fatal(e)
+	}
+	if c.PC != 0x80 || c.LR != 0x44 {
+		t.Fatal("bclrl target/link ordering")
+	}
+	c.CTR = 1
+	c.PC = 0x44
+	if e := c.execute(0x4200fff8, 0x44); e != nil {
+		t.Fatal(e)
+	}
+	if c.CTR != 0 || c.PC != 0x44 {
+		t.Fatal("bdnz")
+	}
+}
+func TestExceptionRoundTrip(t *testing.T) {
+	c := CPU{MSR: MSRSF | MSREE | MSRIR | MSRDR | MSRLE, InterruptLE: true}
+	saved := c.MSR
+	c.Exception(0x900, 0x1234, 0)
+	if c.PC != 0x900 || c.MSR&MSREE != 0 || c.SPR[26] != 0x1234 {
+		t.Fatal("exception entry")
+	}
+	if e := c.execute(0x4c000024, 0x900); e != nil {
+		t.Fatal(e)
+	}
+	if c.PC != 0x1234 || c.MSR != saved {
+		t.Fatal("rfid")
+	}
+}
+func TestReservationInvalidatedByStore(t *testing.T) {
+	m := memoryBus(make([]byte, 256))
+	c := CPU{Bus: m, MSR: MSRLE}
+	c.GPR[4] = 128
+	c.GPR[5] = 0
+	c.GPR[3] = 42
+	if e := c.execute(31<<26|6<<21|4<<16|5<<11|20<<1, 0); e != nil {
+		t.Fatal(e)
+	}
+	if !c.Reserved {
+		t.Fatal("lwarx")
+	}
+	if e := c.write(132, 4, 1); e != nil {
+		t.Fatal(e)
+	}
+	if e := c.execute(31<<26|3<<21|4<<16|5<<11|150<<1|1, 4); e != nil {
+		t.Fatal(e)
+	}
+	if c.CR>>28&2 != 0 {
+		t.Fatal("stwcx succeeded after intervening store")
+	}
+}
+
+-- extended.go --
+package power64
+
+import (
+	"fmt"
+	"math/bits"
+	rt "renvo.dev/internal/rfe/runtime"
+)
+
+func (c *CPU) extended(op uint32, pc uint64) error {
+	rs, ra, rb := op>>21&31, op>>16&31, op>>11&31
+	a, b, s := c.GPR[ra], c.GPR[rb], c.GPR[rs]
+	xo := op >> 1 & 1023
+	if c.MSR&MSRPR != 0 {
+		switch xo {
+		case 83, 146, 178, 402, 434, 498, 851, 915, 306, 370, 566:
+			return &exception{vector: 0x700, status: 1 << 18}
+		case 339, 467:
+			if sprnum(op)&16 != 0 {
+				return &exception{vector: 0x700, status: 1 << 18}
+			}
+		}
+	}
+	result := uint64(0)
+	writeRT, writeRA, record := false, false, op&1 != 0
+	address := c.base(ra) + b
+	switch xo {
+	case 0, 32:
+		lhs, rhs := a, b
+		if op&(1<<21) == 0 {
+			if xo == 0 {
+				lhs, rhs = sext(uint64(uint32(a)), 32), sext(uint64(uint32(b)), 32)
+			} else {
+				lhs, rhs = uint64(uint32(a)), uint64(uint32(b))
+			}
+		}
+		r := uint32(2)
+		if xo == 0 {
+			if int64(lhs) < int64(rhs) {
+				r = 8
+			} else if int64(lhs) > int64(rhs) {
+				r = 4
+			}
+		} else {
+			if lhs < rhs {
+				r = 8
+			} else if lhs > rhs {
+				r = 4
+			}
+		}
+		if c.XER&XERSO != 0 {
+			r |= 1
+		}
+		c.crfield(int(op>>23&7), r)
+		return nil
+	case 4, 68:
+		lhs, rhs := a, b
+		if xo == 4 {
+			lhs, rhs = sext(uint64(uint32(a)), 32), sext(uint64(uint32(b)), 32)
+		}
+		to := rs
+		if to&16 != 0 && int64(lhs) < int64(rhs) || to&8 != 0 && int64(lhs) > int64(rhs) || to&4 != 0 && lhs == rhs || to&2 != 0 && lhs < rhs || to&1 != 0 && lhs > rhs {
+			return &exception{vector: 0x700, status: 1 << 17}
+		}
+		return nil
+	case 19:
+		result = uint64(c.CR)
+		writeRT = true
+		record = false
+	case 144:
+		fm := op >> 12 & 255
+		for f := 0; f < 8; f++ {
+			if fm&(1<<uint(7-f)) != 0 {
+				c.crfield(f, uint32(s>>uint(28-f*4)))
+			}
+		}
+		return nil
+	case 83:
+		result = c.MSR
+		writeRT = true
+		record = false
+	case 146, 178:
+		if op&(1<<16) != 0 {
+			c.MSR = c.MSR&^(MSREE|1<<1) | (s & (MSREE | 1<<1))
+		} else {
+			c.MSR = s
+		}
+		return nil
+	case 339, 371:
+		result = c.readSPR(sprnum(op))
+		writeRT = true
+		record = false
+	case 467:
+		c.writeSPR(sprnum(op), s)
+		return nil
+	case 23, 55, 87, 119, 279, 311, 343, 375, 21, 53, 341, 373, 532, 534, 790:
+		width := 4
+		update := false
+		signed := false
+		reverse := false
+		switch xo {
+		case 55:
+			update = true
+		case 87:
+			width = 1
+		case 119:
+			width = 1
+			update = true
+		case 279:
+			width = 2
+		case 311:
+			width = 2
+			update = true
+		case 343:
+			width = 2
+			signed = true
+		case 375:
+			width = 2
+			signed = true
+			update = true
+		case 21:
+			width = 8
+		case 53:
+			width = 8
+			update = true
+		case 341:
+			signed = true
+		case 373:
+			signed = true
+			update = true
+		case 532:
+			width = 8
+			reverse = true
+		case 534:
+			reverse = true
+		case 790:
+			width = 2
+			reverse = true
+		}
+		v, e := c.read(address, width, rt.Read)
+		if e != nil {
+			return e
+		}
+		if reverse {
+			v = swap(v, width)
+		}
+		if signed {
+			v = sext(v, uint(width*8))
+		}
+		c.GPR[rs] = v
+		if update {
+			c.GPR[ra] = address
+		}
+		return nil
+	case 151, 183, 215, 247, 407, 439, 149, 181, 660, 662, 918:
+		width := 4
+		update := false
+		reverse := false
+		switch xo {
+		case 183:
+			update = true
+		case 215:
+			width = 1
+		case 247:
+			width = 1
+			update = true
+		case 407:
+			width = 2
+		case 439:
+			width = 2
+			update = true
+		case 149:
+			width = 8
+		case 181:
+			width = 8
+			update = true
+		case 660:
+			width = 8
+			reverse = true
+		case 662:
+			reverse = true
+		case 918:
+			width = 2
+			reverse = true
+		}
+		if reverse {
+			s = swap(s, width)
+		}
+		if e := c.write(address, width, s); e != nil {
+			return e
+		}
+		if update {
+			c.GPR[ra] = address
+		}
+		return nil
+	case 20, 84:
+		width := 4
+		if xo == 84 {
+			width = 8
+		}
+		v, e := c.read(address, width, rt.Read)
+		if e != nil {
+			return e
+		}
+		p, e := c.physical(address, rt.Read)
+		if e != nil {
+			return e
+		}
+		c.Reservation = p &^ 127
+		c.Reserved = true
+		c.GPR[rs] = v
+		return nil
+	case 150, 214:
+		width := 4
+		if xo == 214 {
+			width = 8
+		}
+		p, e := c.physical(address, rt.Write)
+		if e != nil {
+			return e
+		}
+		r := uint32(0)
+		if c.XER&XERSO != 0 {
+			r = 1
+		}
+		if c.Reserved && c.Reservation == p&^127 {
+			if e := c.write(address, width, s); e != nil {
+				return e
+			}
+			r |= 2
+		}
+		c.Reserved = false
+		c.crfield(0, r)
+		return nil
+	case 24:
+		if b&32 == 0 {
+			result = uint64(uint32(s) << uint(b&31))
+		}
+		writeRA = true
+	case 536:
+		if b&32 == 0 {
+			result = uint64(uint32(s) >> uint(b&31))
+		}
+		writeRA = true
+	case 27:
+		if b&64 == 0 {
+			result = s << uint(b&63)
+		}
+		writeRA = true
+	case 539:
+		if b&64 == 0 {
+			result = s >> uint(b&63)
+		}
+		writeRA = true
+	case 26:
+		result = uint64(bits.LeadingZeros32(uint32(s)))
+		writeRA = true
+	case 58:
+		result = uint64(bits.LeadingZeros64(s))
+		writeRA = true
+	case 28:
+		result = s & b
+		writeRA = true
+	case 60:
+		result = s &^ b
+		writeRA = true
+	case 124:
+		result = ^(s | b)
+		writeRA = true
+	case 284:
+		result = ^(s ^ b)
+		writeRA = true
+	case 316:
+		result = s ^ b
+		writeRA = true
+	case 412:
+		result = s | ^b
+		writeRA = true
+	case 444:
+		result = s | b
+		writeRA = true
+	case 476:
+		result = ^(s & b)
+		writeRA = true
+	case 922:
+		result = sext(s&65535, 16)
+		writeRA = true
+	case 954:
+		result = sext(s&255, 8)
+		writeRA = true
+	case 986:
+		result = sext(s&0xffffffff, 32)
+		writeRA = true
+	case 792, 824, 794:
+		width := uint(32)
+		shift := uint(b & 63)
+		if xo == 824 {
+			shift = uint(rb)
+		}
+		if xo == 794 {
+			width = 64
+			shift = uint(b & 127)
+		}
+		v := s
+		if width == 32 {
+			v = sext(uint64(uint32(v)), 32)
+		}
+		if shift >= width {
+			result = uint64(int64(v) >> 63)
+			c.carry(int64(v) < 0)
+		} else {
+			result = uint64(int64(v) >> shift)
+			c.carry(int64(v) < 0 && v&((uint64(1)<<shift)-1) != 0)
+		}
+		writeRA = true
+	case 826, 827: // sradi uses one extra shift bit in the XO field
+		shift := uint(rb) | uint(op&2)<<4
+		result = uint64(int64(s) >> shift)
+		c.carry(int64(s) < 0 && s&((uint64(1)<<shift)-1) != 0)
+		writeRA = true
+	case 598, 854, 86, 54, 246, 278, 470, 982, 306, 370, 566: // barriers/cache/TLB operations in a coherent uniprocessor
+		return nil
+	case 1014:
+		start := address &^ 127
+		for off := uint64(0); off < 128; off += 8 {
+			if e := c.write(start+off, 8, 0); e != nil {
+				return e
+			}
+		}
+		return nil
+	case 402:
+		index := int(b & 63)
+		c.SLB[index] = SLB{ESID: b, VSID: s}
+		return nil
+	case 434:
+		for i := 1; i < len(c.SLB); i++ {
+			c.SLB[i] = SLB{}
+		}
+		return nil
+	case 498:
+		esid := b &^ uint64(0xfffffff)
+		for i := range c.SLB {
+			if c.SLB[i].ESID&^uint64(0xfffffff) == esid {
+				c.SLB[i] = SLB{}
+			}
+		}
+		return nil
+	case 851, 915:
+		entry := c.SLB[b&63]
+		result = entry.VSID
+		if xo == 915 {
+			result = entry.ESID
+		}
+		writeRT = true
+		record = false
+	case 659, 595:
+		result = 0
+		writeRT = true
+		record = false
+	case 506:
+		result = uint64(bits.OnesCount64(s))
+		writeRA = true
+	case 122:
+		for i := uint(0); i < 64; i += 8 {
+			result |= uint64(bits.OnesCount8(byte(s>>i))) << i
+		}
+		writeRA = true
+	case 378:
+		result = uint64(bits.OnesCount32(uint32(s))) | uint64(bits.OnesCount32(uint32(s>>32)))<<32
+		writeRA = true
+	case 508: // cmpb
+		for i := uint(0); i < 64; i += 8 {
+			if byte(s>>i) == byte(b>>i) {
+				result |= 255 << i
+			}
+		}
+		writeRA = true
+	default:
+		base := xo & 511
+		oe := xo&512 != 0
+		switch base {
+		case 266, 10, 138, 234, 202:
+			rhs := b
+			carry := uint64(0)
+			if base == 138 || base == 234 || base == 202 {
+				if c.XER&XERCA != 0 {
+					carry = 1
+				}
+			}
+			if base == 234 {
+				rhs = ^uint64(0)
+			}
+			if base == 202 {
+				rhs = 0
+			}
+			sum, ca := bits.Add64(a, rhs, carry)
+			result = sum
+			if base != 266 {
+				c.carry(ca != 0)
+			}
+			if oe {
+				c.overflow((^(a^rhs)&(a^result))>>63 != 0)
+			}
+			writeRT = true
+		case 40, 8, 136, 232, 200:
+			rhs := b
+			carry := uint64(1)
+			if base == 136 || base == 232 || base == 200 {
+				carry = 0
+				if c.XER&XERCA != 0 {
+					carry = 1
+				}
+			}
+			if base == 232 {
+				rhs = ^uint64(0)
+			}
+			if base == 200 {
+				rhs = 0
+			}
+			sum, ca := bits.Add64(^a, rhs, carry)
+			result = sum
+			if base != 40 {
+				c.carry(ca != 0)
+			}
+			if oe {
+				c.overflow(((a^rhs)&(rhs^result))>>63 != 0)
+			}
+			writeRT = true
+		case 104:
+			result = 0 - a
+			writeRT = true
+			if oe {
+				c.overflow(a == 1<<63)
+			}
+		case 235:
+			result = sext(uint64(uint32(a)*uint32(b)), 32)
+			writeRT = true
+		case 233:
+			result = a * b
+			writeRT = true
+		case 11:
+			result = uint64(uint32((uint64(uint32(a)) * uint64(uint32(b))) >> 32))
+			writeRT = true
+		case 75:
+			result = uint64((int64(int32(a)) * int64(int32(b))) >> 32)
+			writeRT = true
+		case 9:
+			hi, _ := bits.Mul64(a, b)
+			result = hi
+			writeRT = true
+		case 73:
+			hi, _ := bits.Mul64(a, b)
+			if int64(a) < 0 {
+				hi -= b
+			}
+			if int64(b) < 0 {
+				hi -= a
+			}
+			result = hi
+			writeRT = true
+		case 459:
+			if uint32(b) != 0 {
+				result = uint64(uint32(a) / uint32(b))
+			}
+			writeRT = true
+		case 491:
+			if int32(b) != 0 {
+				result = sext(uint64(uint32(int32(a)/int32(b))), 32)
+			}
+			writeRT = true
+		case 457:
+			if b != 0 {
+				result = a / b
+			}
+			writeRT = true
+		case 489:
+			if b != 0 {
+				result = uint64(int64(a) / int64(b))
+			}
+			writeRT = true
+		default:
+			return fmt.Errorf("unsupported X opcode %d (word %08x)", xo, op)
+		}
+	}
+	if writeRT {
+		c.GPR[rs] = result
+	}
+	if writeRA {
+		c.GPR[ra] = result
+	}
+	if record {
+		c.record(result)
+	}
+	return nil
+}
+
+-- population_test.go --
+package power64
+
+import "testing"
+
+func TestPopulationCountWidths(t *testing.T) {
+	c := CPU{}
+	c.GPR[3] = 0xff0180f001030000
+	for _, v := range []struct {
+		xo   uint32
+		want uint64
+	}{{506, 17}, {122, 0x0801010401020000}, {378, 0x0000000e00000003}} {
+		if e := c.execute(31<<26|3<<21|4<<16|v.xo<<1, 0); e != nil {
+			t.Fatal(e)
+		}
+		if c.GPR[4] != v.want {
+			t.Fatalf("XO%d got %x want %x", v.xo, c.GPR[4], v.want)
+		}
+	}
+}
+
+-- protection_test.go --
+package power64
+
+import (
+	rt "renvo.dev/internal/rfe/runtime"
+	"testing"
+)
+
+func TestProblemStatePrivilege(t *testing.T) {
+	for _, op := range []uint32{0x44000022, 0x4c000024, 31<<26 | 3<<21 | 83<<1, 31<<26 | 3<<21 | 178<<1, 31<<26 | 3<<21 | 467<<1 | 16<<16} {
+		c := CPU{MSR: MSRSF | MSRPR}
+		if e := c.execute(op, 0); e == nil {
+			t.Fatalf("problem-state privileged word %08x accepted", op)
+		} else if _, ok := e.(*exception); !ok {
+			t.Fatalf("privilege must raise program exception: %v", e)
+		}
+	}
+}
+func TestCrossPageTranslations(t *testing.T) {
+	m := memoryBus(make([]byte, 8192))
+	m[4095], m[0], m[1], m[2] = 0x11, 0x22, 0x33, 0x44
+	c := CPU{Bus: m, MSR: MSRLE}
+	c.Translate = func(c *CPU, a uint64, access rt.Access) (uint64, error) {
+		if a >= 4096 {
+			return a - 4096, nil
+		}
+		return a, nil
+	}
+	v, e := c.read(4095, 4, rt.Read)
+	if e != nil || v != 0x44332211 {
+		t.Fatalf("cross-page read=%x %v", v, e)
+	}
+	c.Translate = func(c *CPU, a uint64, access rt.Access) (uint64, error) {
+		if a >= 4096 {
+			return 0, TranslationMiss(a, access, false, false)
+		}
+		return a, nil
+	}
+	if e := c.write(4095, 4, 0xaabbccdd); e == nil {
+		t.Fatal("store accepted missing second page")
+	}
+	if m[4095] != 0x11 {
+		t.Fatal("faulting cross-page store changed first page")
+	}
+}
+
+-- reverse_test.go --
+package power64
+
+import "testing"
+
+func TestDoublewordByteReverse(t *testing.T) {
+	for _, le := range []bool{false, true} {
+		m := memoryBus(make([]byte, 256))
+		copy(m[128:], []byte{1, 2, 3, 4, 5, 6, 7, 8})
+		c := CPU{Bus: m, MSR: MSRSF}
+		if le {
+			c.MSR |= MSRLE
+		}
+		c.GPR[4] = 128
+		if e := c.execute(31<<26|3<<21|4<<16|532<<1, 0); e != nil {
+			t.Fatal(e)
+		}
+		want := uint64(0x0807060504030201)
+		if le {
+			want = 0x0102030405060708
+		}
+		if c.GPR[3] != want {
+			t.Fatalf("LE=%t value=%x", le, c.GPR[3])
+		}
+		c.GPR[4] = 136
+		if e := c.execute(31<<26|3<<21|4<<16|660<<1, 4); e != nil {
+			t.Fatal(e)
+		}
+		for i := 0; i < 8; i++ {
+			if m[136+i] != byte(i+1) {
+				t.Fatal("stdbrx bytes")
+			}
+		}
+	}
+}
