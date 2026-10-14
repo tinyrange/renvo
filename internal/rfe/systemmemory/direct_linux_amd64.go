@@ -50,8 +50,32 @@ func newDirectRAM(size int) ([]byte, directMemory, error) {
 	return data, d, nil
 }
 func (d *mappedRAM) create(guest uint64) *directWindow {
-	if d.closed || len(d.windows) >= 8 {
+	if d.closed {
 		return nil
+	}
+	if len(d.windows) >= 8 {
+		// Reuse only a completely revoked reservation, never an active view.
+		// forget cleared the context fields and set every page PROT_NONE;
+		// refills occur outside native execution. No old page is reauthorized.
+		for old, w := range d.windows {
+			if w.active {
+				continue
+			}
+			delete(d.windows, old)
+			if d.selected == w {
+				d.selected = nil
+			}
+			if len(w.view) == 0 {
+				break
+			}
+			w.guest, w.hits, w.generation = guest, 0, 1
+			clear(w.pages)
+			d.windows[guest] = w
+			return w
+		}
+		if len(d.windows) >= 8 {
+			return nil
+		}
 	}
 	view, err := syscall.Mmap(-1, 0, int(directWindowSize), syscall.PROT_NONE, syscall.MAP_PRIVATE|syscall.MAP_ANON)
 	if err != nil {
@@ -137,7 +161,11 @@ func (d *mappedRAM) forgetPage(address uint64) {
 	}
 }
 func (d *mappedRAM) forget() {
+	// Heat and selection belong to the current mapping root, not cold boot.
+	// Otherwise an inactive old-root winner can hide every new active view.
+	d.selected = nil
 	for _, w := range d.windows {
+		w.hits = 0
 		if !w.active || len(w.view) == 0 {
 			continue
 		}

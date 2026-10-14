@@ -311,6 +311,41 @@ regressions, formatting and Renvo preflight. Full validation remains with CI.
 These are hosted native-emulation measurements, not physical POWER hardware,
 EEMBC certification or an ARM64/x86 throughput-parity claim.
 
+### Follow-up toward 4,000 iterations/s
+
+The next optimization pass **has not reached 4,000 iterations/s**. Its final
+fresh, unprofiled strict 20,000-iteration gate measured:
+
+| Seed | Guest realtime | Host marker interval | Iterations/s from ticks |
+| --- | ---: | ---: | ---: |
+| Performance | 14.840206 s | 14.841815123 s | **1347.69** |
+| Validation | 13.461432 s | 13.462889796 s | **1485.73** |
+
+These are about 12.9% / 10.6% above the preceding measurements, not a claimed
+4,000-iteration result. Both upstream validations and all ten independent
+identical-ELF/kernel QEMU CRC comparisons passed. The QEMU control remains
+CRC-only: both of its roughly 3.1-second runs correctly fail upstream duration
+validation and must not be reported as performance results.
+
+This pass removes dominated immutable SSA guards and redundant shift/mask
+operations, uses word-width compare flags directly, and keeps the generated
+foreign dispatcher frame resident across genuine monotonic timer polls.
+Prepared successor predictions now work across mixed leaf families, retaining
+full-PC, fresh-epoch and exact-budget checks. Shared write facts and timer
+budgets occupy disjoint frame words; the original total frame cap is unchanged.
+Optional fault-protected RAM gains root-cache reuse and register-result direct
+loops with precise recovery, but **checked Go RAM remains the default** because
+the direct experiment did not improve both seed sets.
+
+The final proof includes 13,337,566,714 native instructions, 2,799,194,749 native
+memory operations and 942,475,216 loop iterations, with zero compilation
+failures or arena resets. Fresh native Linux init, the unchanged 2000-iteration
+interpreter gate, affected package and POWER differential tests, the focused
+Linux backend regression, formatting and Renvo preflight passed. No algorithm,
+clock, duration/CRC rule, default resource limit or compiler performance policy
+was relaxed. `power64-recompiler-followup.json` records the complete counters
+and provenance; the preceding result is retained for comparison.
+
 ## Current boundaries
 
 The scalar CPU now uses the full shared IR/native stack. Vector/VSX, floating

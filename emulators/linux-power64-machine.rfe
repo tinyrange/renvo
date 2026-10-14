@@ -308,7 +308,9 @@ func run(args []string) error {
 			return e
 		}
 	}
-	m, e := New(*memory, os.Stdout)
+	makeMachine := New
+
+	m, e := makeMachine(*memory, os.Stdout)
 	if e != nil {
 		return e
 	}
@@ -664,7 +666,9 @@ func testLinuxCoreMark(t *testing.T, kernel, benchmark string, iterations, budge
 		t.Fatal(e)
 	}
 	var out coremarkOutput
-	m, e := New(256, &out)
+	makeMachine := New
+
+	m, e := makeMachine(256, &out)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -1004,7 +1008,10 @@ func (m *Machine) nativeSpace() uint64 {
 	return m.nativeBank<<32 | (m.CPU.MSR & (power64.MSRSF | power64.MSRIR | power64.MSRDR | power64.MSRPR))
 }
 func (m *Machine) nativeAddress(key uint64) uint64 {
-	return systemmemory.UnfoldPageCacheAddress(key) | m.nativeBank<<48
+	if !m.nativeDirect {
+		key = systemmemory.UnfoldPageCacheAddress(key)
+	}
+	return key | m.nativeBank<<48
 }
 func (m *Machine) nativeMapping(a uint64, execute bool) (uint64, bool, error) {
 	access := emu.Read
@@ -1068,9 +1075,9 @@ func (m *Machine) configureJIT(config engine.EngineConfig) error {
 	}
 	if m.NativeRAM == nil {
 		m.NativeRAM = systemmemory.New(m.RAM, m.nativeActive, m.nativeMapping)
-		m.NativeRAM.ReadGuest, m.NativeRAM.WriteGuest = m.CPU.Read, m.CPU.Write
-		m.NativeRAM.Domain, m.NativeRAM.AddressSpace, m.NativeRAM.NativeAddress = m.nativeDomain, m.nativeSpace, m.nativeAddress
 	}
+	m.NativeRAM.ReadGuest, m.NativeRAM.WriteGuest = m.CPU.Read, m.CPU.Write
+	m.NativeRAM.Domain, m.NativeRAM.AddressSpace, m.NativeRAM.NativeAddress = m.nativeDomain, m.nativeSpace, m.nativeAddress
 	arch := power64.Architecture()
 	fetch := arch.Fetch
 	arch.Fetch = func(memory engine.Memory, pc uint64) (engine.Instruction, error) {
@@ -1101,7 +1108,15 @@ func (m *Machine) configureJIT(config engine.EngineConfig) error {
 				bank &= 0x0fff
 			}
 			b.Guard(b.Binary(emu.Equal, b.Shift(emu.Shr, address, 48), b.Constant(bank)))
-			key := b.Binary(emu.And, address, b.Constant(0x0000ffffffffffff))
+			key := address
+			// A successful zero-bank guard already proves the full 48-bit key.
+			// Other banks still need their guarded high bits removed.
+			if bank != 0 {
+				key = b.Binary(emu.And, address, b.Constant(0x0000ffffffffffff))
+			}
+			if m.nativeDirect {
+				return key
+			}
 			return systemmemory.PageCacheAddress(b, key)
 		}
 		return power64.LowerInstruction(b, ins, completed)
@@ -1117,10 +1132,16 @@ func (m *Machine) configureJIT(config engine.EngineConfig) error {
 	return nil
 }
 func (m *Machine) Close() error {
+	var err error
 	if m.JIT != nil {
-		return m.JIT.Close()
+		err = m.JIT.Close()
 	}
-	return nil
+	if m.NativeRAM != nil {
+		if e := m.NativeRAM.Close(); err == nil {
+			err = e
+		}
+	}
+	return err
 }
 
 type nativeCPU struct {
@@ -1281,10 +1302,15 @@ func TestNativeCodeIdentitySeparatesEndianModes(t *testing.T) {
 	}
 }
 func TestNativeInstructionWritesCannotBypassCodeBarrier(t *testing.T) {
+	for _, mode := range []string{"native", "direct"} {
+		t.Run(mode, func(t *testing.T) { testNativeInstructionWritesCannotBypassCodeBarrier(t, mode) })
+	}
+}
+func testNativeInstructionWritesCannotBypassCodeBarrier(t *testing.T, mode string) {
 	// A guest store replaces the opcode it will execute on the following branch.
 	// Warm the writing block as ordinary data first, then redirect it to code.
 	words := []uint32{0x90a40000, 0x38630001, 0x4bfffff8}
-	m, ref := tierMachine(t, "native", words), tierMachine(t, "interpreter", words)
+	m, ref := tierMachine(t, mode, words), tierMachine(t, "interpreter", words)
 	for _, q := range []*Machine{m, ref} {
 		q.CPU.GPR[4] = 0x8000
 		q.CPU.GPR[5] = 0x38630002
@@ -1338,7 +1364,12 @@ import (
 
 func tierMachine(t *testing.T, mode string, words []uint32) *Machine {
 	t.Helper()
-	m, e := New(32, nil)
+	makeMachine := New
+	if mode == "direct" {
+		makeMachine = NewNative
+		mode = "native"
+	}
+	m, e := makeMachine(32, nil)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -1368,7 +1399,7 @@ func compareMachines(t *testing.T, a, b *Machine) {
 }
 func TestMachineAllTiersMemoryLinksRegionsAndBudgets(t *testing.T) {
 	words := []uint32{0x38630001, 0x90640000, 0x80a40000, 0x7ca62a78, 0x4bfffff0} // addi/store/load/xor/back branch
-	for _, mode := range []string{"ir", "native"} {
+	for _, mode := range []string{"ir", "native", "direct"} {
 		t.Run(mode, func(t *testing.T) {
 			m, ref := tierMachine(t, mode, words), tierMachine(t, "interpreter", words)
 			m.CPU.GPR[4], ref.CPU.GPR[4] = 0x8000, 0x8000
@@ -1404,8 +1435,13 @@ func TestMachineAllTiersMemoryLinksRegionsAndBudgets(t *testing.T) {
 	}
 }
 func TestNativePreciseCrossPageFaultAndNoPrefixReplay(t *testing.T) {
+	for _, mode := range []string{"native", "direct"} {
+		t.Run(mode, func(t *testing.T) { testNativePreciseCrossPageFaultAndNoPrefixReplay(t, mode) })
+	}
+}
+func testNativePreciseCrossPageFaultAndNoPrefixReplay(t *testing.T, mode string) {
 	words := []uint32{0x38630001, 0x90640000, 0x80a60000, 0x4bfffff4}
-	m, ref := tierMachine(t, "native", words), tierMachine(t, "interpreter", words)
+	m, ref := tierMachine(t, mode, words), tierMachine(t, "interpreter", words)
 	for _, q := range []*Machine{m, ref} {
 		q.CPU.GPR[4] = 0x8000
 		q.CPU.GPR[6] = 0x9000
@@ -1461,7 +1497,12 @@ func TestNativePreciseCrossPageFaultAndNoPrefixReplay(t *testing.T) {
 	}
 }
 func TestNativeMappingBitsAliasedCodeAndPermissionChanges(t *testing.T) {
-	m := tierMachine(t, "native", []uint32{0x38630001, 0x90640000, 0x80a40000, 0x4bfffff4})
+	for _, mode := range []string{"native", "direct"} {
+		t.Run(mode, func(t *testing.T) { testNativeMappingBitsAliasedCodeAndPermissionChanges(t, mode) })
+	}
+}
+func testNativeMappingBitsAliasedCodeAndPermissionChanges(t *testing.T, mode string) {
+	m := tierMachine(t, mode, []uint32{0x38630001, 0x90640000, 0x80a40000, 0x4bfffff4})
 	c := &m.CPU
 	c.MSR |= power64.MSRIR | power64.MSRDR
 	bank := uint64(0xc000000000000000)
@@ -1644,7 +1685,9 @@ func TestLinuxBoot(t *testing.T) {
 		t.Fatal(e)
 	}
 	var out bytes.Buffer
-	m, e := New(256, &out)
+	makeMachine := New
+
+	m, e := makeMachine(256, &out)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -1728,6 +1771,7 @@ type Machine struct {
 	adapter                            nativeCPU
 	kernelThreshold                    uint64
 	nativeBank                         uint64
+	nativeDirect                       bool
 	nativeSLBVersion, nativeHPTVersion uint64
 	clockSteps                         uint8
 	clockEE                            bool
@@ -1736,13 +1780,32 @@ type Machine struct {
 }
 
 func New(memory int, output io.Writer) (*Machine, error) {
+	return newMachine(memory, output, false)
+}
+
+// NewNative explicitly owns fault-protected RAM when supported. Close must
+// follow all executions; physical RAM slices must not be used after Close.
+// Unsupported hosts retain checked Go RAM with exactly the same guest policy.
+func NewNative(memory int, output io.Writer) (*Machine, error) {
+	return newMachine(memory, output, true)
+}
+func newMachine(memory int, output io.Writer, direct bool) (*Machine, error) {
 	if memory < 32 || memory > 4096 {
 		return nil, fmt.Errorf("RAM must be 32..4096 MiB")
 	}
 	if output == nil {
 		output = io.Discard
 	}
-	m := &Machine{RAM: make([]byte, memory<<20), HPT: make([]HPTE, 1<<18), Output: output, DEC: 0x7fffffff}
+	m := &Machine{HPT: make([]HPTE, 1<<18), Output: output, DEC: 0x7fffffff}
+	if direct {
+		ram, err := systemmemory.NewDirect(memory<<20, m.nativeActive, m.nativeMapping)
+		if err != nil {
+			return nil, err
+		}
+		m.NativeRAM, m.RAM, m.nativeDirect = ram, ram.Data, ram.DirectAvailable()
+	} else {
+		m.RAM = make([]byte, memory<<20)
+	}
 	m.CPU.Bus = m
 	m.CPU.Translate = m.translate
 	m.CPU.Hypercall = m.hypercall

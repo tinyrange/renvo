@@ -90,7 +90,7 @@ func (a *CodeArena) InstallLoopBlock(code []byte, words, instructions int) (int,
 // has a compatibility entry and a private body returning retirement in RAX and
 // status in RDX with ZF iff status is zero. The private body preserves its
 // resident R11 state base and uses the dispatcher's shared context. Legacy and
-// signal-recovery entries must not use this tag.
+// legacy signal-recovery entries must not use this tag.
 func (a *CodeArena) InstallRegisterLoopBlock(code []byte, words, instructions int) (int, error) {
 	if runtime.GOARCH != "amd64" || words < 1 || words > 256 || instructions < 1 || instructions > 256 {
 		return 0, fmt.Errorf("invalid register-result loop dimensions or host")
@@ -130,6 +130,15 @@ func (a *CodeArena) InstallFaultLoopBlock(code []byte, words, instructions int, 
 		return 0, fmt.Errorf("invalid direct loop dimensions or unavailable fault recovery")
 	}
 	return a.installFaultRecord(code, uint16(words)|32768|8192, 0, instructions, faults)
+}
+
+// InstallFaultRegisterLoopBlock admits only compiler-emitted owned direct
+// loops whose recovery stubs return the same register result as successful code.
+func (a *CodeArena) InstallFaultRegisterLoopBlock(code []byte, words, instructions int, faults []int) (int, error) {
+	if runtime.GOARCH != "amd64" || words < 1 || words > 256 || instructions < 1 || instructions > 256 || len(faults)%3 != 0 || !rfenativebridge.EnableFaults() {
+		return 0, fmt.Errorf("invalid register-result direct loop")
+	}
+	return a.installFaultRecord(code, uint16(words)|32768|8192|512, 16, instructions, faults)
 }
 func (a *CodeArena) installFaultRecord(code []byte, words uint16, body, instructions int, faults []int) (int, error) {
 	a.mu.Lock()

@@ -1482,12 +1482,12 @@ func crFromFlags(b *emu.Builder, flags emu.Value, lessCondition, greaterConditio
 	v := b.Binary(emu.Or, b.Shift(emu.Shl, less, 3), b.Binary(emu.Or, b.Shift(emu.Shl, greater, 2), b.Shift(emu.Shl, equal, 1)))
 	crField(b, field, b.Binary(emu.Or, v, bitAnd(b, b.Shift(emu.Shr, b.Load(StateXER), 31), 1)))
 }
-func compareCR(b *emu.Builder, a, c emu.Value, signed bool, field int) {
+func compareCR(b *emu.Builder, a, c emu.Value, width int, signed bool, field int) {
 	less, greater := 3, 8 // unsigned LO/HI predicates
 	if signed {
 		less, greater = 11, 12
 	} // signed LT/GT predicates
-	crFromFlags(b, b.ArithmeticFlags(a, c, 64, true), less, greater, field)
+	crFromFlags(b, b.ArithmeticFlags(a, c, width, true), less, greater, field)
 }
 func recordCR(b *emu.Builder, v emu.Value) {
 	crFromFlags(b, b.LogicalFlags(v, 64), 4, 12, 0)
@@ -1601,15 +1601,13 @@ func LowerInstruction(b *emu.Builder, ins engine.Instruction, completed int) boo
 		if p == 10 {
 			rhs = b.Constant(uint64(op & 65535))
 		}
-		lhs := a
+		width := 64
 		if op&(1<<21) == 0 {
-			if p == 11 {
-				lhs, rhs = signExtend(b, lhs, 32), signExtend(b, rhs, 32)
-			} else {
-				lhs, rhs = bitAnd(b, lhs, 0xffffffff), bitAnd(b, rhs, 0xffffffff)
-			}
+			width = 32
 		}
-		compareCR(b, lhs, rhs, p == 11, int(op>>23&7))
+		// CMP predicates have the architectural width; widening signed word
+		// operands first only introduces redundant shifts and allocations.
+		compareCR(b, a, rhs, width, p == 11, int(op>>23&7))
 	case 12, 13:
 		result = b.Binary(emu.Add, a, imm)
 		carryXER(b, b.Binary(emu.Less, result, a))
@@ -1987,15 +1985,11 @@ func lowerX(b *emu.Builder, op uint32, pc uint64) bool {
 	dst, record := -1, op&1 != 0
 	switch x {
 	case 0, 32:
-		lhs, rhs := a, c
+		width := 64
 		if op&(1<<21) == 0 {
-			if x == 0 {
-				lhs, rhs = signExtend(b, lhs, 32), signExtend(b, rhs, 32)
-			} else {
-				lhs, rhs = bitAnd(b, lhs, 0xffffffff), bitAnd(b, rhs, 0xffffffff)
-			}
+			width = 32
 		}
-		compareCR(b, lhs, rhs, x == 0, int(op>>23&7))
+		compareCR(b, a, c, width, x == 0, int(op>>23&7))
 		record = false
 	case 19:
 		result = b.Load(StateCR)

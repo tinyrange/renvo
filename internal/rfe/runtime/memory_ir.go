@@ -29,7 +29,16 @@ func (b *Builder) MemoryStore(address, value Value, size int) {
 	address = b.checkedAddress(address)
 	b.emit(Op{Kind: MemoryStore, A: address, B: value, Imm: uint64(size)})
 }
-func (b *Builder) Guard(condition Value) { b.emit(Op{Kind: Guard, A: condition}) }
+func (b *Builder) Guard(condition Value) {
+	if b.Ops[condition].Kind == Const && b.Ops[condition].Imm != 0 || b.guards[condition] {
+		return
+	}
+	if b.guards == nil {
+		b.guards = make(map[Value]bool)
+	}
+	b.guards[condition] = true
+	b.emit(Op{Kind: Guard, A: condition})
+}
 
 // Commit writes only dirty architectural slots in deterministic order. State
 // forwarding remains valid, but checkpoints are observable roots, not deferred

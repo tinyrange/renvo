@@ -32,7 +32,10 @@ func linkLayoutOK() bool {
 		unsafe.Offsetof(m.AdmissionEpoch) == backendcompiled.RenvoRFEAdmissionEpoch &&
 		unsafe.Offsetof(m.DirectGuest) == backendcompiled.RenvoRFEDirectGuest &&
 		unsafe.Offsetof(m.DirectHost) == backendcompiled.RenvoRFEDirectHost &&
-		unsafe.Offsetof(m.DirectSize) == backendcompiled.RenvoRFEDirectSize
+		unsafe.Offsetof(m.DirectSize) == backendcompiled.RenvoRFEDirectSize &&
+		unsafe.Offsetof(m.TimerFunction) == backendcompiled.RenvoRFETimerFunction &&
+		unsafe.Offsetof(m.TimerDeadline) == backendcompiled.RenvoRFETimerDeadline &&
+		unsafe.Offsetof(m.TimerExpired) == backendcompiled.RenvoRFETimerExpired
 }
 
 // PrepareLinks compiles the bounded dispatcher outside the arena call lock.
@@ -65,6 +68,9 @@ func (n *Native) PrepareLinks(words, pc int) error {
 	return nil
 }
 func (n *Native) CallLinked(state []uint64, m *MemoryContext, budget uint64) error {
+	if m != nil {
+		m.TimerFunction, m.TimerDeadline, m.TimerExpired = 0, 0, 0
+	}
 	if m == nil || !n.CanLinkMemory(m) || m.linkOwner != n || n.linkWords == 0 || len(state) != n.linkWords || budget == 0 || budget > 64 {
 		return fmt.Errorf("invalid native linked call")
 	}
@@ -95,6 +101,9 @@ func (n *Native) AdmitLink(entry, words, instructions int) error {
 // generation-ready published targets can start another call. A miss, fault,
 // zero progress or a cold publication returns to the engine outside the lock.
 func (n *Native) RunLinkedQuanta(state []uint64, m *MemoryContext, limit int, remaining, generation uint64) (int, error) {
+	if m != nil {
+		m.TimerFunction, m.TimerDeadline, m.TimerExpired = 0, 0, 0
+	}
 	if m == nil || !n.CanLinkMemory(m) || m.linkOwner != n || n.linkWords == 0 || len(state) != n.linkWords || limit < 1 || limit > 16 || remaining == 0 {
 		return 0, fmt.Errorf("invalid native linked quanta")
 	}

@@ -34,7 +34,8 @@ type Builder struct {
 	state                     map[int]Value
 	masks                     []uint64
 	values                    map[Op]Value
-	dirty                     map[int]bool // stores since the previous effect checkpoint
+	dirty                     map[int]bool   // stores since the previous effect checkpoint
+	guards                    map[Value]bool // dominating successful checks of immutable SSA values
 }
 
 func (b *Builder) emit(op Op) Value {
@@ -290,6 +291,11 @@ func (b *Builder) Binary(k int, a, c Value) Value {
 					return b.Binary(And, b.Binary(prior.Kind, x, y), c)
 				}
 			}
+			// (x << n) & m == (x & (m >> n)) << n, including
+			// truncation of source bits shifted out of the uint64 result.
+			if prior.Kind == Shl && prior.Imm < 64 {
+				return b.Shift(Shl, b.Binary(And, prior.A, b.Constant(mask>>prior.Imm)), prior.Imm)
+			}
 			if prior.Kind == And && b.Ops[prior.B].Kind == Const {
 				return b.Binary(And, prior.A, b.Constant(mask&b.Ops[prior.B].Imm))
 			}
@@ -322,8 +328,8 @@ func (b *Builder) Shift(k int, a Value, count uint64) Value {
 		return b.Constant(0)
 	}
 	source := b.Ops[a]
-	if k == Shr && source.Kind == Shl && source.Imm == count && b.masks[source.A]>>(64-count) == 0 {
-		return source.A
+	if k == Shr && source.Kind == Shl && count >= source.Imm && b.masks[source.A]>>(64-source.Imm) == 0 {
+		return b.Shift(Shr, source.A, count-source.Imm)
 	}
 	if b.Ops[a].Kind == Const {
 		return b.Constant(operation(k, b.Ops[a].Imm, count))

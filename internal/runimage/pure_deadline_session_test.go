@@ -64,11 +64,13 @@ func TestOwnedDeadlineSessionProgressFaultAndExpiry(t *testing.T) {
 		if m.Total > budget || m.Remaining != budget-m.Total || m.MemoryTotal != m.Total || state[0] != before+17*m.Total || state[1] != 0 {
 			t.Fatal("incorrect exact progress", state, m.Total, m.Remaining, m.MemoryTotal)
 		}
-		if m.CodeView != [4]uint64{} || m.PreparedTargets != 0 || m.AdmissionEpoch != 0 || m.DescriptorBase != 0 {
+		if m.CodeView != [4]uint64{} || m.PreparedTargets != 0 || m.AdmissionEpoch != 0 || m.DescriptorBase != 0 || m.TimerFunction != 0 || m.TimerDeadline != 0 || m.TimerExpired != 0 {
 			t.Fatal("borrow survived return")
 		}
 		return expired
 	}
+	// A caller-supplied callback address is never executable authority.
+	m.TimerFunction, m.TimerDeadline, m.TimerExpired = 1, 1, 1
 	// Non-multiple-of-64 budget and GC exercise the resident graph across polls.
 	if run(1001, rfenativebridge.MonotonicNS()+1000000000) || m.Total != 1001 {
 		t.Fatal("resource bound", m.Total)

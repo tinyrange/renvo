@@ -33,6 +33,7 @@ func (n *Native) runLinkedSession(state []uint64, m *MemoryContext, budget uint6
 func (n *Native) runLinkedSessionUntil(state []uint64, m *MemoryContext, budget uint64, backing []byte, deadline uint64, expired *bool) error {
 	if m != nil {
 		m.CodeView, m.PreparedTargets, m.DescriptorBase, m.AdmissionEpoch = [4]uint64{}, 0, 0, 0
+		m.TimerFunction, m.TimerDeadline, m.TimerExpired = 0, 0, 0
 	}
 	if m == nil || !n.CanLinkMemory(m) || m.linkOwner != n || n.linkWords == 0 || len(state) != n.linkWords || budget == 0 || budget > NativeSessionLimit {
 		if n.linkCall != nil {

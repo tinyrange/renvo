@@ -25,10 +25,16 @@ func (a *CodeArena) borrowLinked(view *[4]uint64, targets *uint64) {
 		*targets = uint64(uintptr(unsafe.Pointer(&a.targets[0])))
 	}
 }
+func clearContextTimerBorrow(m *LinkedContextABI) {
+	if m != nil {
+		m.TimerFunction, m.TimerDeadline, m.TimerExpired = 0, 0, 0
+	}
+}
 func clearContextBorrow(m *LinkedContextABI) {
 	if m != nil {
 		clearLinkedBorrow(&m.CodeView, &m.PreparedTargets)
 		m.DescriptorBase, m.AdmissionEpoch = 0, 0
+		clearContextTimerBorrow(m)
 	}
 }
 
@@ -44,6 +50,8 @@ func (a *CodeArena) InstallLinkedDispatcher(code []byte, words int) (int, error)
 // serialization. One cleanup covers both the view and lock, including errors.
 // The specialized path avoids the generic leaf/context ABI branch per quantum.
 func (a *CodeArena) CallLinked(entry int, state []uint64, context unsafe.Pointer, view *[4]uint64) error {
+	clearContextTimerBorrow((*LinkedContextABI)(context))
+	defer clearContextTimerBorrow((*LinkedContextABI)(context))
 	a.mu.Lock()
 	defer func() {
 		clearLinkedBorrow(view, nil)
@@ -59,6 +67,7 @@ func (a *CodeArena) CallLinked(entry int, state []uint64, context unsafe.Pointer
 	a.borrowLinked(view, nil)
 	top := (uintptr(unsafe.Pointer(&a.stack[len(a.stack)-1])) + 1) &^ 15
 	(*LinkedContextABI)(context).AdmissionEpoch = 0
+	clearContextTimerBorrow((*LinkedContextABI)(context))
 	callContext(a.base+uintptr(entry), uintptr(unsafe.Pointer(&state[0])), uintptr(context), top)
 	runtime.KeepAlive(context)
 	runtime.KeepAlive(state)
@@ -134,6 +143,8 @@ func (c *LinkedCall) Call(state []uint64, context unsafe.Pointer, view *[4]uint6
 
 func (c *LinkedCall) CallWithTargets(state []uint64, context unsafe.Pointer, view *[4]uint64, targets *uint64) error {
 	clearLinkedBorrow(view, targets)
+	clearContextTimerBorrow((*LinkedContextABI)(context))
+	defer clearContextTimerBorrow((*LinkedContextABI)(context))
 	if c == nil || c.arena == nil {
 		return fmt.Errorf("invalid prepared native dispatcher")
 	}
@@ -148,6 +159,7 @@ func (c *LinkedCall) CallWithTargets(state []uint64, context unsafe.Pointer, vie
 	}
 	a.borrowLinked(view, targets)
 	(*LinkedContextABI)(context).AdmissionEpoch = 0
+	clearContextTimerBorrow((*LinkedContextABI)(context))
 	callContext(c.entry, uintptr(unsafe.Pointer(&state[0])), uintptr(context), c.top)
 	runtime.KeepAlive(context)
 	runtime.KeepAlive(state)
@@ -166,6 +178,8 @@ func (c *LinkedCall) CallBatch(state []uint64, context unsafe.Pointer, view *[4]
 
 func (c *LinkedCall) CallBatchWithTargets(state []uint64, context unsafe.Pointer, view *[4]uint64, targets *uint64, limit int, next func(int) (bool, error)) (completed int, err error) {
 	clearLinkedBorrow(view, targets)
+	clearContextTimerBorrow((*LinkedContextABI)(context))
+	defer clearContextTimerBorrow((*LinkedContextABI)(context))
 	if c == nil || c.arena == nil || limit < 1 || limit > 16 || next == nil {
 		return 0, fmt.Errorf("invalid prepared dispatcher batch")
 	}
@@ -188,6 +202,7 @@ func (c *LinkedCall) CallBatchWithTargets(state []uint64, context unsafe.Pointer
 			return completed, fmt.Errorf("prepared dispatcher batch limit exhausted")
 		}
 		(*LinkedContextABI)(context).AdmissionEpoch = 0
+		clearContextTimerBorrow((*LinkedContextABI)(context))
 		callContext(c.entry, uintptr(unsafe.Pointer(&state[0])), uintptr(context), c.top)
 		runtime.KeepAlive(context)
 		runtime.KeepAlive(state)

@@ -30,4 +30,6 @@ type Context struct {
 	DescriptorBase, AdmissionEpoch             uint64
 	// Owned direct window; usable only by registered foreign fault sites.
 	DirectGuest, DirectHost, DirectSize uint64
+	// Host-bound monotonic poll; never accepted from the public context.
+	TimerFunction, TimerDeadline, TimerExpired uint64
 }

@@ -237,6 +237,9 @@ func (m *RAM) NativeRefill(address uint64) {
 	if !m.usable() {
 		return
 	}
+	// Selecting a root slot may evict an old root and revoke all data views.
+	// Complete that transition BEFORE publishing a newly authorized alias.
+	domain, slot := m.domain(), m.contextSlot()
 	va := address
 	if m.NativeAddress != nil {
 		va = m.NativeAddress(address)
@@ -244,7 +247,7 @@ func (m *RAM) NativeRefill(address uint64) {
 	offset, writable, err := m.Resolve(va, false)
 	number := address >> 12
 	if err != nil || offset >= uint64(len(m.Data)) || offset&4095 != address&4095 {
-		m.native[m.domain()][m.contextSlot()].Forget(number)
+		m.native[domain][slot].Forget(number)
 		if m.direct != nil {
 			m.direct.forgetPage(address)
 		}
@@ -252,7 +255,7 @@ func (m *RAM) NativeRefill(address uint64) {
 	}
 	base := offset &^ uint64(4095)
 	if uint64(len(m.Data))-base < 4096 {
-		m.native[m.domain()][m.contextSlot()].Forget(number)
+		m.native[domain][slot].Forget(number)
 		if m.direct != nil {
 			m.direct.forgetPage(address)
 		}
@@ -267,11 +270,11 @@ func (m *RAM) NativeRefill(address uint64) {
 	if m.watched[base>>12] != 0 {
 		permissions |= 4
 	}
-	if m.direct != nil && m.domain() == 0 {
+	if m.direct != nil && domain == 0 {
 		m.direct.refill(address, offset, permissions)
 	}
 	m.filled = true
-	m.native[m.domain()][m.contextSlot()].Fill(number, (*[4096]byte)(m.Data[base:base+4096]), permissions, &m.clock)
+	m.native[domain][slot].Fill(number, (*[4096]byte)(m.Data[base:base+4096]), permissions, &m.clock)
 }
 
 func (m *RAM) NativeBacking() []byte { return m.Data }

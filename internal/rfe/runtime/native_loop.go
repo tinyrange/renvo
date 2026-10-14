@@ -112,7 +112,11 @@ func (n *Native) compileLoopMode(ops []Op, words, instructions int, direct bool,
 	if codeVersions != nil && !direct {
 		code, ok = backendcompiled.RenvoEmitCodeVersionedLoopBlock(records, words, instructions, runtime.GOARCH == "arm64")
 	} else if direct && runtime.GOOS == "linux" && runtime.GOARCH == "amd64" && NativeSessionsAvailable() {
-		code, faults, ok = backendcompiled.RenvoEmitDirectLoopBlock(records, words, instructions)
+		if codeVersions != nil {
+			code, faults, ok = backendcompiled.RenvoEmitOwnedDirectLoopBlock(records, words, instructions)
+		} else {
+			code, faults, ok = backendcompiled.RenvoEmitDirectLoopBlock(records, words, instructions)
+		}
 	} else {
 		code, ok = backendcompiled.RenvoEmitSharedLoopBlock(records, words, instructions, runtime.GOARCH == "arm64")
 	}
@@ -122,8 +126,12 @@ func (n *Native) compileLoopMode(ops []Op, words, instructions int, direct bool,
 	var entry int
 	var err error
 	if len(faults) != 0 {
-		entry, err = n.arena.InstallFaultLoopBlock(code, words, instructions, faults)
-	} else if runtime.GOARCH == "amd64" && !direct {
+		if codeVersions != nil && direct {
+			entry, err = n.arena.InstallFaultRegisterLoopBlock(code, words, instructions, faults)
+		} else {
+			entry, err = n.arena.InstallFaultLoopBlock(code, words, instructions, faults)
+		}
+	} else if runtime.GOARCH == "amd64" && (!direct || codeVersions != nil) {
 		entry, err = n.arena.InstallRegisterLoopBlock(code, words, instructions)
 	} else {
 		entry, err = n.arena.InstallLoopBlock(code, words, instructions)

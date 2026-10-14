@@ -28,6 +28,7 @@ const (
 	sessionTotalWord       = unsafe.Offsetof(LinkedContextABI{}.Total) / 8
 	sessionMemoryWord      = unsafe.Offsetof(LinkedContextABI{}.MemoryTotal) / 8
 	sessionDirectWord      = unsafe.Offsetof(LinkedContextABI{}.DirectGuest) / 8
+	sessionTimerWord       = unsafe.Offsetof(LinkedContextABI{}.TimerFunction) / 8
 )
 
 func ForeignSessionsAvailable() bool { return rfenativebridge.Available }
@@ -132,9 +133,14 @@ func (c *LinkedCall) callSession(state []uint64, m *LinkedContextABI, budget uin
 		copy(image[:sessionPrefixWords], unsafe.Slice((*uint64)(unsafe.Pointer(m)), sessionPrefixWords))
 		image[sessionExitsWord], image[sessionIterationsWord] = 0, 0
 		image[sessionDirectWord], image[sessionDirectWord+1], image[sessionDirectWord+2] = m.DirectGuest, m.DirectHost, m.DirectSize
+		clear(image[sessionTimerWord : sessionTimerWord+3])
+		if deadline != 0 && owned && len(backing) != 0 {
+			image[sessionTimerWord], image[sessionTimerWord+1] = rfenativebridge.TimerFunction(), deadline
+		}
 		defer func() {
 			clear(image[:sessionPrefixWords])
 			clear(image[sessionDirectWord : sessionDirectWord+3])
+			clear(image[sessionTimerWord : sessionTimerWord+3])
 			image[sessionTargetsWord], image[sessionDescriptorsWord], image[sessionEpochWord] = 0, 0, 0
 		}() // integer addresses must not outlive their pins
 		if owned {
@@ -164,14 +170,9 @@ func (c *LinkedCall) callSession(state []uint64, m *LinkedContextABI, budget uin
 		if !owned && len(a.faults) != 0 {
 			pins.Pin(&a.faults[0])
 		}
-		if deadline != 0 && owned && len(backing) != 0 {
-			hit := rfenativebridge.CallUntil(c.entry, unsafe.Pointer(&nativeState[0]), unsafe.Pointer(image), c.top, a.faults,
-				&image[sessionRemainingWord], &image[sessionTotalWord], &image[sessionMemoryWord], deadline)
-			if expired != nil {
-				*expired = hit
-			}
-		} else {
-			rfenativebridge.CallFaults(c.entry, unsafe.Pointer(&nativeState[0]), unsafe.Pointer(image), c.top, a.faults)
+		rfenativebridge.CallFaults(c.entry, unsafe.Pointer(&nativeState[0]), unsafe.Pointer(image), c.top, a.faults)
+		if expired != nil {
+			*expired = image[sessionTimerWord+2] != 0
 		}
 		copy(state, nativeState)
 		m.Retired, m.Status, m.Address = image[0], image[1], image[2]
@@ -331,6 +332,7 @@ func (a *CodeArena) pinOwnedSession(m *LinkedContextABI, backing []byte) *ownedS
 func clearSessionPinBorrow(image *[sessionImageWords]uint64) {
 	clear(image[:sessionPrefixWords])
 	clear(image[sessionDirectWord : sessionDirectWord+3])
+	clear(image[sessionTimerWord : sessionTimerWord+3])
 	image[sessionTargetsWord], image[sessionDescriptorsWord], image[sessionEpochWord] = 0, 0, 0
 }
 
