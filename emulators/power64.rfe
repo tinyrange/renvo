@@ -7,6 +7,84 @@ RFE 1
   "import": "renvo.dev/emulators/power64"
 }
 
+-- adapter.go --
+package power64
+
+import (
+	"renvo.dev/internal/rfe/engine"
+	rt "renvo.dev/internal/rfe/runtime"
+)
+
+type EngineConfig = engine.EngineConfig
+type Engine = engine.Engine
+type Stats = engine.Stats
+type NativeMemory = engine.NativeMemory
+
+const (
+	StatePC    = 32
+	StateLR    = 33
+	StateCTR   = 34
+	StateMSR   = 35
+	StateXER   = 36
+	StateCR    = 37
+	StateWords = 38
+)
+
+// TierCPU owns a stable, portable state array, not an unsafe view of CPU fields.
+// Import before an engine invocation and Sync afterward. Machine adapters may
+// override slow execution to retain interrupt and attempted-instruction accounting.
+type TierCPU struct {
+	CPU    *CPU
+	State  [StateWords]uint64
+	Memory engine.Memory
+}
+
+func NewTierCPU(cpu *CPU, memory engine.Memory) *TierCPU {
+	if memory == nil {
+		memory = cpu
+	}
+	c := &TierCPU{CPU: cpu, Memory: memory}
+	c.Import()
+	return c
+}
+func (c *TierCPU) Import() {
+	copy(c.State[:32], c.CPU.GPR[:])
+	c.State[StatePC], c.State[StateLR], c.State[StateCTR] = c.CPU.PC, c.CPU.LR, c.CPU.CTR
+	c.State[StateMSR], c.State[StateXER], c.State[StateCR] = c.CPU.MSR, c.CPU.XER, uint64(c.CPU.CR)
+}
+func (c *TierCPU) Sync() {
+	copy(c.CPU.GPR[:], c.State[:32])
+	c.CPU.PC, c.CPU.LR, c.CPU.CTR = c.State[StatePC], c.State[StateLR], c.State[StateCTR]
+	c.CPU.MSR, c.CPU.XER, c.CPU.CR = c.State[StateMSR], c.State[StateXER], uint32(c.State[StateCR])
+}
+func (c *TierCPU) Registers() []uint64      { return c.State[:] }
+func (c *TierCPU) Retirement() *uint64      { return &c.CPU.Tick }
+func (c *TierCPU) MemoryBus() engine.Memory { return c.Memory }
+func (c *TierCPU) Step() error {
+	c.Sync()
+	err := c.CPU.Step()
+	c.Import()
+	return err
+}
+func (c *TierCPU) ExecuteInstruction(ins engine.Instruction) error {
+	c.Sync()
+	err := c.CPU.Execute(uint32(ins.Bits))
+	c.Import()
+	return err
+}
+func (c *CPU) Read(a uint64, n int, execute bool) (uint64, error) {
+	access := rt.Read
+	if execute {
+		access = rt.Execute
+	}
+	return c.read(a, n, access)
+}
+func (c *CPU) Write(a uint64, n int, v uint64) error { return c.write(a, n, v) }
+func DefaultEngineConfig() engine.EngineConfig       { return engine.DefaultEngineConfig() }
+func NewEngine(config engine.EngineConfig) (*engine.Engine, error) {
+	return engine.New(config, Architecture())
+}
+
 -- cpu.go --
 // POWER Book III-S integer interpreter. No host byte order is assumed.
 package power64
@@ -255,9 +333,19 @@ func (c *CPU) Step() error {
 	oldPC := c.PC
 	op, e := c.read(c.PC, 4, rt.Execute)
 	if e == nil {
-		c.PC += 4
-		e = c.execute(uint32(op), oldPC)
+		return c.Execute(uint32(op))
 	}
+	return c.finish(uint32(op), oldPC, e)
+}
+
+// Execute runs an already execute-checked instruction, with exactly Step's
+// exception, PC and retirement semantics. Fetch authority remains with the bus.
+func (c *CPU) Execute(op uint32) error {
+	oldPC := c.PC
+	c.PC += 4
+	return c.finish(op, oldPC, c.execute(op, oldPC))
+}
+func (c *CPU) finish(op uint32, oldPC uint64, e error) error {
 	if x, ok := e.(*exception); ok {
 		if x.vector == 0x300 || x.vector == 0x380 {
 			c.SPR[19], c.SPR[18] = x.address, x.status
@@ -1203,6 +1291,929 @@ func (c *CPU) extended(op uint32, pc uint64) error {
 		c.record(result)
 	}
 	return nil
+}
+
+-- lower.go --
+package power64
+
+import (
+	"renvo.dev/internal/rfe/engine"
+	emu "renvo.dev/internal/rfe/runtime"
+)
+
+// EndianPolicy is an immutable decoder annotation. An adapter may set it only
+// when its code-context/version guards separate the two fetch byte orders.
+// Generic buses leave Decoded nil and retain dynamic MSR.LE selection.
+type EndianPolicy struct{ Little bool }
+
+type memoryForm struct {
+	size                                   int
+	load, update, signed, reverse, indexed bool
+}
+
+func scalarMemory(op uint32) (d memoryForm, ok bool) {
+	p, x := op>>26, op>>1&1023
+	d.size = 4
+	switch p {
+	case 32, 33, 34, 35, 40, 41, 42, 43, 58:
+		d.load = true
+		d.update = p&1 != 0
+		d.signed = p == 42 || p == 43
+		if p == 34 || p == 35 {
+			d.size = 1
+		}
+		if p >= 40 && p <= 43 {
+			d.size = 2
+		}
+		if p == 58 {
+			if op&3 == 3 {
+				return d, false
+			}
+			d.size = 8
+			d.update = op&3 == 1
+			d.signed = op&3 == 2
+			if d.signed {
+				d.size = 4
+			}
+		}
+	case 36, 37, 38, 39, 44, 45, 62:
+		d.update = p&1 != 0
+		if p == 38 || p == 39 {
+			d.size = 1
+		}
+		if p == 44 || p == 45 {
+			d.size = 2
+		}
+		if p == 62 {
+			if op&3 > 1 {
+				return d, false
+			}
+			d.size = 8
+			d.update = op&3 == 1
+		}
+	case 31:
+		d.indexed = true
+		switch x {
+		case 23, 55, 87, 119, 279, 311, 343, 375, 21, 53, 341, 373, 532, 534, 790:
+			d.load = true
+			d.update = x == 55 || x == 119 || x == 311 || x == 375 || x == 53 || x == 373
+			d.signed = x == 343 || x == 375 || x == 341 || x == 373
+			d.reverse = x == 532 || x == 534 || x == 790
+			if x == 87 || x == 119 {
+				d.size = 1
+			}
+			if x == 279 || x == 311 || x == 343 || x == 375 || x == 790 {
+				d.size = 2
+			}
+			if x == 21 || x == 53 || x == 532 {
+				d.size = 8
+			}
+		case 151, 183, 215, 247, 407, 439, 149, 181, 660, 662, 918:
+			d.update = x == 183 || x == 247 || x == 439 || x == 181
+			d.reverse = x == 660 || x == 662 || x == 918
+			if x == 215 || x == 247 {
+				d.size = 1
+			}
+			if x == 407 || x == 439 || x == 918 {
+				d.size = 2
+			}
+			if x == 149 || x == 181 || x == 660 {
+				d.size = 8
+			}
+		default:
+			return d, false
+		}
+	default:
+		return d, false
+	}
+	return d, true
+}
+
+// Classification is independent of mutable CPU state. Privileged operations,
+// atomics, traps and timer reads retain precise architectural slow execution.
+func lowerable(op uint32) (memory, ok bool) {
+	if _, ok := scalarMemory(op); ok {
+		return true, true
+	}
+	p, x := op>>26, op>>1&1023
+	switch p {
+	case 7, 8, 10, 11, 12, 13, 14, 15, 16, 18, 20, 21, 23, 24, 25, 26, 27, 28, 29:
+		return false, true
+	case 30:
+		return false, (op>>2&7) <= 3 || op>>1&15 == 8 || op>>1&15 == 9
+	case 19:
+		switch x {
+		case 0, 16, 528, 33, 129, 193, 225, 257, 289, 417, 449:
+			return false, true
+		}
+	case 31:
+		switch x {
+		case 0, 32, 19, 144, 24, 536, 27, 539, 26, 58, 28, 60, 124, 284, 316, 412, 444, 476, 922, 954, 986, 792, 824, 794, 826, 827, 506, 122, 378, 508, 659, 595:
+			return false, true
+		case 339, 371, 467:
+			s := sprnum(op)
+			return false, s == 1 || s == 8 || s == 9
+		}
+		switch x & 511 {
+		case 266, 10, 138, 234, 202, 40, 8, 136, 232, 200, 104, 235, 233, 11, 75, 9, 73, 459, 491, 457, 489:
+			return false, true
+		}
+	}
+	return false, false
+}
+func Architecture() engine.Architecture {
+	return engine.Architecture{Name: "power64", StateWords: StateWords, PC: StatePC, Alignment: 4, Fetch: fetchPower, Lower: LowerInstruction}
+}
+func fetchPower(memory engine.Memory, pc uint64) (engine.Instruction, error) {
+	word, err := memory.Read(pc, 4, true)
+	if err != nil {
+		return engine.Instruction{}, err
+	}
+	op := uint32(word)
+	mem, ok := lowerable(op)
+	ins := engine.Instruction{PC: pc, Bits: word, Length: 4, Memory: mem, InterpretOnly: !ok, ScheduleBoundary: !ok, Flow: engine.Successors{Next: pc + 4, Known: true}}
+	switch op >> 26 {
+	case 18:
+		target := sext(uint64(op&0x3fffffc), 26)
+		if op&2 == 0 {
+			target += pc
+		}
+		ins.Terminal = true
+		ins.Flow.Next = target
+		ins.Flow.Known = op&1 == 0
+	case 16:
+		target := sext(uint64(op&0xfffc), 16)
+		if op&2 == 0 {
+			target += pc
+		}
+		ins.Terminal = true
+		ins.Flow = engine.Successors{Next: target, Alternate: pc + 4, Conditional: true, Known: op&1 == 0}
+	case 19:
+		if x := op >> 1 & 1023; x == 16 || x == 528 {
+			ins.Terminal = true
+			ins.Flow.Known = false
+		}
+	}
+	return ins, nil
+}
+func bitAnd(b *emu.Builder, v emu.Value, mask uint64) emu.Value {
+	return b.Binary(emu.And, v, b.Constant(mask))
+}
+func invert(b *emu.Builder, v emu.Value) emu.Value {
+	return b.Binary(emu.Xor, v, b.Constant(^uint64(0)))
+}
+func nonzero(b *emu.Builder, v emu.Value) emu.Value {
+	return b.Binary(emu.Equal, b.Binary(emu.Equal, v, b.Constant(0)), b.Constant(0))
+}
+func signExtend(b *emu.Builder, v emu.Value, width int) emu.Value {
+	return b.VariableShift(emu.ArithmeticShr, b.Shift(emu.Shl, v, uint64(64-width)), b.Constant(uint64(64-width)), 64)
+}
+func signedLess(b *emu.Builder, a, c emu.Value) emu.Value {
+	return b.Binary(emu.Less, b.Binary(emu.Xor, a, b.Constant(1<<63)), b.Binary(emu.Xor, c, b.Constant(1<<63)))
+}
+func crField(b *emu.Builder, field int, v emu.Value) {
+	shift := uint64(28 - field*4)
+	b.Store(StateCR, b.Binary(emu.Or, bitAnd(b, b.Load(StateCR), 0xffffffff & ^(uint64(15)<<shift)), b.Shift(emu.Shl, bitAnd(b, v, 15), shift)))
+}
+func crFromFlags(b *emu.Builder, flags emu.Value, lessCondition, greaterCondition int, field int) {
+	less, _ := b.FlagCondition(flags, lessCondition)
+	greater, _ := b.FlagCondition(flags, greaterCondition)
+	equal, _ := b.FlagCondition(flags, 0)
+	v := b.Binary(emu.Or, b.Shift(emu.Shl, less, 3), b.Binary(emu.Or, b.Shift(emu.Shl, greater, 2), b.Shift(emu.Shl, equal, 1)))
+	crField(b, field, b.Binary(emu.Or, v, bitAnd(b, b.Shift(emu.Shr, b.Load(StateXER), 31), 1)))
+}
+func compareCR(b *emu.Builder, a, c emu.Value, signed bool, field int) {
+	less, greater := 3, 8 // unsigned LO/HI predicates
+	if signed {
+		less, greater = 11, 12
+	} // signed LT/GT predicates
+	crFromFlags(b, b.ArithmeticFlags(a, c, 64, true), less, greater, field)
+}
+func recordCR(b *emu.Builder, v emu.Value) {
+	crFromFlags(b, b.LogicalFlags(v, 64), 4, 12, 0)
+}
+func carryXER(b *emu.Builder, on emu.Value) {
+	b.Store(StateXER, b.Binary(emu.Or, bitAnd(b, b.Load(StateXER), ^XERCA), b.Shift(emu.Shl, on, 29)))
+}
+func overflowXER(b *emu.Builder, on emu.Value) {
+	b.Store(StateXER, b.Binary(emu.Or, bitAnd(b, b.Load(StateXER), ^XEROV), b.Choose(on, b.Constant(XEROV|XERSO), b.Constant(0))))
+}
+func branchTest(b *emu.Builder, bo, bi uint32, decrement bool) emu.Value {
+	count := b.Constant(1)
+	if decrement && bo&4 == 0 {
+		ctr := b.Binary(emu.Sub, b.Load(StateCTR), b.Constant(1))
+		b.Store(StateCTR, ctr)
+		count = nonzero(b, ctr)
+		if bo&2 != 0 {
+			count = b.Binary(emu.Xor, count, b.Constant(1))
+		}
+	}
+	condition := b.Constant(1)
+	if bo&16 == 0 {
+		condition = bitAnd(b, b.Shift(emu.Shr, b.Load(StateCR), uint64(31-bi)), 1)
+		if bo&8 == 0 {
+			condition = b.Binary(emu.Xor, condition, b.Constant(1))
+		}
+	}
+	return b.Binary(emu.And, count, condition)
+}
+func reverseValue(b *emu.Builder, v emu.Value, size int) emu.Value {
+	if size == 1 {
+		return v
+	}
+	width := 32
+	if size == 8 {
+		width = 64
+	}
+	return b.RichUnary(emu.ReverseBytes, v, width, size*8)
+}
+func LowerInstruction(b *emu.Builder, ins engine.Instruction, completed int) bool {
+	op, pc := uint32(ins.Bits), ins.PC
+	mem, ok := lowerable(op)
+	if !ok {
+		return false
+	} // rejection never mutates the builder
+	rs, ra, rb := int(op>>21&31), int(op>>16&31), int(op>>11&31)
+	p := op >> 26
+	if mem {
+		d, _ := scalarMemory(op)
+		b.Store(StatePC, b.Constant(pc))
+		b.Checkpoint(StateWords, completed)
+		base := b.Constant(0)
+		if ra != 0 {
+			base = b.Load(ra)
+		}
+		off := b.Constant(sext(uint64(op&65535), 16))
+		if p == 58 || p == 62 {
+			off = b.Constant(sext(uint64(op&0xfffc), 16))
+		}
+		if d.indexed {
+			off = b.Load(rb)
+		}
+		address := b.Binary(emu.Add, base, off)
+		endian := func(v emu.Value) emu.Value {
+			if policy, ok := ins.Decoded.(EndianPolicy); ok {
+				if policy.Little {
+					return v
+				}
+				return reverseValue(b, v, d.size)
+			}
+			le := nonzero(b, bitAnd(b, b.Load(StateMSR), MSRLE))
+			return b.Choose(le, v, reverseValue(b, v, d.size))
+		}
+		if d.load {
+			v := endian(b.MemoryLoad(address, d.size))
+			if d.reverse {
+				v = reverseValue(b, v, d.size)
+			}
+			if d.signed {
+				v = signExtend(b, v, d.size*8)
+			}
+			b.Store(rs, v)
+		} else {
+			v := b.Load(rs)
+			if d.reverse {
+				v = reverseValue(b, v, d.size)
+			}
+			v = endian(v)
+			b.MemoryStore(address, v, d.size)
+		}
+		if d.update {
+			b.Store(ra, address)
+		}
+		b.Store(StatePC, b.Constant(pc+4))
+		return true
+	}
+	a, c, s := b.Load(ra), b.Load(rb), b.Load(rs)
+	imm := b.Constant(sext(uint64(op&65535), 16))
+	result := b.Constant(0)
+	dst, record := -1, false
+	switch p {
+	case 7:
+		result = b.Binary(emu.Mul, a, imm)
+		dst = rs
+	case 8:
+		result = b.Binary(emu.Sub, imm, a)
+		carryXER(b, b.Binary(emu.Equal, b.Binary(emu.Less, imm, a), b.Constant(0)))
+		dst = rs
+	case 10, 11:
+		rhs := imm
+		if p == 10 {
+			rhs = b.Constant(uint64(op & 65535))
+		}
+		lhs := a
+		if op&(1<<21) == 0 {
+			if p == 11 {
+				lhs, rhs = signExtend(b, lhs, 32), signExtend(b, rhs, 32)
+			} else {
+				lhs, rhs = bitAnd(b, lhs, 0xffffffff), bitAnd(b, rhs, 0xffffffff)
+			}
+		}
+		compareCR(b, lhs, rhs, p == 11, int(op>>23&7))
+	case 12, 13:
+		result = b.Binary(emu.Add, a, imm)
+		carryXER(b, b.Binary(emu.Less, result, a))
+		dst = rs
+		record = p == 13
+	case 14, 15:
+		base := b.Constant(0)
+		if ra != 0 {
+			base = a
+		}
+		if p == 15 {
+			imm = b.Shift(emu.Shl, imm, 16)
+		}
+		result = b.Binary(emu.Add, base, imm)
+		dst = rs
+	case 16, 18:
+		target := sext(uint64(op&0xfffc), 16)
+		if p == 18 {
+			target = sext(uint64(op&0x3fffffc), 26)
+		}
+		if op&2 == 0 {
+			target += pc
+		}
+		next := b.Constant(target)
+		if p == 16 {
+			next = b.Choose(branchTest(b, uint32(rs), uint32(ra), true), next, b.Constant(pc+4))
+		}
+		b.Store(StatePC, next)
+		if op&1 != 0 {
+			b.Store(StateLR, b.Constant(pc+4))
+		}
+		return true
+	case 19:
+		x := op >> 1 & 1023
+		switch x {
+		case 16, 528:
+			slot := StateLR
+			if x == 528 {
+				slot = StateCTR
+			}
+			target := bitAnd(b, b.Load(slot), ^uint64(3))
+			cond := branchTest(b, uint32(rs), uint32(ra), x == 16)
+			b.Store(StatePC, b.Choose(cond, target, b.Constant(pc+4)))
+			if op&1 != 0 {
+				b.Store(StateLR, b.Constant(pc+4))
+			}
+			return true
+		case 0:
+			crField(b, int(op>>23&7), bitAnd(b, b.Shift(emu.Shr, b.Load(StateCR), uint64(28-int(op>>18&7)*4)), 15))
+		default:
+			lhs := bitAnd(b, b.Shift(emu.Shr, b.Load(StateCR), uint64(31-ra)), 1)
+			rhs := bitAnd(b, b.Shift(emu.Shr, b.Load(StateCR), uint64(31-rb)), 1)
+			switch x {
+			case 33:
+				result = invert(b, b.Binary(emu.Or, lhs, rhs))
+			case 129:
+				result = b.Binary(emu.And, lhs, invert(b, rhs))
+			case 193:
+				result = b.Binary(emu.Xor, lhs, rhs)
+			case 225:
+				result = invert(b, b.Binary(emu.And, lhs, rhs))
+			case 257:
+				result = b.Binary(emu.And, lhs, rhs)
+			case 289:
+				result = invert(b, b.Binary(emu.Xor, lhs, rhs))
+			case 417:
+				result = b.Binary(emu.Or, lhs, invert(b, rhs))
+			case 449:
+				result = b.Binary(emu.Or, lhs, rhs)
+			}
+			shift := uint64(31 - rs)
+			b.Store(StateCR, b.Binary(emu.Or, bitAnd(b, b.Load(StateCR), 0xffffffff & ^(uint64(1)<<shift)), b.Shift(emu.Shl, bitAnd(b, result, 1), shift)))
+		}
+	case 20, 21, 23, 30:
+		width, sh := 32, b.Constant(uint64(rb))
+		m := mask(uint(op>>6&31), uint(op>>1&31), 32)
+		merge := p == 20
+		if p == 23 {
+			sh = bitAnd(b, c, 31)
+		}
+		if p == 30 {
+			width = 64
+			amount := uint(rb) | uint(op>>1&1)<<5
+			sh = b.Constant(uint64(amount))
+			mb := uint(op>>6&31) | uint(op&32)
+			x := op >> 2 & 7
+			switch x {
+			case 0:
+				m = mask(mb, 63, 64)
+			case 1:
+				m = mask(0, mb, 64)
+			case 2, 3:
+				m = mask(mb, 63-amount, 64)
+				merge = x == 3
+			default:
+				sh = bitAnd(b, c, 63)
+				if op>>1&15 == 8 {
+					m = mask(mb, 63, 64)
+				} else {
+					m = mask(0, mb, 64)
+				}
+			}
+		}
+		rot := b.VariableShift(emu.RotateRight, s, b.Binary(emu.Sub, b.Constant(0), sh), width)
+		result = bitAnd(b, rot, m)
+		if merge {
+			result = b.Binary(emu.Or, result, bitAnd(b, a, ^m))
+		}
+		dst = ra
+		record = op&1 != 0
+	case 24, 25, 26, 27, 28, 29:
+		v := uint64(op & 65535)
+		if p&1 != 0 {
+			v <<= 16
+		}
+		kind := emu.Or
+		if p == 26 || p == 27 {
+			kind = emu.Xor
+		}
+		if p == 28 || p == 29 {
+			kind = emu.And
+			record = true
+		}
+		result = b.Binary(kind, s, b.Constant(v))
+		dst = ra
+	case 31:
+		return lowerX(b, op, pc)
+	}
+	if dst >= 0 {
+		b.Store(dst, result)
+	}
+	if record {
+		recordCR(b, result)
+	}
+	b.Store(StatePC, b.Constant(pc+4))
+	return true
+}
+
+-- lower_memory_test.go --
+package power64
+
+import (
+	"bytes"
+	"encoding/binary"
+	"renvo.dev/internal/rfe/engine"
+	emu "renvo.dev/internal/rfe/runtime"
+	"testing"
+)
+
+func TestNativeScalarMemoryEndianUpdateReverseAndAliases(t *testing.T) {
+	n, e := emu.NewNative(8 << 20)
+	if e != nil {
+		if nativeHost() {
+			t.Fatal(e)
+		}
+		t.Skip(e)
+	}
+	defer n.Close()
+	var forms []uint32
+	for _, p := range []uint32{32, 33, 34, 35, 40, 41, 42, 43, 58, 36, 37, 38, 39, 44, 45, 62} {
+		forms = append(forms, p<<26|4)
+		if p == 58 {
+			forms = append(forms, p<<26|5, p<<26|6)
+		}
+		if p == 62 {
+			forms = append(forms, p<<26|5)
+		}
+	}
+	for _, x := range []uint32{23, 55, 87, 119, 279, 311, 343, 375, 21, 53, 341, 373, 532, 534, 790, 151, 183, 215, 247, 407, 439, 149, 181, 660, 662, 918} {
+		forms = append(forms, 31<<26|x<<1)
+	}
+	for _, le := range []bool{false, true} {
+		for _, form := range forms {
+			for _, rs := range []uint32{3, 4, 5} {
+				op := form | rs<<21 | 4<<16
+				d, _ := scalarMemory(op)
+				if d.indexed {
+					op |= 5 << 11
+				}
+				expected := memoryBus(make([]byte, 65536))
+				actual := memoryBus(make([]byte, 65536))
+				for i := 0; i < 4096; i++ {
+					expected[0x8000+i] = byte(i*73 + 41)
+				}
+				copy(actual, expected)
+				cpu := CPU{Bus: expected, PC: 0x1000, MSR: MSRSF, LR: 0x8888, CTR: 77, XER: XERSO, CR: 0x12345678}
+				if le {
+					cpu.MSR |= MSRLE
+				}
+				cpu.GPR[3], cpu.GPR[4], cpu.GPR[5] = 0x80ff0180a1b2c3d4, 0x8003, 19
+				c := NewTierCPU(&cpu, nil)
+				state := c.State
+				if e := cpu.Execute(op); e != nil {
+					t.Fatal(e)
+				}
+				c.Import()
+				want := c.State
+				var b emu.Builder
+				if !LowerInstruction(&b, engine.Instruction{PC: 0x1000, Bits: uint64(op), Length: 4}, 0) {
+					t.Fatalf("memory rejection %08x", op)
+				}
+				b.Checkpoint(StateWords, 1)
+				ops := b.FinishMemory(StateWords)
+				entry, e := n.CompileMemory(ops, StateWords)
+				if e != nil {
+					t.Fatalf("compile %08x: %v", op, e)
+				}
+				clock := uint64(1)
+				ctx := &emu.MemoryContext{}
+				ctx.Clock = &clock
+				ctx.Fill(8, (*[4096]byte)(actual[0x8000:0x9000]), 3, &clock)
+				if e := n.CallMemory(entry, state[:], ctx); e != nil || ctx.Status != 0 || ctx.Retired != 1 {
+					t.Fatalf("native op=%08x LE=%t status=%d retired=%d err=%v", op, le, ctx.Status, ctx.Retired, e)
+				}
+				if state != want || !bytes.Equal(expected, actual) {
+					t.Fatalf("op=%08x LE=%t state=%x want=%x", op, le, state, want)
+				}
+			}
+		}
+	}
+	// Cross-page stores must exit before any access or RA update, even when the
+	// first descriptor is writable. The architectural CPU owns the complete check.
+	op := uint32(37<<26 | 3<<21 | 4<<16)
+	var b emu.Builder
+	LowerInstruction(&b, engine.Instruction{PC: 0x1000, Bits: uint64(op), Length: 4}, 0)
+	b.Checkpoint(StateWords, 1)
+	entry, e := n.CompileMemory(b.FinishMemory(StateWords), StateWords)
+	if e != nil {
+		t.Fatal(e)
+	}
+	data := make([]byte, 8192)
+	binary.LittleEndian.PutUint32(data[4092:], 0xaabbccdd)
+	state := [StateWords]uint64{}
+	state[StatePC], state[StateMSR], state[3], state[4] = 0x1000, MSRSF|MSRLE, 0x12345678, 4095
+	clock := uint64(1)
+	ctx := &emu.MemoryContext{}
+	ctx.Clock = &clock
+	ctx.Fill(0, (*[4096]byte)(data[:4096]), 3, &clock)
+	if e := n.CallMemory(entry, state[:], ctx); e != nil || ctx.Status != 1 || ctx.Retired != 0 || ctx.Address != 4095 || state[StatePC] != 0x1000 || state[4] != 4095 || binary.LittleEndian.Uint32(data[4092:]) != 0xaabbccdd {
+		t.Fatal("partial native cross-page store", ctx.Status, ctx.Retired, state, e)
+	}
+}
+
+-- lower_test.go --
+package power64
+
+import (
+	"math/rand"
+	"renvo.dev/internal/rfe/engine"
+	emu "renvo.dev/internal/rfe/runtime"
+	"runtime"
+	"testing"
+)
+
+func nativeHost() bool {
+	return (runtime.GOOS == "linux" || runtime.GOOS == "windows") && (runtime.GOARCH == "amd64" || runtime.GOARCH == "arm64") || runtime.GOOS == "darwin" && runtime.GOARCH == "arm64"
+}
+func TestIntegerLoweringAllTiers(t *testing.T) {
+	n, e := emu.NewNative(16 << 20)
+	if e != nil && nativeHost() {
+		t.Fatal(e)
+	}
+	if n != nil {
+		defer n.Close()
+	}
+	rng := rand.New(rand.NewSource(7331))
+	var words []uint32
+	for _, p := range []uint32{7, 8, 10, 11, 12, 13, 14, 15, 16, 18, 20, 21, 23, 24, 25, 26, 27, 28, 29, 30} {
+		for i := 0; i < 16; i++ {
+			w := p<<26 | uint32(rng.Intn(1<<26))
+			if _, ok := lowerable(w); ok {
+				words = append(words, w)
+			}
+		}
+	}
+	for _, x := range []uint32{0, 32, 19, 144, 24, 536, 27, 539, 26, 58, 28, 60, 124, 284, 316, 412, 444, 476, 922, 954, 986, 792, 824, 794, 826, 827, 506, 122, 378, 508, 659, 595, 266, 10, 138, 234, 202, 40, 8, 136, 232, 200, 104, 235, 233, 11, 75, 9, 73, 459, 491, 457, 489} {
+		for _, regs := range [][3]uint32{{3, 4, 5}, {3, 3, 5}, {3, 4, 3}, {0, 0, 0}, {31, 31, 31}} {
+			for _, rc := range []uint32{0, 1} {
+				words = append(words, 31<<26|regs[0]<<21|regs[1]<<16|regs[2]<<11|x<<1|rc)
+				// Arithmetic OE forms only: don't reinterpret a different X opcode.
+				if x == 266 || x == 10 || x == 138 || x == 40 || x == 8 || x == 136 || x == 104 {
+					words = append(words, words[len(words)-1]|1<<10)
+				}
+			}
+		}
+	}
+	for _, spr := range []uint32{1, 8, 9} {
+		for _, x := range []uint32{339, 371, 467} {
+			words = append(words, 31<<26|3<<21|(spr&31)<<16|(spr&0x3e0)<<6|x<<1)
+		}
+	}
+	for _, x := range []uint32{0, 16, 528, 33, 129, 193, 225, 257, 289, 417, 449} {
+		for i := 0; i < 8; i++ {
+			words = append(words, 19<<26|uint32(rng.Intn(1<<26))&^uint32(2046)|x<<1)
+		}
+	}
+	edges := []uint64{0, 1, 31, 32, 63, 64, 127, 128, 0x7fffffff, 0x80000000, 0xffffffff, 1<<63 - 1, 1 << 63, ^uint64(0)}
+	for _, op := range words {
+		var b emu.Builder
+		if !LowerInstruction(&b, engine.Instruction{PC: 0x1000, Bits: uint64(op), Length: 4}, 0) {
+			t.Fatalf("rejected %08x", op)
+		}
+		ops := b.Finish(StateWords)
+		entry := 0
+		if n != nil {
+			entry, e = n.Compile(ops, StateWords)
+			if e != nil {
+				t.Fatalf("compile %08x: %v", op, e)
+			}
+		}
+		for i := 0; i < 32; i++ {
+			cpu := CPU{PC: 0x1000, MSR: MSRSF | MSRLE, CR: rng.Uint32(), XER: rng.Uint64(), LR: rng.Uint64(), CTR: rng.Uint64()}
+			if i&1 != 0 {
+				cpu.MSR &^= MSRSF
+			}
+			for r := range cpu.GPR {
+				cpu.GPR[r] = rng.Uint64()
+			}
+			cpu.GPR[op>>16&31] = edges[i%len(edges)]
+			cpu.GPR[op>>11&31] = edges[(i*3)%len(edges)]
+			if i%4 == 0 {
+				cpu.CTR = uint64(i / 4)
+			}
+			adapter := NewTierCPU(&cpu, nil)
+			initial := adapter.State
+			if e := cpu.Execute(op); e != nil {
+				t.Fatalf("interpreter %08x: %v", op, e)
+			}
+			adapter.Import()
+			want := adapter.State
+			for _, native := range []bool{false, true} {
+				if native && n == nil {
+					continue
+				}
+				got := initial
+				var err error
+				if native {
+					err = n.Call(entry, got[:])
+				} else {
+					err = emu.Interpret(ops, got[:])
+				}
+				if err != nil {
+					t.Fatalf("op=%08x native=%t: %v", op, native, err)
+				}
+				for slot := range got {
+					if got[slot] != want[slot] {
+						t.Fatalf("op=%08x case=%d native=%t slot=%d got=%x want=%x initial=%x", op, i, native, slot, got[slot], want[slot], initial)
+					}
+				}
+			}
+		}
+	}
+}
+func TestLoweringRejectsWithoutBuilderMutation(t *testing.T) {
+	for _, op := range []uint32{0, 0x44000022, 31<<26 | 84<<1, 31<<26 | 178<<1, 31<<26 | 371<<1 | 12<<16, 58<<26 | 3, 62<<26 | 2} {
+		var b emu.Builder
+		b.Store(0, b.Constant(99))
+		before := len(b.Ops)
+		if LowerInstruction(&b, engine.Instruction{Bits: uint64(op)}, 0) || len(b.Ops) != before {
+			t.Fatalf("rejection mutated builder for %08x", op)
+		}
+	}
+}
+
+-- lower_x.go --
+package power64
+
+import emu "renvo.dev/internal/rfe/runtime"
+
+func lowerX(b *emu.Builder, op uint32, pc uint64) bool {
+	rs, ra, rb := int(op>>21&31), int(op>>16&31), int(op>>11&31)
+	x := op >> 1 & 1023
+	a, c, s := b.Load(ra), b.Load(rb), b.Load(rs)
+	result := b.Constant(0)
+	dst, record := -1, op&1 != 0
+	switch x {
+	case 0, 32:
+		lhs, rhs := a, c
+		if op&(1<<21) == 0 {
+			if x == 0 {
+				lhs, rhs = signExtend(b, lhs, 32), signExtend(b, rhs, 32)
+			} else {
+				lhs, rhs = bitAnd(b, lhs, 0xffffffff), bitAnd(b, rhs, 0xffffffff)
+			}
+		}
+		compareCR(b, lhs, rhs, x == 0, int(op>>23&7))
+		record = false
+	case 19:
+		result = b.Load(StateCR)
+		dst = rs
+		record = false
+	case 144:
+		fm := op >> 12 & 255
+		mask := uint64(0)
+		for f := 0; f < 8; f++ {
+			if fm&(1<<uint(7-f)) != 0 {
+				mask |= 15 << uint(28-f*4)
+			}
+		}
+		b.Store(StateCR, b.Binary(emu.Or, bitAnd(b, b.Load(StateCR), 0xffffffff & ^mask), bitAnd(b, s, mask)))
+		record = false
+	case 339, 371, 467:
+		slot := StateXER
+		switch sprnum(op) {
+		case 8:
+			slot = StateLR
+		case 9:
+			slot = StateCTR
+		}
+		if x == 467 {
+			b.Store(slot, s)
+		} else {
+			result = b.Load(slot)
+			dst = rs
+		}
+		record = false
+	case 24, 536, 27, 539:
+		width, kind := 32, emu.VariableShl
+		if x == 27 || x == 539 {
+			width = 64
+		}
+		if x == 536 || x == 539 {
+			kind = emu.VariableShr
+		}
+		v := b.VariableShift(kind, s, bitAnd(b, c, uint64(width-1)), width)
+		good := b.Binary(emu.Equal, bitAnd(b, c, uint64(width)), b.Constant(0))
+		result = b.Choose(good, v, b.Constant(0))
+		dst = ra
+	case 26, 58:
+		width := 32
+		if x == 58 {
+			width = 64
+		}
+		result = b.RichUnary(emu.LeadingZeros, s, width, 0)
+		dst = ra
+	case 28, 60, 124, 284, 316, 412, 444, 476:
+		switch x {
+		case 28:
+			result = b.Binary(emu.And, s, c)
+		case 60:
+			result = b.Binary(emu.And, s, invert(b, c))
+		case 124:
+			result = invert(b, b.Binary(emu.Or, s, c))
+		case 284:
+			result = invert(b, b.Binary(emu.Xor, s, c))
+		case 316:
+			result = b.Binary(emu.Xor, s, c)
+		case 412:
+			result = b.Binary(emu.Or, s, invert(b, c))
+		case 444:
+			result = b.Binary(emu.Or, s, c)
+		case 476:
+			result = invert(b, b.Binary(emu.And, s, c))
+		}
+		dst = ra
+	case 922, 954, 986:
+		width := 16
+		if x == 954 {
+			width = 8
+		}
+		if x == 986 {
+			width = 32
+		}
+		result = signExtend(b, s, width)
+		dst = ra
+	case 792, 824, 794, 826, 827:
+		width := 32
+		shift := bitAnd(b, c, 63)
+		if x == 824 {
+			shift = b.Constant(uint64(rb))
+		}
+		if x == 794 {
+			width = 64
+			shift = bitAnd(b, c, 127)
+		}
+		if x == 826 || x == 827 {
+			width = 64
+			shift = b.Constant(uint64(rb) | uint64(op&2)<<4)
+		}
+		value := s
+		if width == 32 {
+			value = signExtend(b, s, 32)
+		}
+		small := b.Binary(emu.Less, shift, b.Constant(uint64(width)))
+		clipped := b.Choose(small, shift, b.Constant(63))
+		result = b.VariableShift(emu.ArithmeticShr, value, clipped, 64)
+		// A negative input sets CA iff any discarded bit is nonzero. For an
+		// architectural overshift every negative value has discarded set bits.
+		discardedMask := b.Binary(emu.Sub, b.VariableShift(emu.VariableShl, b.Constant(1), shift, 64), b.Constant(1))
+		discarded := b.Choose(small, nonzero(b, b.Binary(emu.And, value, discardedMask)), b.Constant(1))
+		negative := b.Shift(emu.Shr, value, 63)
+		carryXER(b, b.Binary(emu.And, negative, discarded))
+		dst = ra
+	case 659, 595:
+		result = b.Constant(0)
+		dst = rs
+		record = false
+	case 506, 122, 378:
+		v := b.Binary(emu.Sub, s, bitAnd(b, b.Shift(emu.Shr, s, 1), 0x5555555555555555))
+		v = b.Binary(emu.Add, bitAnd(b, v, 0x3333333333333333), bitAnd(b, b.Shift(emu.Shr, v, 2), 0x3333333333333333))
+		v = bitAnd(b, b.Binary(emu.Add, v, b.Shift(emu.Shr, v, 4)), 0x0f0f0f0f0f0f0f0f)
+		result = v
+		if x == 506 {
+			result = b.Shift(emu.Shr, b.Binary(emu.Mul, v, b.Constant(0x0101010101010101)), 56)
+		}
+		if x == 378 {
+			lo := bitAnd(b, b.Shift(emu.Shr, b.Binary(emu.Mul, bitAnd(b, v, 0xffffffff), b.Constant(0x01010101)), 24), 255)
+			hi := bitAnd(b, b.Shift(emu.Shr, b.Binary(emu.Mul, b.Shift(emu.Shr, v, 32), b.Constant(0x01010101)), 24), 255)
+			result = b.Binary(emu.Or, lo, b.Shift(emu.Shl, hi, 32))
+		}
+		dst = ra
+	case 508:
+		for i := uint64(0); i < 64; i += 8 {
+			equal := b.Binary(emu.Equal, bitAnd(b, b.Shift(emu.Shr, s, i), 255), bitAnd(b, b.Shift(emu.Shr, c, i), 255))
+			result = b.Binary(emu.Or, result, b.Shift(emu.Shl, b.Binary(emu.Mul, equal, b.Constant(255)), i))
+		}
+		dst = ra
+	default:
+		base, oe := x&511, x&512 != 0
+		switch base {
+		case 266, 10, 138, 234, 202, 40, 8, 136, 232, 200:
+			rhs, carry, lhs := c, b.Constant(0), a
+			sub := base == 40 || base == 8 || base == 136 || base == 232 || base == 200
+			if base == 138 || base == 234 || base == 202 || base == 136 || base == 232 || base == 200 {
+				carry = bitAnd(b, b.Shift(emu.Shr, b.Load(StateXER), 29), 1)
+			}
+			if base == 234 || base == 232 {
+				rhs = b.Constant(^uint64(0))
+			}
+			if base == 202 || base == 200 {
+				rhs = b.Constant(0)
+			}
+			if sub {
+				lhs = invert(b, a)
+				if base == 40 || base == 8 {
+					carry = b.Constant(1)
+				}
+			}
+			partial := b.Binary(emu.Add, lhs, rhs)
+			result = b.Binary(emu.Add, partial, carry)
+			if base != 266 && base != 40 {
+				carryXER(b, b.Binary(emu.Or, b.Binary(emu.Less, partial, lhs), b.Binary(emu.Less, result, partial)))
+			}
+			if oe {
+				sign := b.Binary(emu.And, invert(b, b.Binary(emu.Xor, a, rhs)), b.Binary(emu.Xor, a, result))
+				if sub {
+					sign = b.Binary(emu.And, b.Binary(emu.Xor, a, rhs), b.Binary(emu.Xor, rhs, result))
+				}
+				overflowXER(b, b.Shift(emu.Shr, sign, 63))
+			}
+			dst = rs
+		case 104:
+			result = b.Binary(emu.Sub, b.Constant(0), a)
+			if oe {
+				overflowXER(b, b.Binary(emu.Equal, a, b.Constant(1<<63)))
+			}
+			dst = rs
+		case 235, 233:
+			result = b.Binary(emu.Mul, a, c)
+			if base == 235 {
+				result = signExtend(b, result, 32)
+			}
+			dst = rs
+		case 11, 75:
+			lhs, rhs := bitAnd(b, a, 0xffffffff), bitAnd(b, c, 0xffffffff)
+			if base == 75 {
+				lhs, rhs = signExtend(b, a, 32), signExtend(b, c, 32)
+			}
+			result = b.Shift(emu.Shr, b.Binary(emu.Mul, lhs, rhs), 32)
+			if base == 75 {
+				result = signExtend(b, result, 32)
+			}
+			dst = rs
+		case 9, 73:
+			result = b.MultiplyHigh(a, c, base == 73)
+			dst = rs
+		case 459, 491, 457, 489:
+			width, kind := 64, emu.UnsignedDivide
+			if base == 459 || base == 491 {
+				width = 32
+			}
+			if base == 491 || base == 489 {
+				kind = emu.SignedDivide
+			}
+			result = b.Divide(kind, a, c, width)
+			if base == 491 {
+				result = signExtend(b, result, 32)
+			}
+			divisor := c
+			if width == 32 {
+				divisor = bitAnd(b, divisor, 0xffffffff)
+			}
+			result = b.Choose(nonzero(b, divisor), result, b.Constant(0))
+			dst = rs
+		}
+	}
+	if dst >= 0 {
+		b.Store(dst, result)
+	}
+	if record {
+		recordCR(b, result)
+	}
+	b.Store(StatePC, b.Constant(pc+4))
+	return true
 }
 
 -- mask_test.go --

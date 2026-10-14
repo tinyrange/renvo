@@ -1,6 +1,8 @@
 # POWER64 Linux partition RFE
 
-`emulators/power64.rfe` is an architectural interpreter, shared by the
+`emulators/power64.rfe` supplies the architectural CPU and the POWER adapter
+for the shared recompiler: cached interpretation, scalar IR, native code,
+checked native memory, linked dispatch and cyclic regions. It is shared by the
 `linux-power64-machine.rfe` single-vCPU PAPR-style partition. The verified
 configuration boots a PPC64le Linux kernel with the hashed MMU, 4 KiB pages,
 and a freestanding ELFv2 PID 1. The CPU retains explicit big- and little-endian
@@ -24,7 +26,9 @@ The same kernel/root fixture also passed an independent QEMU POWER8 boot.
 The test uses 256 MiB RAM, a 4 MiB hypervisor-owned hash table (pft-size 22),
 256 MiB segments and 4 KiB pages. A larger hash table than the initial 1 MiB
 prototype leaves space for mappings beyond the 65,536 bolted RAM pages.
-There is no JIT or QEMU delegation in this execution proof.
+The original interpreter boot remains a correctness control. A separate fresh
+native-engine boot and real Linux/CoreMark run now pass the full-stack gates
+below. There is no QEMU delegation in either RFE execution.
 
 ## Build the development fixture
 
@@ -185,10 +189,80 @@ profile with `go tool pprof -top /path/to/machine OUTPUT`. Profiling runs are
 **diagnostics**, not before/after performance comparisons: compare identical
 ELFs, kernel, clock mode, host and toolchain with profiling disabled.
 
+## Full shared recompiler stack
+
+The machine CLI defaults to `-engine native`; `-engine ir` and
+`-engine interpreter` select the lower-tier controls. On a host without a native
+emitter the shared engine can fall back to its lower tiers, but an explicit
+native fixture proof requires `NativeAvailable()` and real native retirement.
+`New`/`Step` remain interpreter-compatible APIs; `EnableJIT` plus `RunQuantum`
+provides bounded accelerated execution. `Close` releases executable storage.
+The CPU library exposes `Architecture`, `NewEngine`, and a stable `TierCPU`
+state ABI with explicit import/export instead of unsafe CPU-layout assumptions.
+
+Scalar integer/CR/XER, branches/CTR/LR, shifts/rotates, multiplication/division,
+loads/stores, update forms and byte reversals lower to shared IR. The machine
+uses `systemmemory.RAM` for checked descriptors and code versions. Full-width
+addresses are bank-guarded into reversible 48-bit keys; cross-bank data accesses
+exit before the access. Endian-separated code identities permit guarded endian
+specialization. Native refills probe permissions **without** setting HPTE R/C;
+first accesses and cleared bits return to architectural execution. SLB/HPT
+mutations invalidate mappings; CPU, boot and RTAS writes use physical code
+barriers, including aliases. External raw RAM edits must call
+`NativeRAM.BeforeWrite` before mutation; external HPT/SLB edits must call
+`InvalidateMappings`. The trusted, single-threaded native-memory contract does
+not authorize arbitrary unnotified changes to public backing arrays.
+
+Native state stays resident across linked/region side exits only inside the
+unchanged **64-attempt** timer window. Slow instructions, exceptions and bank
+transitions synchronize immediately. Deterministic slices stop at decrementer
+expiry. Realtime counter accesses and cede remain synchronous, and the POWER
+oscillator includes host compilation time rather than pausing it out of scores.
+Regions are bounded to the same schedulable window; cold kernel native admission
+is conservative. The original instruction/arena/duration budgets are unchanged.
+
+Use the explicit fixtures above to require actual full-stack execution:
+
+```sh
+sandbox/power64-linux/machine -kernel /path/to/linux/vmlinux \
+  -init-elf /absolute/path/to/coremark.elf -engine native -clock realtime -stats
+RENVO_POWER_ENGINE=native \
+RENVO_POWER_LINUX_KERNEL=/path/to/linux/vmlinux \
+RENVO_POWER_LINUX_INIT=/absolute/path/to/init \
+RENVO_POWER_COREMARK_ELF=/absolute/path/to/coremark.elf \
+RENVO_POWER_COREMARK_ITERATIONS=2000 \
+  go run ./cmd/renvoemu test emulators/linux-power64-machine.rfe
+```
+
+The fixture gates require positive native, native-memory, linked, region and
+loop counters and zero compilation failures, in addition to the existing CRC,
+ordered output, host/guest time agreement, duration and orderly shutdown checks.
+Differential tests cover scalar edge cases and register aliases in interpreter,
+IR and native code; native BE/LE memory, unaligned/update/reverse forms, code
+identity and aliased code writes, R/C/permissions, precise cross-page exits,
+reservation slow paths and fixed timer/resource boundaries.
+
+The final real guest retired **1,291,919,236 native instructions**, including
+**272,920,788 native memory instructions**, with **1,291,883,631 linked
+instructions**, **7,980 regions**, **86,570,758 loop iterations** and **zero
+compilation failures**. Both standard seed sets validated at 2,000 iterations;
+all ten CRCs matched an independent identical-ELF QEMU POWER8 control. The
+fresh full-stack fixture gates and Renvo preflight passed.
+
+This is functional stack integration, not a claim of ARM64/x86 throughput
+parity. In the same-fixture unprofiled comparison, inclusive-clock native runs
+took 24.096318/22.021507 seconds (83.00/90.82 iterations/s); interpreter controls
+took 24.113729/23.624208 seconds (82.94/84.66 iterations/s). The earlier
+interpreter results are historical measurements on another fixture build.
+Native dispatch/scheduling overhead remains significant; no large new speedup
+is claimed. See `power64-recompiler-results.json` for provenance and counters.
+
 ## Current boundaries
 
-The initial CPU is interpreter-only: no IR/native acceleration, vector/VSX,
-floating point, or transactional memory.
+The scalar CPU now uses the full shared IR/native stack. Vector/VSX, floating
+point and transactional memory remain unsupported. Privileged operations,
+interrupts, atomics/reservations, devices and precise memory faults retain
+architectural slow paths; unsupported instructions still fail explicitly.
 The partition has a checked RAM bus, a hypervisor-owned hash page table,
 256 MiB segments with 4 KiB pages, terminal polling, selectable deterministic/realtime timebase
 and decrementer, and a small RTAS surface. It is not a general PowerVM

@@ -40,7 +40,7 @@ Use the Linux kernel/config described in `docs/power64-linux.md`:
 
 ```sh
 sandbox/power64-linux/machine -kernel /path/to/linux/vmlinux \
-  -init-elf /absolute/path/to/coremark.elf -clock realtime
+  -init-elf /absolute/path/to/coremark.elf -engine native -clock realtime -stats
 ```
 
 Timing markers are outside each measured interval. `Total ticks` are
@@ -54,8 +54,11 @@ never add a sleep to the timed workload or fabricate clock ticks.
 The deterministic mode remains useful for small instruction/CRC diagnostics,
 not performance reporting. The DTB's synthetic processor-frequency property
 is not a host CPU frequency and must not be used to report CoreMark/MHz.
-The results measure this hosted interpreter plus guest kernel overhead, not
-physical POWER8 hardware.
+The results measure the selected hosted execution tier plus guest kernel and
+emulator overhead, not physical POWER8 hardware. Use `-engine interpreter` for
+the interpreter control and `-engine native -stats` for full-stack execution;
+`RENVO_POWER_ENGINE=native` makes the fixture gate require native memory,
+linked dispatch and regions as well as correct CRCs and timing.
 
 Expected seed/list/matrix/state CRCs are:
 

@@ -1,0 +1,84 @@
+{
+  "architecture": "ppc64le",
+  "baseline_revision": "583c41b04bf2239a9fc1d8031f4af68a43226cbf",
+  "benchmark_elf_sha256": "a2a8968ba5db483f8dabc1a30c20cb5198bc7a8f9ef9fc2c1e298ee79abb2144",
+  "clock": "inclusive host-monotonic realtime, 1000000 Hz; compilation time is not paused out",
+  "compiler": "GCC 13.4.0",
+  "contexts": 1,
+  "coremark_revision": "d5fad6bd094899101a4e5fd53af7298160ced6ab",
+  "engine": "shared POWER64 recompiler: cached interpreter, IR, native memory, links and cyclic regions",
+  "gates": {
+    "all_required_native_tiers_exercised": true,
+    "format": "passed",
+    "fresh_native_linux_coremark2000": "passed",
+    "fresh_native_linux_init": "passed",
+    "host_guest_agreement": "within max(100 ms, 5%)",
+    "host_guest_minimum_seconds": 10,
+    "preflight": "passed",
+    "source_package_differential_tests": "passed"
+  },
+  "guest": "Linux 6.6.1",
+  "host": "one-CPU Linux/amd64 development sandbox",
+  "host_toolchain": "go1.26.0 linux/amd64",
+  "independent_control": {
+    "all_ten_crcs_match": true,
+    "emulator": "QEMU 10.2.1 POWER8 pseries",
+    "identical_elf": true,
+    "performance_score": false,
+    "reason": "0.314600/0.313766 second control intentionally fails unchanged ten-second validation and is used only for CRC verification"
+  },
+  "initramfs_sha256": "04b08c7fbaa6c95401e8571da641bd808500de647270dcc9a559d6690ac7328d",
+  "instruction_budget": 2000000000,
+  "iterations_per_seed": 2000,
+  "kernel_sha256": "1348922c03cac86d3e67a993a2091078514a6992e599bf4353bee6ce61bc1b09",
+  "linux_source_sha256": "da1ed7d47c97ed72c9354091628740aa3c40a3c9cd7382871f3cedbd60588234",
+  "maximum_timer_poll_attempts": 64,
+  "native_counters": {
+    "arena_resets": 4,
+    "attempted": 1410246512,
+    "compile_failures": 0,
+    "interpreted": 103851978,
+    "ir": 13798321,
+    "linked": 1291883631,
+    "loop_iterations": 86570758,
+    "native": 1291919236,
+    "native_bytes": 6544363,
+    "native_memory": 272920788,
+    "regions": 7980,
+    "retired": 1410246502
+  },
+  "ram_mib": 256,
+  "runs": [
+    {
+      "crcs": [
+        "e9f5",
+        "e714",
+        "1fd7",
+        "8e3a",
+        "4983"
+      ],
+      "interpreter_guest_microseconds": 24113729,
+      "interpreter_iterations_per_second": 82.94030342631784,
+      "native_guest_microseconds": 24096318,
+      "native_iterations_per_second": 83.00023264965212,
+      "seed": "performance"
+    },
+    {
+      "crcs": [
+        "18f2",
+        "e3c1",
+        "0747",
+        "8d84",
+        "0cac"
+      ],
+      "interpreter_guest_microseconds": 23624208,
+      "interpreter_iterations_per_second": 84.65892274568527,
+      "native_guest_microseconds": 22021507,
+      "native_iterations_per_second": 90.82030580377628,
+      "seed": "validation"
+    }
+  ],
+  "scope": "Full scalar recompiler-stack functionality verified; no complete POWER ISA, BE Linux, physical hardware, EEMBC certification or ARM64/x86 throughput parity claim. Same-fixture native improvement is small; dispatch/scheduling overhead remains significant.",
+  "tested_revision": "recompiler implementation in this change",
+  "total_dataset_bytes": 2000
+}
