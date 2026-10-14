@@ -15,10 +15,18 @@ const (
 	Guard       = Mul + 4
 )
 
+func (b *Builder) checkedAddress(address Value) Value {
+	if b.MemoryAddress != nil {
+		return b.MemoryAddress(b, address)
+	}
+	return address
+}
 func (b *Builder) MemoryLoad(address Value, size int) Value {
+	address = b.checkedAddress(address)
 	return b.emit(Op{Kind: MemoryLoad, A: address, Imm: uint64(size)})
 }
 func (b *Builder) MemoryStore(address, value Value, size int) {
+	address = b.checkedAddress(address)
 	b.emit(Op{Kind: MemoryStore, A: address, B: value, Imm: uint64(size)})
 }
 func (b *Builder) Guard(condition Value) { b.emit(Op{Kind: Guard, A: condition}) }
@@ -36,13 +44,19 @@ func (b *Builder) Commit(words int) {
 }
 func (b *Builder) Checkpoint(words, completed int) {
 	b.Commit(words)
-	b.emit(Op{Kind: Progress, Imm: uint64(completed)})
+	mode := Value(0)
+	if b.MemoryInstructionProgress {
+		mode = 1
+	}
+	// B is metadata, not an SSA operand: 0 retains raw-access accounting;
+	// 1 counts completed guest memory instructions between checkpoints.
+	b.emit(Op{Kind: Progress, B: mode, Imm: uint64(completed)})
 }
 func memoryOperands(o Op) (bool, bool) {
 	switch o.Kind {
 	case Const, LoadState, Progress:
 		return false, false
-	case StoreState, Shl, Shr, MemoryLoad, Guard, RegionGuard, LoopContinue, PairHigh:
+	case StoreState, Shl, Shr, MemoryLoad, Guard, RegionGuard, LoopContinue, PairHigh, NativeElapsed:
 		return true, false
 	default:
 		return true, true
@@ -109,13 +123,16 @@ func ValidateMemory(ops []Op, words int) error {
 		return fmt.Errorf("invalid memory block dimensions")
 	}
 	for i, o := range ops {
+		if o.Kind == NativeElapsed && (o.B < 1 || o.B > 1024 || o.Imm > 256) {
+			return fmt.Errorf("invalid native elapsed encoding")
+		}
 		if carryKind(o.Kind) && (o.Imm>>8 >= uint64(i) || effectOnly(ops[o.Imm>>8].Kind) || !validFlags(Op{Kind: ArithmeticFlags, Imm: o.Imm & 255})) {
 			return fmt.Errorf("invalid carry operand/width")
 		}
 		if !validFlags(o) || !validRich(o) || !validDivision(o) {
 			return fmt.Errorf("invalid flags width")
 		}
-		if !pureOperation(o.Kind) && (o.Kind < MemoryLoad || o.Kind > Guard) && o.Kind != RegionGuard && o.Kind != LoopContinue && o.Kind != PairHigh && o.Kind != MemoryPairStore {
+		if !pureOperation(o.Kind) && (o.Kind < MemoryLoad || o.Kind > Guard) && o.Kind != RegionGuard && o.Kind != LoopContinue && o.Kind != PairHigh && o.Kind != MemoryPairStore && o.Kind != NativeElapsed {
 			return fmt.Errorf("invalid memory IR operation")
 		}
 		if o.Kind == SelectValue && (o.Imm >= uint64(i) || effectOnly(ops[o.Imm].Kind)) {
@@ -139,7 +156,7 @@ func ValidateMemory(ops []Op, words int) error {
 		if o.Kind == MemoryLoad && o.Imm == 16 && (i+1 >= len(ops) || ops[i+1].Kind != PairHigh || ops[i+1].A != Value(i)) {
 			return fmt.Errorf("missing paired load result")
 		}
-		if o.Kind == Progress && o.Imm > 256 {
+		if o.Kind == Progress && (o.Imm > 256 || o.B < 0 || o.B > 1) {
 			return fmt.Errorf("invalid progress checkpoint")
 		}
 		left, right := memoryOperands(o)

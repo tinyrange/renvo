@@ -1,0 +1,47 @@
+Truncated bzImage before: FAILED with slice bounds [:4096] capacity 617.
+Oversized initramfs before: FAILED with placement underflow slice bounds [18446744073708503040:20971520].
+INVLPG before: FAILED - preserved stale native mapping authority.
+After repairs: complete x86 CPU/system archive suites PASS.
+Portable native API: stage0/stage3 rfe_ir_semantics frontend corpus PASS.
+ok  	renvo.dev/rfe/workspace/packages/amd64	0.092s
+ok  	renvo.dev/rfe/workspace/packages/linux-amd64-machine	0.502s
+
+==> focused frontend corpus (rfe_ir_semantics)
+=== RUN   TestFrontendQuickCorpus
+    frontend_corpus_test.go:50: no frontend corpus cases in /tmp/tempdir1817362624/publication-system-clock-page-table-repair/frontend_tests/quick match RENVO_TEST_FILTER="rfe_ir_semantics"
+--- SKIP: TestFrontendQuickCorpus (0.68s)
+=== RUN   TestFrontendRegressionCorpus
+    frontend_corpus_test.go:55: regressions: starting 1 cases
+=== RUN   TestFrontendRegressionCorpus/worker-01
+=== PAUSE TestFrontendRegressionCorpus/worker-01
+=== CONT  TestFrontendRegressionCorpus/worker-01
+=== NAME  TestFrontendRegressionCorpus
+    progress.go:104: regressions: completed 1/1 cases in 190ms; slowest cases: rfe_ir_semantics=190ms; slowest groups: rfe=190ms/1
+--- PASS: TestFrontendRegressionCorpus (0.00s)
+    --- PASS: TestFrontendRegressionCorpus/worker-01 (0.19s)
+=== RUN   TestFrontendExtendedCorpus
+    frontend_corpus_test.go:59: no frontend corpus cases in /tmp/tempdir1817362624/publication-system-clock-page-table-repair/frontend_tests/extended match RENVO_TEST_FILTER="rfe_ir_semantics"
+--- SKIP: TestFrontendExtendedCorpus (0.03s)
+=== RUN   TestFrontendStage3QuickCorpus
+    frontend_corpus_test.go:64: no frontend corpus cases in /tmp/tempdir1817362624/publication-system-clock-page-table-repair/frontend_tests/quick match RENVO_TEST_FILTER="rfe_ir_semantics"
+--- SKIP: TestFrontendStage3QuickCorpus (3.75s)
+=== RUN   TestFrontendStage3RegressionCorpus
+    frontend_corpus_test.go:69: regressions: starting 1 cases
+=== RUN   TestFrontendStage3RegressionCorpus/worker-01
+=== NAME  TestFrontendStage3RegressionCorpus
+    progress.go:104: regressions: completed 1/1 cases in 390ms; slowest cases: rfe_ir_semantics=390ms; slowest groups: rfe=390ms/1
+--- PASS: TestFrontendStage3RegressionCorpus (0.39s)
+    --- PASS: TestFrontendStage3RegressionCorpus/worker-01 (0.39s)
+=== RUN   TestFrontendStage3ExtendedCorpus
+    frontend_corpus_test.go:74: no frontend corpus cases in /tmp/tempdir1817362624/publication-system-clock-page-table-repair/frontend_tests/extended match RENVO_TEST_FILTER="rfe_ir_semantics"
+--- SKIP: TestFrontendStage3ExtendedCorpus (0.03s)
+=== RUN   TestFrontendStdCompatibility
+=== RUN   TestFrontendStdCompatibility/stage0
+    std_compat_test.go:12: no frontend corpus cases in /tmp/tempdir1817362624/publication-system-clock-page-table-repair/frontend_tests/std_compat match RENVO_TEST_FILTER="rfe_ir_semantics"
+=== RUN   TestFrontendStdCompatibility/stage3
+    std_compat_test.go:15: no frontend corpus cases in /tmp/tempdir1817362624/publication-system-clock-page-table-repair/frontend_tests/std_compat match RENVO_TEST_FILTER="rfe_ir_semantics"
+--- PASS: TestFrontendStdCompatibility (0.00s)
+    --- SKIP: TestFrontendStdCompatibility/stage0 (0.00s)
+    --- SKIP: TestFrontendStdCompatibility/stage3 (0.00s)
+PASS
+ok  	renvo.dev/frontend_tests	5.081s

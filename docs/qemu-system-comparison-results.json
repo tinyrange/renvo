@@ -1,0 +1,417 @@
+{
+  "arm_icount8_diagnostic_median": 2715.7667847554035,
+  "arm_icount8_runs": 3,
+  "caveats": [
+    "RFE balanced32 uses32MiB aggregate native code/16384 decoded blocks; QEMU uses default TCG cache, host code-cache budgets not matched.",
+    "Guest CPU features/devices/virtual-clock models differ; same ELF/kernel/rootfs, not identical virtual hardware.",
+    "IRQ snapshots encompass both seeds and program boundary work, not performance-seed-exclusive.",
+    "icount diagnostic changes instruction instrumentation as well as virtual clock; slowdown cannot be attributed solely to interrupts.",
+    "Additional default-cache repeats were cancelled; do not count an interrupted run as a score."
+  ],
+  "results": [
+    {
+      "architecture": "aarch64",
+      "iterations_per_seed": 100000,
+      "paired_input_hashes": {
+        "architecture": "aarch64",
+        "base_initramfs_sha256": "7499644735348e2bcec55ead4ad5fa1f0485faf61f0fc89d493d6eaee6fe4e46",
+        "benchmark_initramfs_sha256": "d04ac56abd2e9dc9c68112b242af7893422a9434c0febdf5424b50ff32178ddf",
+        "benchmark_sha256": "def14bf4146658ce216cb589e0fb562d7f5b039a4466cd1f41e24a8f548aa8eb",
+        "compiler_argv": [
+          "aarch64-linux-gnu-gcc",
+          "-O2",
+          "-static",
+          "-nostdlib",
+          "-fno-builtin",
+          "-fno-stack-protector",
+          "-fno-pie",
+          "-no-pie",
+          "-mgeneral-regs-only",
+          "-fno-tree-vectorize",
+          "-I.",
+          "-Iport",
+          "-DITERATIONS=100000",
+          "-DPERFORMANCE_RUN=1",
+          "core_list_join.c",
+          "core_main.c",
+          "core_matrix.c",
+          "core_state.c",
+          "core_util.c",
+          "port/core_portme.c",
+          "port/start.S",
+          "-Wl,-e,_start",
+          "-Wl,--build-id=none",
+          "-o",
+          "/home/joshua/dev/projects/renvo/sandbox/rfe-linux/coremark-system-compare-v1/aarch64/iterations-100000/coremark.elf"
+        ],
+        "iterations_per_seed": 100000,
+        "kernel_sha256": "e698a107e4d04117db1a7b0daee99bdae5f0647fba2af50f3cd020a666950ab9",
+        "source_hashes": {
+          "core_list_join.c": "ca00e4e010ece47d7f040cb92aa50a95345a00d3171b59d088f6b243be06ce7b",
+          "core_main.c": "17884c93c5b94378eb0ff02b4df3725756cf2addb9b8cbcaa6200a4649ff5ca7",
+          "core_matrix.c": "ecdff717b5a5c4907d221a606760e25499899cbf617582c05d40db71c91351e4",
+          "core_state.c": "f4b84bb0a3452c45a4daa664ab502bfdccbd31cb57d93e9ac490c60937717a4e",
+          "core_util.c": "a3fbfcb9bb943b638624b8ece01c5836dd56a96d7bcde2697b248d077447327f",
+          "coremark.h": "29f7eb0f0bdf6002f6c7dccfa4f8f9f32c0b8f6709f6538c2b73221938a9c8f1",
+          "port/core_portme.c": "1d145a077e406e29cad2f38d1579de5e4c59128d49b45f36da85d851379d6731",
+          "port/core_portme.h": "d21e27adf8d98463c65195118ca48a67f8a958c7139f540aba8dd4b7f0bebdb2",
+          "port/start.S": "2f05e7e7f2bb9c6ea0ea2b9acf3a9cd226c702acddee03e12797cae2d79109ba"
+        },
+        "timing_port": "frozen start_time/stop_time serial markers only",
+        "upstream": "d5fad6bd094899101a4e5fd53af7298160ced6ab"
+      },
+      "qemu_run_directories": [
+        "sandbox/rfe-linux/coremark-system-compare-v1/aarch64/iterations-100000/runs/qemu-tcg-default-1791887648993587518",
+        "sandbox/rfe-linux/coremark-system-compare-v1/aarch64/iterations-100000/runs/qemu-tcg-default-1791889110820046830",
+        "sandbox/rfe-linux/coremark-system-compare-v1/aarch64/iterations-100000/runs/qemu-tcg-default-1791889349435181097"
+      ],
+      "qemu_tcg_median": 5880.657774521939,
+      "qemu_timer_irq_example": {
+        "11": {
+          "count": 33847,
+          "description": "GIC-0  27 Level     arch_timer"
+        },
+        "13": {
+          "count": 0,
+          "description": "GIC-0  33 Level     uart-pl011"
+        },
+        "14": {
+          "count": 0,
+          "description": "GIC-0  34 Level     rtc-pl031"
+        },
+        "Err": {
+          "count": 0,
+          "description": ""
+        },
+        "IPI0": {
+          "count": 0,
+          "description": "Rescheduling interrupts"
+        },
+        "IPI1": {
+          "count": 0,
+          "description": "Function call interrupts"
+        },
+        "IPI2": {
+          "count": 0,
+          "description": "CPU stop interrupts"
+        },
+        "IPI3": {
+          "count": 0,
+          "description": "CPU stop NMIs"
+        },
+        "IPI4": {
+          "count": 0,
+          "description": "Timer broadcast interrupts"
+        },
+        "IPI5": {
+          "count": 0,
+          "description": "IRQ work interrupts"
+        },
+        "IPI6": {
+          "count": 0,
+          "description": "CPU backtrace interrupts"
+        },
+        "IPI7": {
+          "count": 0,
+          "description": "KGDB roundup interrupts"
+        }
+      },
+      "qemu_to_rfe_ratio": 4.933661244427619,
+      "rfe_balanced32_median": 1191.945997744356,
+      "rfe_run_directories": [
+        "sandbox/rfe-linux/coremark-system-compare-v1/aarch64/iterations-100000/runs/rfe-balanced32-1791888387314909185",
+        "sandbox/rfe-linux/coremark-system-compare-v1/aarch64/iterations-100000/runs/rfe-balanced32-1791889146354256646",
+        "sandbox/rfe-linux/coremark-system-compare-v1/aarch64/iterations-100000/runs/rfe-balanced32-1791889384936290673"
+      ],
+      "rfe_timer_irq_example": {
+        "11": {
+          "count": 615661,
+          "description": "GIC-0  27 Level     arch_timer"
+        },
+        "13": {
+          "count": 0,
+          "description": "GIC-0  33 Level     uart-pl011"
+        },
+        "Err": {
+          "count": 0,
+          "description": ""
+        },
+        "IPI0": {
+          "count": 0,
+          "description": "Rescheduling interrupts"
+        },
+        "IPI1": {
+          "count": 0,
+          "description": "Function call interrupts"
+        },
+        "IPI2": {
+          "count": 0,
+          "description": "CPU stop interrupts"
+        },
+        "IPI3": {
+          "count": 0,
+          "description": "CPU stop NMIs"
+        },
+        "IPI4": {
+          "count": 0,
+          "description": "Timer broadcast interrupts"
+        },
+        "IPI5": {
+          "count": 0,
+          "description": "IRQ work interrupts"
+        },
+        "IPI6": {
+          "count": 0,
+          "description": "CPU backtrace interrupts"
+        },
+        "IPI7": {
+          "count": 0,
+          "description": "KGDB roundup interrupts"
+        }
+      },
+      "runs_per_engine": 3,
+      "same_host_cpu": 0
+    },
+    {
+      "architecture": "x86_64",
+      "iterations_per_seed": 100000,
+      "paired_input_hashes": {
+        "architecture": "x86_64",
+        "base_initramfs_sha256": "f6e63ecc6a831c5ef4021a2b0ee5bfca8ec13661f91c3f0930313b40ebbe9af3",
+        "benchmark_initramfs_sha256": "3d584d07a181fe7aa03a6a2d2bed423e4a0d2cdf03f145fabaee8b2990085ede",
+        "benchmark_sha256": "ef4c5e1b1e017f4693138a7b0731221701d3c5590d703351a8e65fffeb8336fa",
+        "compiler_argv": [
+          "gcc",
+          "-O2",
+          "-static",
+          "-nostdlib",
+          "-fno-builtin",
+          "-fno-stack-protector",
+          "-fno-pie",
+          "-no-pie",
+          "-march=x86-64",
+          "-mtune=generic",
+          "-mgeneral-regs-only",
+          "-fno-tree-vectorize",
+          "-I.",
+          "-Ihost-port",
+          "-DITERATIONS=100000",
+          "-DPERFORMANCE_RUN=1",
+          "core_list_join.c",
+          "core_main.c",
+          "core_matrix.c",
+          "core_state.c",
+          "core_util.c",
+          "host-port/core_portme.c",
+          "host-port/start.S",
+          "-Wl,-e,_start",
+          "-Wl,--build-id=none",
+          "-o",
+          "/home/joshua/dev/projects/renvo/sandbox/rfe-linux/coremark-system-compare-v1/x86_64/iterations-100000/coremark.elf"
+        ],
+        "iterations_per_seed": 100000,
+        "kernel_sha256": "40f620bc8c93d952e57dd8dfc0f94fca1759d192a4fc4a260705d50ca378559c",
+        "source_hashes": {
+          "core_list_join.c": "ca00e4e010ece47d7f040cb92aa50a95345a00d3171b59d088f6b243be06ce7b",
+          "core_main.c": "17884c93c5b94378eb0ff02b4df3725756cf2addb9b8cbcaa6200a4649ff5ca7",
+          "core_matrix.c": "ecdff717b5a5c4907d221a606760e25499899cbf617582c05d40db71c91351e4",
+          "core_state.c": "f4b84bb0a3452c45a4daa664ab502bfdccbd31cb57d93e9ac490c60937717a4e",
+          "core_util.c": "a3fbfcb9bb943b638624b8ece01c5836dd56a96d7bcde2697b248d077447327f",
+          "coremark.h": "29f7eb0f0bdf6002f6c7dccfa4f8f9f32c0b8f6709f6538c2b73221938a9c8f1",
+          "host-port/core_portme.c": "0c19da9dd3a9d48331ee9637fcb3ad575a7222fb5f3440fd0574377002d86ebd",
+          "host-port/core_portme.h": "280187964dab675617a21674d6360b6788a0f9ada28525e12256b427d7be1478",
+          "host-port/start.S": "5e08e31ef2e1a2f6e481ebbe553300aa6b27407b600063ce5de76d35265aa65d"
+        },
+        "timing_port": "frozen start_time/stop_time serial markers only",
+        "upstream": "d5fad6bd094899101a4e5fd53af7298160ced6ab"
+      },
+      "qemu_run_directories": [
+        "sandbox/rfe-linux/coremark-system-compare-v1/x86_64/iterations-100000/runs/qemu-tcg-default-1791888590098198931",
+        "sandbox/rfe-linux/coremark-system-compare-v1/x86_64/iterations-100000/runs/qemu-tcg-default-1791889609474811674",
+        "sandbox/rfe-linux/coremark-system-compare-v1/x86_64/iterations-100000/runs/qemu-tcg-default-1791889898846938513"
+      ],
+      "qemu_tcg_median": 5442.363865955411,
+      "qemu_timer_irq_example": {
+        "0": {
+          "count": 0,
+          "description": "IO-APIC   2-edge      timer"
+        },
+        "1": {
+          "count": 0,
+          "description": "IO-APIC   1-edge      i8042"
+        },
+        "12": {
+          "count": 0,
+          "description": "IO-APIC  12-edge      i8042"
+        },
+        "14": {
+          "count": 0,
+          "description": "IO-APIC  14-edge      ata_piix"
+        },
+        "15": {
+          "count": 0,
+          "description": "IO-APIC  15-edge      ata_piix"
+        },
+        "4": {
+          "count": 248,
+          "description": "IO-APIC   4-edge      ttyS0"
+        },
+        "8": {
+          "count": 0,
+          "description": "IO-APIC   8-edge      rtc0"
+        },
+        "9": {
+          "count": 0,
+          "description": "IO-APIC   9-fasteoi   acpi"
+        },
+        "CAL": {
+          "count": 0,
+          "description": "Function call interrupts"
+        },
+        "ERR": {
+          "count": 0,
+          "description": ""
+        },
+        "IWI": {
+          "count": 0,
+          "description": "IRQ work interrupts"
+        },
+        "LOC": {
+          "count": 37561,
+          "description": "Local timer interrupts"
+        },
+        "MIS": {
+          "count": 0,
+          "description": ""
+        },
+        "NMI": {
+          "count": 0,
+          "description": "Non-maskable interrupts"
+        },
+        "NPI": {
+          "count": 0,
+          "description": "Nested posted-interrupt event"
+        },
+        "PIN": {
+          "count": 0,
+          "description": "Posted-interrupt notification event"
+        },
+        "PIW": {
+          "count": 0,
+          "description": "Posted-interrupt wakeup event"
+        },
+        "PMI": {
+          "count": 0,
+          "description": "Performance monitoring interrupts"
+        },
+        "RES": {
+          "count": 0,
+          "description": "Rescheduling interrupts"
+        },
+        "RTR": {
+          "count": 0,
+          "description": "APIC ICR read retries"
+        },
+        "SPU": {
+          "count": 0,
+          "description": "Spurious interrupts"
+        },
+        "TLB": {
+          "count": 0,
+          "description": "TLB shootdowns"
+        },
+        "TRM": {
+          "count": 0,
+          "description": "Thermal event interrupts"
+        }
+      },
+      "qemu_to_rfe_ratio": 5.10981072176055,
+      "rfe_balanced32_median": 1065.0813038492122,
+      "rfe_run_directories": [
+        "sandbox/rfe-linux/coremark-system-compare-v1/x86_64/iterations-100000/runs/rfe-balanced32-1791888631064640655",
+        "sandbox/rfe-linux/coremark-system-compare-v1/x86_64/iterations-100000/runs/rfe-balanced32-1791889648962517537",
+        "sandbox/rfe-linux/coremark-system-compare-v1/x86_64/iterations-100000/runs/rfe-balanced32-1791889938360765804"
+      ],
+      "rfe_timer_irq_example": {
+        "0": {
+          "count": 566366,
+          "description": "XT-PIC      timer"
+        },
+        "2": {
+          "count": 0,
+          "description": "XT-PIC      cascade"
+        },
+        "4": {
+          "count": 232,
+          "description": "XT-PIC      ttyS0"
+        },
+        "8": {
+          "count": 0,
+          "description": "XT-PIC      rtc0"
+        },
+        "CAL": {
+          "count": 0,
+          "description": "Function call interrupts"
+        },
+        "ERR": {
+          "count": 0,
+          "description": ""
+        },
+        "IWI": {
+          "count": 0,
+          "description": "IRQ work interrupts"
+        },
+        "LOC": {
+          "count": 0,
+          "description": "Local timer interrupts"
+        },
+        "MIS": {
+          "count": 0,
+          "description": ""
+        },
+        "NMI": {
+          "count": 0,
+          "description": "Non-maskable interrupts"
+        },
+        "NPI": {
+          "count": 0,
+          "description": "Nested posted-interrupt event"
+        },
+        "PIN": {
+          "count": 0,
+          "description": "Posted-interrupt notification event"
+        },
+        "PIW": {
+          "count": 0,
+          "description": "Posted-interrupt wakeup event"
+        },
+        "PMI": {
+          "count": 0,
+          "description": "Performance monitoring interrupts"
+        },
+        "RES": {
+          "count": 0,
+          "description": "Rescheduling interrupts"
+        },
+        "RTR": {
+          "count": 0,
+          "description": "APIC ICR read retries"
+        },
+        "SPU": {
+          "count": 0,
+          "description": "Spurious interrupts"
+        },
+        "TLB": {
+          "count": 0,
+          "description": "TLB shootdowns"
+        },
+        "TRM": {
+          "count": 0,
+          "description": "Thermal event interrupts"
+        }
+      },
+      "runs_per_engine": 3,
+      "same_host_cpu": 0
+    }
+  ]
+}

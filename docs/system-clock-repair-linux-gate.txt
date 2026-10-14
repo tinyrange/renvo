@@ -1,0 +1,8 @@
+
+==> Alpine direct boot and guest programs in both RFE system emulators
+Prepared /tmp/tempdir1817362624/publication-system-clock-page-table-repair/sandbox/rfe-linux/aarch64
+Prepared /tmp/tempdir1817362624/publication-system-clock-page-table-repair/sandbox/rfe-linux/x86_64
+Booting Alpine in linux-arm64-machine; serial log: /tmp/tempdir1817362624/publication-system-clock-page-table-repair/sandbox/rfe-linux/aarch64/rfe-boot.log
+PASS: aarch64 Alpine kernel boot, child exec, file I/O, pipeline and shutdown
+Booting Alpine in linux-amd64-machine; serial log: /tmp/tempdir1817362624/publication-system-clock-page-table-repair/sandbox/rfe-linux/x86_64/rfe-boot.log
+PASS: x86_64 Alpine kernel boot, child exec, file I/O, pipeline and shutdown

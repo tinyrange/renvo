@@ -1,0 +1,4388 @@
+RFE 1
+
+-- rfe.json --
+{
+  "format": 1,
+  "name": "linux-arm64-machine",
+  "import": "renvo.dev/emulators/arm64machine",
+  "entry": "Main",
+  "requires": [
+    {
+      "name": "aarch64"
+    }
+  ]
+}
+
+-- boot.go --
+package arm64machine
+
+import (
+	"bytes"
+	"compress/gzip"
+	"encoding/binary"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"renvo.dev/emulators/aarch64"
+)
+
+type deviceTree struct {
+	body, strings []byte
+	names         map[string]uint32
+}
+
+func (d *deviceTree) word(v uint32) { d.body = binary.BigEndian.AppendUint32(d.body, v) }
+func (d *deviceTree) align() {
+	for len(d.body)%4 != 0 {
+		d.body = append(d.body, 0)
+	}
+}
+func (d *deviceTree) node(n string) {
+	d.word(1)
+	d.body = append(d.body, []byte(n)...)
+	d.body = append(d.body, 0)
+	d.align()
+}
+func (d *deviceTree) end() { d.word(2) }
+func (d *deviceTree) prop(n string, v []byte) {
+	i, ok := d.names[n]
+	if !ok {
+		i = uint32(len(d.strings))
+		d.names[n] = i
+		d.strings = append(d.strings, []byte(n)...)
+		d.strings = append(d.strings, 0)
+	}
+	d.word(3)
+	d.word(uint32(len(v)))
+	d.word(i)
+	d.body = append(d.body, v...)
+	d.align()
+}
+func (d *deviceTree) text(n, v string) { d.prop(n, append([]byte(v), 0)) }
+func (d *deviceTree) cells(n string, v ...uint32) {
+	var b []byte
+	for _, x := range v {
+		b = binary.BigEndian.AppendUint32(b, x)
+	}
+	d.prop(n, b)
+}
+func (m *Machine) dtb(args string, initStart, initEnd uint64) []byte {
+	d := &deviceTree{names: map[string]uint32{}}
+	d.node("")
+	d.cells("#address-cells", 2)
+	d.cells("#size-cells", 2)
+	d.text("compatible", "linux,dummy-virt")
+	d.text("model", "Renvo AArch64 virtual machine")
+	d.cells("interrupt-parent", 1)
+	d.node("chosen")
+	d.text("bootargs", args)
+	d.text("stdout-path", "/pl011@9000000")
+	if initStart != 0 {
+		d.cells("linux,initrd-start", uint32(initStart>>32), uint32(initStart))
+		d.cells("linux,initrd-end", uint32(initEnd>>32), uint32(initEnd))
+	}
+	d.end()
+	d.node("memory@40000000")
+	d.text("device_type", "memory")
+	d.cells("reg", 0, uint32(ramBase), 0, uint32(len(m.RAM)))
+	d.end()
+	d.node("cpus")
+	d.cells("#address-cells", 1)
+	d.cells("#size-cells", 0)
+	d.node("cpu@0")
+	d.text("device_type", "cpu")
+	d.text("compatible", "arm,cortex-a53")
+	d.cells("reg", 0)
+	d.text("enable-method", "psci")
+	d.end()
+	d.end()
+	d.node("psci")
+	d.text("compatible", "arm,psci-0.2")
+	d.text("method", "hvc")
+	d.end()
+	d.node("intc@8000000")
+	d.text("compatible", "arm,cortex-a15-gic")
+	d.cells("#interrupt-cells", 3)
+	d.prop("interrupt-controller", nil)
+	d.cells("#address-cells", 2)
+	d.cells("#size-cells", 2)
+	d.prop("ranges", nil)
+	d.cells("reg", 0, uint32(gicDist), 0, 0x10000, 0, uint32(gicCPU), 0, 0x10000)
+	d.cells("phandle", 1)
+	d.end()
+	d.node("timer")
+	d.text("compatible", "arm,armv8-timer")
+	d.cells("interrupts", 1, 13, 0xf08, 1, 14, 0xf08, 1, 11, 0xf08, 1, 10, 0xf08)
+	d.prop("always-on", nil)
+	d.end()
+	d.node("apb-pclk")
+	d.text("compatible", "fixed-clock")
+	d.cells("#clock-cells", 0)
+	d.cells("clock-frequency", 24000000)
+	d.cells("phandle", 2)
+	d.end()
+	d.node("pl011@9000000")
+	d.text("compatible", "arm,pl011\x00arm,primecell")
+	d.cells("reg", 0, uint32(uartBase), 0, 0x1000)
+	d.cells("interrupts", 0, 1, 4)
+	d.cells("clocks", 2, 2)
+	d.text("clock-names", "uartclk\x00apb_pclk")
+	d.end()
+	d.end()
+	d.word(9)
+	h := make([]byte, 56)
+	values := []uint32{0xd00dfeed, uint32(56 + len(d.body) + len(d.strings)), 56, uint32(56 + len(d.body)), 40, 17, 16, 0, uint32(len(d.strings)), uint32(len(d.body))}
+	for i, v := range values {
+		binary.BigEndian.PutUint32(h[i*4:], v)
+	}
+	return append(append(h, d.body...), d.strings...)
+}
+func (m *Machine) Boot(kernel, initrd []byte, args string) error {
+	if len(kernel) >= 2 && kernel[0] == 0x1f && kernel[1] == 0x8b {
+		r, e := gzip.NewReader(bytes.NewReader(kernel))
+		if e != nil {
+			return e
+		}
+		kernel, e = io.ReadAll(io.LimitReader(r, int64(len(m.RAM))+1))
+		r.Close()
+		if e != nil {
+			return e
+		}
+	}
+	if len(kernel) < 64 || binary.LittleEndian.Uint32(kernel[56:]) != 0x644d5241 {
+		return fmt.Errorf("kernel must be an uncompressed AArch64 Linux Image (or gzip Image)")
+	}
+	if binary.LittleEndian.Uint64(kernel[24:])&1 != 0 {
+		return fmt.Errorf("big-endian kernel Images are unsupported")
+	}
+	offset := binary.LittleEndian.Uint64(kernel[8:])
+	imageSize := binary.LittleEndian.Uint64(kernel[16:])
+	if imageSize == 0 {
+		offset = 0x80000
+		imageSize = uint64(len(kernel))
+	}
+	if imageSize < uint64(len(kernel)) {
+		imageSize = uint64(len(kernel))
+	}
+	if offset < 0x10000 {
+		offset += 0x200000
+	}
+	if offset > uint64(len(m.RAM)) || imageSize > uint64(len(m.RAM))-offset {
+		return fmt.Errorf("kernel does not fit guest RAM")
+	}
+	copy(m.RAM[offset:], kernel)
+	initStart, initEnd := uint64(0), uint64(0)
+	if len(initrd) > 0 {
+		if uint64(len(initrd))+0x10000 > uint64(len(m.RAM)) {
+			return fmt.Errorf("initramfs does not fit RAM")
+		}
+		initOffset := (uint64(len(m.RAM)) - uint64(len(initrd)) - 0x10000) &^ uint64(4095)
+		if initOffset < offset+imageSize {
+			return fmt.Errorf("initramfs overlaps kernel")
+		}
+		copy(m.RAM[initOffset:], initrd)
+		initStart = ramBase + initOffset
+		initEnd = initStart + uint64(len(initrd))
+	}
+	dt := m.dtb(args, initStart, initEnd)
+	if len(dt) > 0x10000 {
+		return fmt.Errorf("device tree too large")
+	}
+	copy(m.RAM, dt)
+	m.CPU.State[aarch64.PC] = ramBase + offset
+	m.CPU.State[0] = ramBase
+	return nil
+}
+func Main(args []string) int {
+	if err := run(args); err != nil {
+		fmt.Fprintln(os.Stderr, "arm64-machine:", err)
+		return 1
+	}
+	return 0
+}
+func run(args []string) error {
+	f := flag.NewFlagSet("linux-arm64-machine", flag.ContinueOnError)
+	kernel := f.String("kernel", "", "AArch64 Linux Image")
+	initrd := f.String("initrd", "", "cpio initramfs (optionally compressed)")
+	memory := f.Int("memory", 256, "RAM MiB")
+	steps := f.Uint64("steps", 1000000000, "maximum guest instructions")
+	appendArgs := f.String("append", "earlycon=pl011,0x09000000 console=ttyAMA0 rdinit=/init nokaslr maxcpus=1", "kernel command line")
+	trace := f.String("trace", "", "instruction trace file")
+	traceAfter := f.Uint64("trace-after", 0, "first instruction to trace")
+	progress := f.Uint64("progress", 0, "diagnostic interval in guest instructions")
+	stats := f.Bool("stats", false, "print retirement count")
+	clockMode := f.String("clock", "deterministic", "system clock: realtime or deterministic")
+	mode := f.String("engine", "native", "execution tier: native, ir, interpreter")
+	jitProfile := f.Bool("jit-profile", false, "emit native JIT profiling symbols (diagnostic only)")
+	jitCache := f.String("jit-cache", "default", "native cache preset: default, balanced8, balanced32, kernel32, balanced64")
+	if e := f.Parse(args); e != nil {
+		return e
+	}
+	if *kernel == "" {
+		return fmt.Errorf("-kernel is required")
+	}
+	k, e := os.ReadFile(*kernel)
+	if e != nil {
+		return e
+	}
+	var init []byte
+	if *initrd != "" {
+		init, e = os.ReadFile(*initrd)
+		if e != nil {
+			return e
+		}
+	}
+	// The checked RAM path remains the default. Fault-assisted direct RAM
+	// is an explicit constructor experiment, not selected by execution tier.
+	m, e := New(*memory, os.Stdout)
+	if e != nil {
+		return e
+	}
+	defer m.Close()
+	if e = m.Boot(k, init, *appendArgs); e != nil {
+		return e
+	}
+	if *trace != "" {
+		out, e := os.Create(*trace)
+		if e != nil {
+			return e
+		}
+		defer out.Close()
+		m.Trace = out
+	}
+	if *clockMode == "realtime" {
+		m.UseRealtimeClock()
+	} else if *clockMode != "deterministic" {
+		return fmt.Errorf("clock must be realtime or deterministic")
+	}
+	m.ProfileJIT = *jitProfile
+	m.JITCache = *jitCache
+	if e = m.EnableSystemJIT(*mode); e != nil {
+		return e
+	}
+	defer m.CloseJIT()
+	defer m.printJITStats()
+	input := make(chan []byte, 16)
+	go func() {
+		defer close(input)
+		var b [256]byte
+		for {
+			n, e := os.Stdin.Read(b[:])
+			if n > 0 {
+				copyData := append([]byte(nil), b[:n]...)
+				input <- copyData
+			}
+			if e != nil {
+				return
+			}
+		}
+	}()
+	nextProgress := uint64(0)
+	for i := uint64(0); i < *steps && !m.Done; {
+		if *progress != 0 && i >= nextProgress {
+			nextProgress = i + *progress
+			fmt.Fprintf(os.Stderr, "progress instruction=%d pc=%#x ticks=%d pstate=%#x irq=%d cntv=%#x cval=%d\n", i, m.CPU.State[aarch64.PC], m.Ticks, m.Pstate, m.pendingIRQ(), m.Sys[0xdf19], m.Sys[0xdf1a])
+			m.printJITStats()
+		}
+		if *traceAfter != 0 && i < *traceAfter {
+			saved := m.Trace
+			m.Trace = nil
+			e = m.Step()
+			m.Trace = saved
+			if e != nil {
+				return e
+			}
+			i++
+			continue
+		}
+		if i&1023 == 0 && input != nil {
+			select {
+			case data, ok := <-input:
+				if !ok {
+					input = nil
+				} else {
+					m.Input = append(m.Input, data...)
+				}
+			default:
+			}
+		}
+
+		budget := uint64(65536)
+		if input != nil {
+			budget = uint64(1024) - (i & 1023)
+		}
+		if *steps-i < budget {
+			budget = *steps - i
+		}
+		consumed, err := m.RunQuantum(budget)
+		if err != nil {
+			return fmt.Errorf("instruction %d ticks=%d PC=%#x: %w", i, m.Ticks, m.CPU.State[aarch64.PC], err)
+		}
+		i += consumed
+	}
+	if *stats {
+		fmt.Fprintf(os.Stderr, "instructions=%d ticks=%d pc=%#x done=%t\n", m.Instructions, m.Ticks, m.CPU.State[aarch64.PC], m.Done)
+	}
+	if !m.Done {
+		return fmt.Errorf("instruction budget exhausted at %#x", m.CPU.State[aarch64.PC])
+	}
+	return nil
+}
+
+-- clock.go --
+package arm64machine
+
+import (
+	"renvo.dev/internal/rfe/engine"
+	"renvo.dev/internal/rfe/systemclock"
+)
+
+// Select the clock before JIT creation so counter reads are not compiled as
+// instruction prefixes. Device and architectural timer frequencies stay fixed.
+func (m *Machine) UseRealtimeClock() { m.Clock = systemclock.New(timerFreq) }
+func (m *Machine) syncClock() {
+	if m.Clock != nil {
+		m.Ticks = m.Clock.Read()
+	}
+}
+
+func (c *nativeCPU) PauseTranslationClock() {
+	if c.m.Clock != nil {
+		c.m.Clock.Pause()
+	}
+}
+func (c *nativeCPU) ResumeTranslationClock() {
+	if c.m.Clock != nil {
+		c.m.Clock.Resume()
+	}
+}
+
+var _ engine.TranslationClock = (*nativeCPU)(nil)
+
+-- clock_test.go --
+package arm64machine
+
+import (
+	"encoding/binary"
+	"renvo.dev/emulators/aarch64"
+	"renvo.dev/internal/rfe/systemclock"
+	"testing"
+	"time"
+)
+
+func TestRealtimeClockFrozenNativeRetirementAndCounterReads(t *testing.T) {
+	for _, mode := range []string{"interpreter", "ir", "native"} {
+		m := jitMachine(t, mode)
+		m.JIT.Close()
+		elapsed := 100 * time.Millisecond
+		m.Clock = systemclock.WithSource(timerFreq, func() time.Duration { return elapsed }, func(time.Duration) { t.Fatal("busy CPU waited") })
+		m.Sys[0xc708] = 3
+		// MRS CNTVCT_EL0,x2; ADD x3,x3,#1; B back.
+		for i, op := range []uint32{0xd53be042, 0x91000463, 0x17fffffe} {
+			binary.LittleEndian.PutUint32(m.RAM[0x8000+4*i:], op)
+		}
+		if err := m.EnableJIT(mode); err != nil {
+			t.Fatal(err)
+		}
+		m.syncClock()
+		m.Sys[0xdf19], m.Sys[0xdf1a] = 1, m.Ticks+timerFreq/1000
+		jitRun(t, m, 8192)
+		if m.Ticks != 10000000 || m.CPU.State[2] != m.Ticks || m.CPU.Retired != 8192 || m.Instructions != 8192 || m.timerPending(0xdf19, 0xdf1a) {
+			t.Fatal(mode, "retirement fabricated clock time", m.Ticks, m.CPU.State, m.CPU.Retired, m.Instructions)
+		}
+		elapsed += 20 * time.Millisecond
+		jitRun(t, m, 12)
+		if m.Ticks != 12000000 || m.CPU.State[2] != m.Ticks || !m.timerPending(0xdf19, 0xdf1a) {
+			t.Fatal(mode, "host time/counter/deadline diverged", m.Ticks, m.CPU.State)
+		}
+		if mode == "native" && m.JIT.NativeAvailable() && m.JIT.Stats.Native == 0 {
+			t.Fatal("no native execution tested")
+		}
+	}
+}
+
+func TestRealtimeClockWFIWaitsWithoutFabricatingTime(t *testing.T) {
+	m := reviewMachine(t)
+	elapsed := time.Duration(0)
+	waits := 0
+	m.Clock = systemclock.WithSource(timerFreq, func() time.Duration { return elapsed }, func(d time.Duration) { elapsed += d; waits++ })
+	m.Pstate = 0x3c5
+	m.CPU.State[aarch64.PC] = ramBase + 0x8000
+	m.Sys[0xdf19], m.Sys[0xdf1a] = 1, timerFreq/1000
+	binary.LittleEndian.PutUint32(m.RAM[0x8000:], 0xd503207f)
+	if err := m.Step(); err != nil {
+		t.Fatal(err)
+	}
+	if waits != 1 || elapsed != time.Millisecond || m.Ticks != timerFreq/1000 || m.CPU.Retired != 1 || m.Instructions != 1 {
+		t.Fatal("idle invented time or retirement", waits, elapsed, m.Ticks, m.CPU.Retired, m.Instructions)
+	}
+}
+
+-- jit.go --
+package arm64machine
+
+import (
+	"fmt"
+	"os"
+	"renvo.dev/emulators/aarch64"
+	"renvo.dev/internal/rfe/engine"
+	emu "renvo.dev/internal/rfe/runtime"
+	"renvo.dev/internal/rfe/systemmemory"
+)
+
+// Both EL0 and EL1 use checked native ISA lowering. Privileged instructions,
+// device I/O, exclusive sequences and exception delivery retain slow paths.
+func (m *Machine) nativeActive() bool { return !m.Exclusive && m.Trace == nil }
+func (m *Machine) nativeDomain() int {
+	if m.Pstate&0xc == 0 {
+		return 0
+	}
+	if m.Sys[0xc080]&1 == 0 {
+		return 2
+	}
+	return 1
+}
+func (m *Machine) nativeAddress(a uint64) uint64 {
+	if m.nativeDomain() == 1 {
+		return a | 0xffff000000000000
+	}
+	return a
+}
+func (m *Machine) nativeMapping(a uint64, exec bool) (uint64, bool, error) {
+	p, err := m.translate(a, false, exec)
+	if err != nil {
+		return 0, false, err
+	}
+	if !m.inRAM(p, 1) {
+		return 0, false, fmt.Errorf("native access is not RAM")
+	}
+	w, writeErr := m.translate(a, true, false)
+	return p - ramBase, writeErr == nil && w == p, nil
+}
+func (m *Machine) EnableJIT(mode string) error {
+	m.kernelThreshold = 4096
+	config := engine.DefaultEngineConfig()
+	config.Mode = mode
+	config.EvictCold = true
+	config.RecycleNative = true
+	config.DiscoveryThreshold = 32
+	return m.configureJIT(config)
+}
+func (m *Machine) configureJIT(config engine.EngineConfig) error {
+	e, err := m.newJIT(config)
+	if err == nil {
+		m.JIT = e
+	}
+	return err
+}
+func (m *Machine) newJIT(config engine.EngineConfig) (*engine.Engine, error) {
+	arch := aarch64.Architecture()
+	arch.StateWords = systemStateWords
+	fetch, lower := arch.Fetch, arch.Lower
+	arch.Fetch = func(memory engine.Memory, pc uint64) (engine.Instruction, error) {
+		ins, err := fetch(memory, pc)
+		if m.nativeDomain() != 0 {
+			ins.NativeThreshold = m.kernelThreshold
+		}
+		if nativeSystemBarrier(uint32(ins.Bits)) || nativeOrderedScalar(uint32(ins.Bits)) || nativeSystemRead(uint32(ins.Bits)) || nativeDAIFWrite(uint32(ins.Bits)) {
+			ins.InterpretOnly = false
+			ins.Memory = nativeOrderedScalar(uint32(ins.Bits)) || nativeSystemRead(uint32(ins.Bits)) || nativeDAIFWrite(uint32(ins.Bits))
+		}
+		if uint32(ins.Bits)&0x3b200c00 == 0x38000800 {
+			ins.InterpretOnly = true
+		}
+		if m.Clock != nil && (uint32(ins.Bits)&0xffffffe0 == 0xd53be020 || uint32(ins.Bits)&0xffffffe0 == 0xd53be040) {
+			ins.ScheduleBoundary = true
+		}
+		return ins, err
+	}
+	arch.Lower = func(b *emu.Builder, ins engine.Instruction, completed int) bool {
+		b.MemoryAddress = nil
+		if m.nativeDomain() == 1 {
+			b.MemoryAddress = systemmemory.KernelAddress
+		}
+		if lowerDAIFWrite(b, ins, completed) || lowerClockedSystemRead(b, ins, completed, m.Clock == nil) || lowerSystemScalar(b, ins, completed) {
+			return true
+		}
+		return lower(b, ins, completed)
+	}
+	return engine.New(config, arch)
+}
+func (m *Machine) printJITStats() {
+	fmt.Fprintf(os.Stderr, "mapping changes [page-table code-write root-switch invalidation]=%v\n", m.NativeRAM.ProfileMappingCounters())
+	if m.Clock != nil {
+		fmt.Fprintf(os.Stderr, "clock mode=realtime ticks=%d instructions=%d translation_paused_ns=%d\n", m.Ticks, m.Instructions, m.Clock.PausedDuration())
+	}
+	m.printKernelJITStats()
+	if m.ProfileJIT {
+		if m.JIT != nil {
+			fmt.Fprintf(os.Stderr, "jit user hot link misses=%+v\n", m.JIT.LinkMissProfile())
+			fmt.Fprintf(os.Stderr, "jit user timeline=%s\n", m.JIT.DispatchProfileJSON())
+		}
+		if m.KernelJIT != nil {
+			fmt.Fprintf(os.Stderr, "jit kernel hot link misses=%+v\n", m.KernelJIT.LinkMissProfile())
+			fmt.Fprintf(os.Stderr, "jit kernel timeline=%s\n", m.KernelJIT.DispatchProfileJSON())
+		}
+	}
+	if m.JIT != nil {
+		s := m.JIT.Stats
+		fmt.Fprintf(os.Stderr, "jit available=%t native=%d linked=%d interpreted=%d promotions=%d failures=%d bytes=%d\n", m.JIT.NativeAvailable(), s.Native, s.Linked, s.Interpreted, s.Promotions, s.CompileFailures, s.NativeBytes)
+		fmt.Fprintf(os.Stderr, "jit stats=%+v cached=%d\n", s, m.JIT.CachedBlocks())
+	}
+}
+
+const (
+	systemPstate     = aarch64.StateWords
+	systemSP0        = systemPstate + 1
+	systemIRQRisk    = systemSP0 + 1
+	systemTime       = systemIRQRisk + 1
+	systemTPIDR      = systemTime + 1
+	systemStateWords = systemTPIDR + 1
+)
+
+type nativeCPU struct {
+	state     [systemStateWords]uint64
+	m         *Machine
+	accounted uint64
+	consumed  uint64
+}
+
+func (c *nativeCPU) Registers() []uint64 { return c.state[:] }
+
+// Banked SP and IRQ risk are read-only native inputs. Native Pstate writes
+// may change only DAIF masks; every other control bit remains interpreter-owned.
+func (c *nativeCPU) importState() {
+	copy(c.state[:aarch64.StateWords], c.m.CPU.State[:])
+	c.state[systemPstate], c.state[systemSP0], c.state[systemTime] = c.m.Pstate, c.m.SP[0], c.m.Ticks
+	c.state[systemTPIDR] = c.m.Sys[0xc684]
+	c.state[systemIRQRisk] = 0
+	// Conservative risk, not interrupt authority. False positives fall back;
+	// timers cap every native slice and devices/input require a host boundary.
+	if c.m.timerPending(0xdf11, 0xdf12) || c.m.timerPending(0xdf19, 0xdf1a) || c.m.uartStatus()&c.m.UARTMask != 0 || c.m.SoftwarePending {
+		c.state[systemIRQRisk] = 1
+	}
+}
+func (c *nativeCPU) Retirement() *uint64      { return &c.m.CPU.Retired }
+func (c *nativeCPU) MemoryBus() engine.Memory { return c.m.NativeRAM }
+func (c *nativeCPU) sync() {
+	copy(c.m.CPU.State[:], c.state[:aarch64.StateWords])
+	c.m.Pstate = c.m.Pstate&^0x3c0 | c.state[systemPstate]&0x3c0
+	count := c.m.CPU.Retired - c.accounted
+	if c.m.Clock == nil {
+		c.m.Ticks += count
+	} else {
+		c.m.syncClock()
+	}
+	c.m.Instructions += count
+	c.consumed += count
+	c.accounted = c.m.CPU.Retired
+}
+func (c *nativeCPU) Step() error {
+	c.sync() // Precise time and progress before any slow memory/trap operation.
+	err := c.m.Step()
+	c.importState()
+	c.accounted = c.m.CPU.Retired // Step already accounted its architectural work.
+	c.consumed++                  // Also count fault/interrupt attempts against the fixed limit.
+	return err
+}
+func (c *nativeCPU) ExecuteInstruction(ins engine.Instruction) error {
+	// Engine validated the cached opcode's execute permission and code version
+	// in this thread. Keep interrupt and architectural execution identical to
+	// Step, but do not repeat its MMU fetch and decoder work.
+	c.sync()
+	var err error
+	pc := c.m.CPU.State[aarch64.PC]
+	if c.m.takePendingIRQ(pc) {
+		err = nil
+	} else {
+		err = c.m.executeOpcode(uint32(ins.Bits))
+	}
+	c.importState()
+	c.accounted = c.m.CPU.Retired
+	c.consumed++
+	return err
+}
+func (m *Machine) RunQuantum(remaining uint64) (uint64, error) {
+	m.syncClock()
+	if remaining == 0 {
+		return 0, fmt.Errorf("instruction budget exhausted")
+	}
+	pending := m.Pstate&0x80 == 0 && (m.timerPending(0xdf11, 0xdf12) || m.timerPending(0xdf19, 0xdf1a) || m.uartStatus()&m.UARTMask != 0 || m.SoftwarePending) && m.pendingIRQ() != 1023
+	if m.JIT == nil || !m.nativeActive() || pending {
+		return 1, m.Step()
+	}
+	// The caller caps live console polling at its original 1024-instruction
+	// boundary. Without live input, use the existing native session ceiling.
+	// Architectural timers always cap the slice independently.
+	budget := uint64(emu.NativeSessionLimit)
+	if budget > remaining {
+		budget = remaining
+	}
+	for _, timer := range [][2]uint32{{0xdf11, 0xdf12}, {0xdf19, 0xdf1a}} {
+		if m.Clock == nil && m.Sys[timer[0]]&3 == 1 && m.Sys[timer[1]] > m.Ticks && m.Sys[timer[1]]-m.Ticks < budget {
+			budget = m.Sys[timer[1]] - m.Ticks
+		}
+	}
+	cpu := &m.adapter
+	cpu.m, cpu.accounted, cpu.consumed = m, m.CPU.Retired, 0
+	cpu.importState()
+	err := m.activeJIT().RunQuanta(cpu, budget)
+	cpu.sync()
+	return cpu.consumed, err
+}
+
+-- jit_btf_repro_test.go --
+package arm64machine
+
+import (
+	"encoding/binary"
+	"renvo.dev/emulators/aarch64"
+	"renvo.dev/internal/rfe/engine"
+	"testing"
+)
+
+func mapKernelPage(t *testing.T, m *Machine, va, physical uint64, next *uint64) {
+	t.Helper()
+	table := uint64(0x1000)
+	for level := 0; level < 4; level++ {
+		at := table + ((va>>uint(12+9*(3-level)))&511)*8
+		if level == 3 {
+			reviewWord(m, at, ramBase+physical|3|1<<10)
+			break
+		}
+		entry := binary.LittleEndian.Uint64(m.RAM[at:])
+		if entry&3 == 0 {
+			entry = ramBase + *next | 3
+			reviewWord(m, at, entry)
+			*next += 4096
+		}
+		table = (entry & 0x0000fffffffff000) - ramBase
+	}
+}
+func btfReproMachine(t *testing.T, mode string) *Machine {
+	m := reviewMachine(t)
+	m.Sys[0xc080] = 1
+	m.Sys[0xc101] = ramBase + 0x1000
+	m.Sys[0xc102] = 16 | 16<<16 | 2<<30
+	m.setPstate(5)
+	next := uint64(0x20000)
+	for _, p := range [][2]uint64{{0xffff8000802f6000, 0x8000}, {0xffff0000030cd000, 0x9000}, {0xffff8000822bb000, 0xa000}, {0xffff800081136000, 0xc000}} {
+		mapKernelPage(t, m, p[0], p[1], &next)
+	}
+	for i := uint64(0); i < 8; i++ {
+		mapKernelPage(t, m, 0xffff000003300000+i*4096, 0x10000+i*4096, &next)
+	}
+	opcodes := map[uint64]uint32{
+		0xffff8000802f64c0: 0xb9409ae3,
+		0xffff8000802f64c4: 0x2a1303f4,
+		0xffff8000802f64c8: 0xaa1703e0,
+		0xffff8000802f64cc: 0x6b13007f,
+		0xffff8000802f64d0: 0x54000109,
+		0xffff8000802f64f0: 0xb9404801,
+		0xffff8000802f64f4: 0x4b030263,
+		0xffff8000802f64f8: 0x6b01007f,
+		0xffff8000802f64fc: 0x540009a2,
+		0xffff8000802f6500: 0xf9400400,
+		0xffff8000802f6504: 0xf8635816,
+		0xffff8000802f6508: 0xb4000956,
+		0xffff8000802f650c: 0xb94006c1,
+		0xffff8000802f6510: 0xd3587020,
+		0xffff8000802f6514: 0x71002c1f,
+		0xffff8000802f6518: 0x540007c8,
+		0xffff8000802f651c: 0x7205043f,
+		0xffff8000802f6520: 0x54000560,
+		0xffff8000802f65cc: 0x11000673,
+		0xffff8000802f65d0: 0x6b13031f,
+		0xffff8000802f65d4: 0x54fff761,
+		0xffff8000802f6524: 0x1400002a, // other tags rejoin the independent loop
+		0xffff8000802f6610: 0x17ffffef, // tags >11 rejoin increment at 65cc
+	}
+	for va, op := range opcodes {
+		binary.LittleEndian.PutUint32(m.RAM[0x8000+(va&4095):], op)
+	}
+	binary.LittleEndian.PutUint64(m.RAM[0x9a08:], 0xffff000003300000)
+	binary.LittleEndian.PutUint32(m.RAM[0x9a48:], 0x183ed)
+	binary.LittleEndian.PutUint32(m.RAM[0xcbb4:], 0x02000000)
+	binary.LittleEndian.PutUint32(m.RAM[0xcbc4:], 0x17000000)
+	for i := 0; i < 4096; i++ {
+		pointer := uint64(0xffff800081136bb0)
+		if i%64 == 40 {
+			pointer = 0xffff800081136bc0
+		}
+		binary.LittleEndian.PutUint64(m.RAM[0x10000+i*8:], pointer)
+	}
+	m.CPU.State = [aarch64.StateWords]uint64{0xffff0000030cda00, 0x183ed, 0x99, 0xa7, 0x0, 0x0, 0x0, 0x0, 0xffff0000029524a0, 0xffff8000822bb9a0, 0xec0, 0xc0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xa7, 0xa7, 0x9a, 0xffff800081136ba4, 0xffff0000030cda00, 0x183ed, 0x12000000, 0xffff00000319f800, 0x6484a38131c9ecd4, 0xa61eae039e2fee55, 0xffff8000822bbaf0, 0xffff8000802f6528, 0xffff8000822bbaf0, 0xffff8000802f6500, 0x80000000}
+	m.CPU.State[0] = m.CPU.State[23]
+	m.flush()
+	config := engine.DefaultEngineConfig()
+	config.Mode = mode
+	config.EvictCold, config.RecycleNative = true, true
+	if mode == "native-leaves" {
+		config.Mode = "native"
+		config.MaxRegionInstructions = 1
+	}
+	if err := m.configureJIT(config); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { m.JIT.Close() })
+	if config.Mode == "native" && !m.JIT.NativeAvailable() {
+		t.Skip("native host unavailable")
+	}
+	return m
+}
+func TestKernelJITPointerReloadAcrossTypeBranch(t *testing.T) {
+	for _, mode := range []string{"ir", "native-leaves", "native"} {
+		t.Run(mode, func(t *testing.T) {
+			native, interpreted := btfReproMachine(t, mode), btfReproMachine(t, "interpreter")
+			for i := 0; i < 4096; i++ {
+				count := uint64(1 + i%256)
+				if native.CPU.State[19] > 2000 {
+					break
+				}
+				jitRun(t, native, count)
+				jitRun(t, interpreted, count)
+				if native.CPU.State != interpreted.CPU.State || native.Pstate != interpreted.Pstate || native.Ticks != interpreted.Ticks {
+					t.Fatalf("slice %d count=%d native=%#x interpreted=%#x stats=%+v", i, count, native.CPU.State, interpreted.CPU.State, native.JIT.Stats)
+				}
+			}
+			if mode != "ir" && native.JIT.Stats.Native == 0 {
+				t.Fatalf("reproducer never reached native tier: %+v pc=%#x state=%#x", native.JIT.Stats, native.CPU.State[aarch64.PC], native.CPU.State)
+			}
+		})
+	}
+}
+
+-- jit_daif_write.go --
+package arm64machine
+
+import (
+	"renvo.dev/emulators/aarch64"
+	"renvo.dev/internal/rfe/engine"
+	emu "renvo.dev/internal/rfe/runtime"
+)
+
+func nativeDAIFWrite(op uint32) bool {
+	return op&0xffffffe0 == 0xd51b4220 || op&0xfffff0df == 0xd50340df
+}
+
+func lowerDAIFWrite(b *emu.Builder, ins engine.Instruction, completed int) bool {
+	op := uint32(ins.Bits)
+	if !nativeDAIFWrite(op) {
+		return false
+	}
+	b.Store(aarch64.PC, b.Constant(ins.PC))
+	b.Checkpoint(systemStateWords, completed)
+	pstate := b.Load(systemPstate)
+	b.Guard(b.Binary(emu.Less, b.Constant(0), b.Binary(emu.And, pstate, b.Constant(0xc))))
+	masks := b.Binary(emu.And, pstate, b.Constant(0x3c0))
+	if op&0xffffffe0 == 0xd51b4220 {
+		value := b.Constant(0)
+		if rt := int(op & 31); rt != 31 {
+			value = b.Load(rt)
+		}
+		masks = b.Binary(emu.And, value, b.Constant(0x3c0))
+	} else {
+		immediate := uint64(op>>8&15) << 6
+		if op&0x20 == 0 {
+			masks = b.Binary(emu.Or, masks, b.Constant(immediate))
+		} else {
+			masks = b.Binary(emu.And, masks, b.Constant(^immediate))
+		}
+	}
+	// Native execution cannot introduce an IRQ: timers cap the slice, device
+	// writes exit, and input is polled only at the existing host boundary. If an
+	// IRQ could already be pending, unmasking must replay exactly this operation
+	// through Step and then return to the scheduler before another instruction.
+	masked := b.Binary(emu.Less, b.Constant(0), b.Binary(emu.And, masks, b.Constant(0x80)))
+	quiet := b.Binary(emu.Equal, b.Load(systemIRQRisk), b.Constant(0))
+	b.Guard(b.Binary(emu.Or, masked, quiet))
+	b.Store(systemPstate, b.Binary(emu.Or, b.Binary(emu.And, pstate, b.Constant(^uint64(0x3c0))), masks))
+	b.Store(aarch64.PC, b.Constant(ins.PC+4))
+	// Commit DAIF now, so ordinary scalar/pair checkpoints that export 34 words
+	// cannot lose a preceding mask update at a later precise memory fault.
+	b.Checkpoint(systemStateWords, completed+1)
+	return true
+}
+
+-- jit_daif_write_test.go --
+package arm64machine
+
+import (
+	"encoding/binary"
+	"renvo.dev/emulators/aarch64"
+	"testing"
+)
+
+func daifMachines(t *testing.T, ops []uint32) []*Machine {
+	t.Helper()
+	machines := []*Machine{reviewMachine(t), reviewMachine(t)}
+	for index, m := range machines {
+		m.setPstate(0x3c5)
+		m.CPU.State[aarch64.PC] = ramBase + 0x8000
+		m.CPU.State[1] = ramBase + 0x9000
+		for i, op := range ops {
+			binary.LittleEndian.PutUint32(m.RAM[0x8000+4*i:], op)
+		}
+		mode := "interpreter"
+		if index == 0 {
+			mode = "native"
+		}
+		if err := m.EnableJIT(mode); err != nil {
+			t.Fatal(err)
+		}
+		m.kernelThreshold = 64
+		t.Cleanup(m.CloseJIT)
+	}
+	return machines
+}
+
+func TestNativeDAIFMasksAndReadForwardingAllImmediates(t *testing.T) {
+	for mask := uint32(0); mask < 16; mask++ {
+		ops := []uint32{0xd51b4220, 0xd53b4222, 0xd50340df | mask<<8, 0xd53b4223, 0xd50340ff | mask<<8, 0xd53b4224, 0x17fffffa}
+		machines := daifMachines(t, ops)
+		for _, m := range machines {
+			m.CPU.State[0] = 0xaaaaaaaaaaaaaaaa
+		}
+		for _, budget := range []uint64{8192, 1, 2, 3, 4, 63, 65} {
+			for _, m := range machines {
+				runSystemReadBudget(t, m, budget)
+			}
+			compareSystemReadMachines(t, machines[0], machines[1])
+		}
+		if machines[0].JIT.Stats.Native <= machines[0].CPU.Retired*3/4 {
+			t.Fatal("DAIF writes stayed interpreted", mask, machines[0].JIT.Stats)
+		}
+	}
+}
+
+func TestNativeDAIFUnmaskPendingIRQReturnsBeforeNextInstruction(t *testing.T) {
+	for _, op := range []uint32{0xd50342ff, 0xd51b4220} {
+		machines := daifMachines(t, []uint32{op, 0x91000421, 0x17fffffe})
+		for _, m := range machines {
+			runSystemReadBudget(t, m, 8192)
+		}
+		for _, m := range machines {
+			m.setPstate(0x3c5)
+			m.CPU.State[aarch64.PC] = ramBase + 0x8000
+			m.CPU.State[0] = 0
+			m.DistControl, m.CPUControl = 1, 1
+			m.IRQEnabled[27] = true
+			m.Sys[0xdf19], m.Sys[0xdf1a] = 1, 0
+			m.Sys[0xc600] = ramBase + 0x10000
+			retired, register := m.CPU.Retired, m.CPU.State[1]
+			used, err := m.RunQuantum(64)
+			if err != nil || used != 1 || m.CPU.Retired != retired+1 || m.CPU.State[aarch64.PC] != ramBase+0x8004 || m.CPU.State[1] != register || m.Pstate&0x80 != 0 {
+				t.Fatal("unmask did not return before next instruction", used, err)
+			}
+			retired = m.CPU.Retired
+			used, err = m.RunQuantum(64)
+			if err != nil || used != 1 || m.CPU.Retired != retired || m.Sys[0xc201] != ramBase+0x8004 || m.CPU.State[1] != register {
+				t.Fatal("pending IRQ delayed", used, err)
+			}
+		}
+		compareSystemReadMachines(t, machines[0], machines[1])
+	}
+}
+
+func TestNativeDAIFMaskSurvivesFollowingMemoryFault(t *testing.T) {
+	machines := []*Machine{jitKernelMachine(t, "native"), jitKernelMachine(t, "interpreter")}
+	for _, m := range machines {
+		ops := []uint32{0xd5034fdf, 0xf9000020, 0x17fffffe}
+		for i, op := range ops {
+			binary.LittleEndian.PutUint32(m.RAM[reviewData+uint64(4*i):], op)
+		}
+		runSystemReadBudget(t, m, 8192)
+	}
+	nativeBefore := machines[0].JIT.Stats.Native
+	for _, m := range machines {
+		m.Pstate = 5
+		m.CPU.State[aarch64.PC] = jitKernelVA
+		m.CPU.State[1] = jitKernelVA + 8192 // architecturally unmapped, not a host fixture error
+		m.Sys[0xc600] = jitKernelVA + 0x10000
+		// Data aborts consume an attempt, not a retired instruction. Do not
+		// continue at the exception vector trying to retire the fault itself.
+		attempted := uint64(0)
+		for attempted < 2 {
+			used, err := m.RunQuantum(64)
+			if err != nil || used == 0 || used > 2-attempted {
+				t.Fatal("imprecise fault attempt", used, err)
+			}
+			attempted += used
+		}
+	}
+	compareSystemReadMachines(t, machines[0], machines[1])
+	if machines[0].JIT.Stats.Native != nativeBefore+1 {
+		t.Fatal("fault test did not execute mask update natively")
+	}
+	if machines[0].Sys[0xc201] != jitKernelVA+4 || machines[0].Sys[0xc200]&0x3c0 != 0x3c0 {
+		t.Fatal("fault lost preceding native DAIF mask", machines[0].Sys)
+	}
+}
+
+func TestNativeDAIFWarmPrivilegeTrapAndLiveTimerBudget(t *testing.T) {
+	machines := daifMachines(t, []uint32{0xd5034fdf, 0xd5034fff, 0x91000421, 0x17fffffd})
+	for _, m := range machines {
+		runSystemReadBudget(t, m, 8192)
+	}
+	for _, m := range machines {
+		m.setPstate(0)
+		m.CPU.State[aarch64.PC] = ramBase + 0x8000
+		m.Sys[0xc600] = ramBase + 0x10000
+		if _, err := m.RunQuantum(1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	compareSystemReadMachines(t, machines[0], machines[1])
+	if machines[0].Sys[0xc290]>>26 != 0 {
+		t.Fatal("wrong immediate DAIF privilege syndrome")
+	}
+	machines = daifMachines(t, []uint32{0xd5034fdf, 0xd5034fff, 0x91000421, 0x17fffffd})
+	for _, m := range machines {
+		runSystemReadBudget(t, m, 8192)
+	}
+	for _, m := range machines {
+		m.Pstate = 5
+		m.CPU.State[aarch64.PC] = ramBase + 0x8000
+		m.DistControl, m.CPUControl = 1, 1
+		m.IRQEnabled[27] = true
+		m.Sys[0xdf19] = 1
+		m.Sys[0xdf1a] = m.Ticks + 2
+		m.Sys[0xc600] = ramBase + 0x10000
+		deadline := m.Ticks + 2
+		for m.Ticks < deadline {
+			used, err := m.RunQuantum(64)
+			if err != nil || used == 0 || m.Ticks > deadline {
+				t.Fatal("native DAIF crossed timer deadline", used, err, m.Ticks, deadline)
+			}
+		}
+		retired, register := m.CPU.Retired, m.CPU.State[1]
+		if used, err := m.RunQuantum(64); err != nil || used != 1 || m.CPU.Retired != retired || m.CPU.State[1] != register || m.Sys[0xc201] != ramBase+0x8008 {
+			t.Fatal("timer IRQ delayed after native unmask", used, err)
+		}
+	}
+	compareSystemReadMachines(t, machines[0], machines[1])
+}
+
+-- jit_domains.go --
+package arm64machine
+
+import (
+	"fmt"
+	"os"
+	"renvo.dev/internal/rfe/engine"
+)
+
+func (m *Machine) activeJIT() *engine.Engine {
+	if m.nativeDomain() != 0 && m.KernelJIT != nil {
+		return m.KernelJIT
+	}
+	return m.JIT
+}
+func (m *Machine) EnableSystemJIT(mode string) error {
+	cache, err := engine.SystemCachePreset(m.JITCache)
+	if err != nil {
+		return err
+	}
+	m.kernelThreshold = 256
+	m.NativeRAM.Profile = m.ProfileJIT
+	user := engine.DefaultEngineConfig()
+	user.Mode = mode
+	user.ProfileNative = m.ProfileJIT
+	user.ProfileNativeMonotonic = m.ProfileJIT
+	user.EvictCold, user.RecycleNative = true, true
+	user.DiscoveryThreshold = 8
+	user.MaxBlocks, user.NativeBytes = cache.UserBlocks, cache.UserBytes
+	kernel := user
+	kernel.DiscoveryThreshold = 64
+	kernel.MaxBlocks, kernel.NativeBytes = cache.KernelBlocks, cache.KernelBytes
+	kernel.MaxRegionInstructions = 64
+	first, err := m.newJIT(user)
+	if err != nil {
+		return err
+	}
+	second, err := m.newJIT(kernel)
+	if err != nil {
+		first.Close()
+		return err
+	}
+	m.JIT, m.KernelJIT = first, second
+	m.NativeRAM.MultipleArenas = true
+	return nil
+}
+
+// Close ends the machine/RAM lifetime; CloseJIT alone still permits interpreting.
+func (m *Machine) Close() error {
+	m.CloseJIT()
+	err := m.NativeRAM.Close()
+	m.RAM = nil
+	return err
+}
+
+func (m *Machine) CloseJIT() {
+	if m.JIT != nil {
+		m.JIT.Close()
+	}
+	if m.KernelJIT != nil {
+		m.KernelJIT.Close()
+	}
+}
+func (m *Machine) printKernelJITStats() {
+	if m.KernelJIT != nil {
+		fmt.Fprintf(os.Stderr, "jit kernel stats=%+v cached=%d\n", m.KernelJIT.Stats, m.KernelJIT.CachedBlocks())
+	}
+}
+
+-- jit_domains_test.go --
+package arm64machine
+
+import (
+	"renvo.dev/emulators/aarch64"
+	"testing"
+)
+
+func TestSystemJITSeparateDomainsDifferential(t *testing.T) {
+	native, interpreted := jitKernelMachine(t, "native"), jitKernelMachine(t, "interpreter")
+	for _, item := range []struct {
+		m    *Machine
+		mode string
+	}{{native, "native"}, {interpreted, "interpreter"}} {
+		item.m.CloseJIT()
+		if err := item.m.EnableSystemJIT(item.mode); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(item.m.CloseJIT)
+	}
+	for cycle := 0; cycle < 3; cycle++ {
+		for _, m := range []*Machine{native, interpreted} {
+			m.setPstate(5)
+			m.CPU.State[aarch64.PC] = jitKernelVA
+			m.CPU.State[1] = jitKernelVA + 4096
+			jitRun(t, m, 16384)
+			m.setPstate(0)
+			m.CPU.State[aarch64.PC] = reviewVA
+			m.CPU.State[1] = 0x5000
+			jitRun(t, m, 16384)
+		}
+		if native.CPU.State != interpreted.CPU.State || native.CPU.Retired != interpreted.CPU.Retired || native.Ticks != interpreted.Ticks {
+			t.Fatal("domain switch differs from interpreter")
+		}
+	}
+	if native.JIT.Stats.NativeMemory == 0 || native.KernelJIT.Stats.NativeMemory == 0 {
+		t.Fatal("both domain arenas must execute actual native RAM operations")
+	}
+	if native.JIT.CachedBlocks()+native.KernelJIT.CachedBlocks() > 4096 || native.JIT.Stats.NativeBytes > 6<<20 || native.KernelJIT.Stats.NativeBytes > 2<<20 {
+		t.Fatal("system JIT expanded aggregate resource limits")
+	}
+}
+
+-- jit_kernel_test.go --
+package arm64machine
+
+import (
+	"encoding/binary"
+	"renvo.dev/emulators/aarch64"
+	"testing"
+)
+
+const jitKernelVA = uint64(0xffff800000004000)
+
+func jitKernelMachine(t *testing.T, mode string) *Machine {
+	m := jitMachine(t, mode)
+	m.kernelThreshold = 64
+	reviewWord(m, 0x1000+256*8, ramBase+0x2000|3)
+	m.Sys[0xc101] = ramBase + 0x1000
+	m.setPstate(5)
+	m.flush()
+	m.CPU.State[aarch64.PC] = jitKernelVA
+	m.CPU.State[1] = jitKernelVA + 4096
+	return m
+}
+func TestKernelJITHighVirtualRAMAndLowBankSlowPath(t *testing.T) {
+	native, interpreted := jitKernelMachine(t, "native"), jitKernelMachine(t, "interpreter")
+	jitRun(t, native, 4096)
+	jitRun(t, interpreted, 4096)
+	if native.JIT.Stats.NativeMemory == 0 || native.CPU.State != interpreted.CPU.State || native.Ticks != interpreted.Ticks || binary.LittleEndian.Uint64(native.RAM[0x9000:]) != 1024 {
+		t.Fatal("high kernel JIT is not equivalent to interpreter")
+	}
+	if native.CPU.State[1] != jitKernelVA+4096 || native.CPU.State[aarch64.PC] != jitKernelVA {
+		t.Fatal("native address key leaked into architectural registers")
+	}
+	// Kernel accesses to low user addresses must use their ORIGINAL address,
+	// not silently gain access to the high bank's cached RAM descriptor.
+	native.CPU.State[1] = 0x5000
+	x := native.CPU.State[0]
+	jitRun(t, native, 4)
+	if native.CPU.State[0] != x+1 || native.CPU.State[2] != x+1 || native.CPU.State[1] != 0x5000 {
+		t.Fatal("kernel low-bank access was redirected")
+	}
+	native.CPU.State[1] = jitKernelVA + 4096 + 4092
+	x = native.CPU.State[0]
+	jitRun(t, native, 2)
+	if native.CPU.State[0] != x+1 || native.Sys[0xc201] != jitKernelVA+4 || native.Sys[0xc300] != jitKernelVA+8192 {
+		t.Fatal("high kernel fault lost original VA or precise PC")
+	}
+}
+
+-- jit_native_clock_test.go --
+package arm64machine
+
+import (
+	"encoding/binary"
+	"renvo.dev/emulators/aarch64"
+	"testing"
+)
+
+func TestNativeCounterReadsExactPrefixesWrapAndPrivilege(t *testing.T) {
+	machines := daifMachines(t, []uint32{0xd53be040, 0xd53be022, 0x91000484, 0xd53be05f, 0x17fffffc})
+	for _, m := range machines {
+		m.Ticks = ^uint64(0) - 200
+	}
+	for _, budget := range []uint64{8192, 1, 2, 3, 65, 1024} {
+		for _, m := range machines {
+			runSystemReadBudget(t, m, budget)
+		}
+		compareSystemReadMachines(t, machines[0], machines[1])
+	}
+	if machines[0].JIT.Stats.Native <= machines[0].CPU.Retired*3/4 {
+		t.Fatal("counter reads stayed interpreted")
+	}
+	for _, m := range machines {
+		m.Ticks += 5000
+		m.CPU.State[aarch64.PC] = ramBase + 0x8000
+		runSystemReadBudget(t, m, 64)
+	}
+	compareSystemReadMachines(t, machines[0], machines[1])
+	// The conservative native EL guard must preserve both an allowed EL0 read
+	// and an actual forbidden read's architectural syndrome at warmed code.
+	for _, allow := range []uint64{2, 0} {
+		for _, m := range machines {
+			m.setPstate(0x3c0)
+			m.Sys[0xc708] = allow
+			m.Sys[0xc600] = ramBase + 0x10000
+			m.CPU.State[aarch64.PC] = ramBase + 0x8000
+			if _, err := m.RunQuantum(1); err != nil {
+				t.Fatal(err)
+			}
+		}
+		compareSystemReadMachines(t, machines[0], machines[1])
+		if allow == 0 && machines[0].Sys[0xc290]>>26 != 0x18 {
+			t.Fatal("forbidden EL0 clock read did not trap")
+		}
+	}
+	// A following memory abort cannot replay a previously read timestamp.
+	machines = []*Machine{jitKernelMachine(t, "native"), jitKernelMachine(t, "interpreter")}
+	for _, m := range machines {
+		for i, op := range []uint32{0xd53be040, 0xf9000020, 0x17fffffe} {
+			binary.LittleEndian.PutUint32(m.RAM[reviewData+uint64(4*i):], op)
+		}
+		runSystemReadBudget(t, m, 8192)
+		m.CPU.State[aarch64.PC] = jitKernelVA
+		m.CPU.State[1] = jitKernelVA + 8192
+		m.Sys[0xc600] = jitKernelVA + 0x10000
+		attempted := uint64(0)
+		for attempted < 2 {
+			used, err := m.RunQuantum(64)
+			if err != nil || used == 0 || used > 2-attempted {
+				t.Fatal("counter fault progress", used, err)
+			}
+			attempted += used
+		}
+	}
+	compareSystemReadMachines(t, machines[0], machines[1])
+	if machines[0].Sys[0xc201] != jitKernelVA+4 {
+		t.Fatal("clock read replayed before fault")
+	}
+}
+
+-- jit_native_tpidr_test.go --
+package arm64machine
+
+import (
+	"renvo.dev/emulators/aarch64"
+	"testing"
+)
+
+func TestNativeTPIDREL1RefreshWritesDiscardAndPrivilege(t *testing.T) {
+	machines := daifMachines(t, []uint32{0xd538d082, 0xd518d081, 0xd538d083, 0xd538d09f, 0x17fffffc})
+	for _, m := range machines {
+		m.Sys[0xc684] = 0x8877665544332211
+		m.CPU.State[1] = 0x123456789abcdef0
+	}
+	for _, budget := range []uint64{8192, 1, 2, 3, 4, 65} {
+		for _, m := range machines {
+			runSystemReadBudget(t, m, budget)
+		}
+		compareSystemReadMachines(t, machines[0], machines[1])
+	}
+	if machines[0].JIT.Stats.Native <= machines[0].CPU.Retired/2 {
+		t.Fatal("thread-pointer reads stayed interpreted")
+	}
+	for _, m := range machines {
+		m.Sys[0xc684] = 0x5a5a5a5a5a5a5a5a
+		m.CPU.State[aarch64.PC] = ramBase + 0x8000
+		runSystemReadBudget(t, m, 1)
+	}
+	compareSystemReadMachines(t, machines[0], machines[1])
+	if machines[0].CPU.State[2] != 0x5a5a5a5a5a5a5a5a {
+		t.Fatalf("native TPIDR read cached value: x2=%x sys=%x pc=%x pstate=%x", machines[0].CPU.State[2], machines[0].Sys[0xc684], machines[0].CPU.State[aarch64.PC], machines[0].Pstate)
+	}
+	for _, offset := range []uint64{0, 12} {
+		for _, m := range machines {
+			m.setPstate(0x3c0)
+			m.Sys[0xc600] = ramBase + 0x10000
+			m.CPU.State[aarch64.PC] = ramBase + 0x8000 + offset
+			if _, err := m.RunQuantum(1); err != nil {
+				t.Fatal(err)
+			}
+		}
+		compareSystemReadMachines(t, machines[0], machines[1])
+		if machines[0].Sys[0xc290]>>26 != 0x18 {
+			t.Fatal("TPIDR EL0/XZR privilege check missing")
+		}
+	}
+}
+
+-- jit_ordered.go --
+package arm64machine
+
+import (
+	"renvo.dev/emulators/aarch64"
+	"renvo.dev/internal/rfe/engine"
+	emu "renvo.dev/internal/rfe/runtime"
+)
+
+// The single-CPU architectural interpreter serializes all RAM operations and
+// models these barriers as no-ops. Device accesses and page-table/code stores
+// still exit before the architectural slow path; exclusives are NOT admitted.
+func nativeSystemBarrier(op uint32) bool {
+	v := op & 0xfffff0ff
+	return v == 0xd503309f || v == 0xd50330bf || v == 0xd50330df || nativePrefetch(op)
+}
+
+// Like the single-CPU interpreter, prefetch hints do not perform a guest data
+// access, change registers, or raise data aborts for the hinted address.
+func nativePrefetch(op uint32) bool {
+	return op&0x3f000000 == 0x18000000 && op>>30 == 3 ||
+		(op&0x3b000000 == 0x39000000 || op&0x3b000000 == 0x38000000) && op>>22&3 == 2 && op>>30 == 3
+}
+func nativeOrderedScalar(op uint32) bool {
+	return op&0x3fbffc00 == 0x089ffc00 // STLR/LDAR; no pairs or exclusive status
+}
+func lowerSystemScalar(b *emu.Builder, ins engine.Instruction, completed int) bool {
+	op := uint32(ins.Bits)
+	if nativeSystemBarrier(op) {
+		b.Store(aarch64.PC, b.Constant(ins.PC+4))
+		return true
+	}
+	if !nativeOrderedScalar(op) {
+		return false
+	}
+	n := 1 << (op >> 30)
+	rn, rt := int(op>>5&31), int(op&31)
+	b.Store(aarch64.PC, b.Constant(ins.PC))
+	b.Checkpoint(aarch64.StateWords, completed)
+	address := b.Load(rn) // register 31 is SP only for the address
+	b.Guard(b.Binary(emu.Equal, b.Binary(emu.And, address, b.Constant(uint64(n-1))), b.Constant(0)))
+	if op>>22&1 != 0 {
+		v := b.MemoryLoad(address, int(n))
+		if rt != 31 {
+			b.Store(rt, v)
+		}
+	} else {
+		v := b.Constant(0)
+		if rt != 31 {
+			v = b.Load(rt)
+		}
+		b.MemoryStore(address, v, int(n))
+	}
+	b.Store(aarch64.PC, b.Constant(ins.PC+4))
+	return true
+}
+
+-- jit_ordered_test.go --
+package arm64machine
+
+import (
+	"bytes"
+	"encoding/binary"
+	"renvo.dev/emulators/aarch64"
+	"testing"
+)
+
+func TestOrderedNativeScalarBarrierWidthsAndAlignment(t *testing.T) {
+	for size := uint32(0); size < 4; size++ {
+		for _, zero := range []bool{false, true} {
+			var machines [2]*Machine
+			for i, mode := range []string{"native", "interpreter"} {
+				m := reviewMachine(t)
+				machines[i] = m
+				m.setPstate(5)
+				m.CPU.State[aarch64.PC] = ramBase + 0x8000
+				m.CPU.State[1] = ramBase + 0x9000
+				m.CPU.State[0] = 0x1122334455667788
+				rt := uint32(0)
+				if zero {
+					rt = 31
+				}
+				ops := []uint32{size<<30 | 0x089ffc20 | rt, 0xd5033abf, size<<30 | 0x08dffc22, 0x91000400, 0x17fffffc}
+				for at, op := range ops {
+					binary.LittleEndian.PutUint32(m.RAM[0x8000+4*at:], op)
+				}
+				if err := m.EnableJIT(mode); err != nil {
+					t.Fatal(err)
+				}
+				m.kernelThreshold = 64
+				t.Cleanup(m.CloseJIT)
+			}
+			for _, budget := range []uint64{4096, 1, 2, 3, 63, 65} {
+				for _, m := range machines {
+					end := m.CPU.Retired + budget
+					for m.CPU.Retired < end {
+						if _, err := m.RunQuantum(end - m.CPU.Retired); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+				native, reference := machines[0], machines[1]
+				if native.CPU.State != reference.CPU.State || native.CPU.Retired != reference.CPU.Retired || native.Ticks != reference.Ticks ||
+					!bytes.Equal(native.RAM[0x9000:0xa000], reference.RAM[0x9000:0xa000]) {
+					t.Fatal("ordered/barrier native differs", size, zero, budget)
+				}
+			}
+			if machines[0].JIT.Stats.NativeMemory == 0 {
+				t.Fatal("ordered accesses never native")
+			}
+			if size != 0 {
+				for _, m := range machines {
+					m.CPU.State[aarch64.PC] = ramBase + 0x8000
+					m.CPU.State[1] = ramBase + 0x9001
+					m.Sys[0xc600] = ramBase + 0x10000
+				}
+				before := machines[0].CPU.Retired
+				for _, m := range machines {
+					if _, err := m.RunQuantum(1); err != nil {
+						t.Fatal(err)
+					}
+				}
+				a, b := machines[0], machines[1]
+				if a.CPU.State != b.CPU.State || a.CPU.Retired != before || b.CPU.Retired != before || a.Sys[0xc300] != ramBase+0x9001 ||
+					a.Sys[0xc290] != b.Sys[0xc290] || !bytes.Equal(a.RAM[0x9000:0xa000], b.RAM[0x9000:0xa000]) {
+					t.Fatal("ordered alignment fault changed progress")
+				}
+			}
+		}
+	}
+}
+
+-- jit_prefetch_cached_test.go --
+package arm64machine
+
+import (
+	"encoding/binary"
+	"renvo.dev/emulators/aarch64"
+	"testing"
+)
+
+func TestNativePrefetchHintsDoNotAccessUnmappedData(t *testing.T) {
+	machines := []*Machine{jitMachine(t, "native"), jitMachine(t, "interpreter")}
+	ops := []uint32{0xf9800011, 0xf8a06811, 0xf8800011, 0xd8000011, 0x91000421, 0x17fffffb}
+	for _, m := range machines {
+		for i, op := range ops {
+			binary.LittleEndian.PutUint32(m.RAM[reviewData+uint64(4*i):], op)
+		}
+		m.CPU.State[0] = ^uint64(0) - 7 // no mapped RAM or device at the hinted address
+		m.CPU.State[1] = 0
+	}
+	for _, budget := range []uint64{8192, 1, 2, 3, 65} {
+		for _, m := range machines {
+			jitRun(t, m, budget)
+		}
+		compareSystemReadMachines(t, machines[0], machines[1])
+	}
+	if machines[0].JIT.Stats.Native <= machines[0].CPU.Retired/2 {
+		t.Fatal("prefetch hints stayed interpreted")
+	}
+	if machines[0].Sys[0xc290] != 0 || machines[0].Sys[0xc300] != 0 {
+		t.Fatal("hint raised data abort")
+	}
+	// Revoking execution is different from the hinted-data address: code still
+	// needs execute permission and an exact version even for a semantic no-op.
+	for _, m := range machines {
+		m.CPU.State[aarch64.PC] = reviewVA
+		reviewWord(m, 0x4000+4*8, ramBase+reviewData|3|1<<10|1<<6|1<<54)
+		m.flush()
+		if _, err := m.RunQuantum(1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	compareSystemReadMachines(t, machines[0], machines[1])
+	if machines[0].Sys[0xc201] != reviewVA {
+		t.Fatal("prefetch bypassed execute revoke")
+	}
+}
+
+func TestCachedSystemOpcodesKeepTimePrivilegeAndControlState(t *testing.T) {
+	machines := []*Machine{reviewMachine(t), reviewMachine(t)}
+	for index, m := range machines {
+		m.setPstate(0x3c5)
+		m.CPU.State[aarch64.PC] = ramBase + 0x8000
+		m.Sys[0xc684] = 0x8877665544332211
+		ops := []uint32{0xd53be040, 0xd538d082, 0xd5034fdf, 0xd51b4229, 0x17fffffc}
+		for i, op := range ops {
+			binary.LittleEndian.PutUint32(m.RAM[0x8000+4*i:], op)
+		}
+		mode := "interpreter"
+		if index == 0 {
+			mode = "native"
+		}
+		if err := m.EnableJIT(mode); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(m.CloseJIT)
+	}
+	for _, budget := range []uint64{8192, 1, 2, 4, 65, 1024} {
+		for _, m := range machines {
+			runSystemReadBudget(t, m, budget)
+		}
+		compareSystemReadMachines(t, machines[0], machines[1])
+	}
+	// Change a live register after warmup. Cached opcodes must not cache values.
+	for _, m := range machines {
+		m.Sys[0xc684] = 0x123456789abcdef0
+		m.Ticks += 5000
+		runSystemReadBudget(t, m, 100)
+	}
+	compareSystemReadMachines(t, machines[0], machines[1])
+	if machines[0].CPU.State[2] != 0x123456789abcdef0 || machines[0].JIT.Stats.CodeReads >= machines[0].CPU.Retired/4 {
+		t.Fatal("system opcode was not reused through checked cache")
+	}
+}
+
+-- jit_revalidation_test.go --
+package arm64machine
+
+import "testing"
+
+func TestUserJITMappingFlushRetainsUnmodifiedNativeCode(t *testing.T) {
+	m := jitMachine(t, "native")
+	jitRun(t, m, 4096)
+	// Settle legitimate side-entry promotion before checking repeated flushes.
+	m.flush()
+	jitRun(t, m, 4096)
+	bytes, promotions, invalidations := m.JIT.Stats.NativeBytes, m.JIT.Stats.Promotions, m.JIT.Stats.Invalidations
+	native := m.JIT.Stats.Native
+	for i := 0; i < 128; i++ {
+		m.flush()
+		jitRun(t, m, 64)
+	}
+	if m.JIT.Stats.NativeBytes != bytes || m.JIT.Stats.Promotions != promotions || m.JIT.Stats.Invalidations != invalidations || m.JIT.Stats.Native <= native {
+		t.Fatalf("mapping flush recompiled unchanged physical text: %+v", m.JIT.Stats)
+	}
+}
+
+-- jit_slice_test.go --
+package arm64machine
+
+import "testing"
+
+func TestNativeSessionUsesBoundedCallerSlice(t *testing.T) {
+	m := jitMachine(t, "native")
+	jitRun(t, m, 8192)
+	before := m.CPU.Retired
+	used, err := m.RunQuantum(65536)
+	if err != nil || used > 65536 || m.CPU.Retired-before != used || used <= 1024 {
+		t.Fatal("native session failed to amortize within caller/host bounds", used, err)
+	}
+}
+
+-- jit_system_read.go --
+package arm64machine
+
+import (
+	"renvo.dev/emulators/aarch64"
+	"renvo.dev/internal/rfe/engine"
+	emu "renvo.dev/internal/rfe/runtime"
+)
+
+func nativeSystemRead(op uint32) bool {
+	return op&0xffffffe0 == 0xd53b4220 || op&0xffffffe0 == 0xd5384100 || op&0xffffffe0 == 0xd53be020 || op&0xffffffe0 == 0xd53be040 || op&0xffffffe0 == 0xd538d080
+}
+func lowerSystemRead(b *emu.Builder, ins engine.Instruction, completed int) bool {
+	return lowerClockedSystemRead(b, ins, completed, true)
+}
+func lowerClockedSystemRead(b *emu.Builder, ins engine.Instruction, completed int, deterministic bool) bool {
+	op := uint32(ins.Bits)
+	if !nativeSystemRead(op) {
+		return false
+	}
+	// Commit original PC and all writable architectural words before the EL0
+	// trap guard. Extra adapter words are immutable, so existing scalar/pair
+	// checkpoints over StateWords remain complete for architectural effects.
+	b.Store(aarch64.PC, b.Constant(ins.PC))
+	b.Checkpoint(aarch64.StateWords, completed)
+	pstate := b.Load(systemPstate)
+	privileged := b.Binary(emu.And, pstate, b.Constant(0xc))
+	b.Guard(b.Binary(emu.Less, b.Constant(0), privileged))
+	if rt := int(op & 31); rt != 31 {
+		var value emu.Value
+		if op&0xffffffe0 == 0xd53be020 || op&0xffffffe0 == 0xd53be040 {
+			value = b.Load(systemTime)
+			if deterministic {
+				value = b.Elapsed(value, 1, completed)
+			}
+		} else if op&0xffffffe0 == 0xd538d080 {
+			value = b.Load(systemTPIDR)
+		} else if op&0xffffffe0 == 0xd53b4220 {
+			value = b.Binary(emu.And, pstate, b.Constant(0x3c0))
+		} else {
+			// SP_EL0 aliases the live SP when SPSel==0, not the saved bank.
+			useLive := b.Binary(emu.Equal, b.Binary(emu.And, pstate, b.Constant(1)), b.Constant(0))
+			value = b.Choose(useLive, b.Load(aarch64.SP), b.Load(systemSP0))
+		}
+		b.Store(rt, value)
+	}
+	b.Store(aarch64.PC, b.Constant(ins.PC+4))
+	return true
+}
+
+-- jit_system_read_test.go --
+package arm64machine
+
+import (
+	"encoding/binary"
+	"reflect"
+	"renvo.dev/emulators/aarch64"
+	"testing"
+)
+
+func compareSystemReadMachines(t *testing.T, a, b *Machine) {
+	t.Helper()
+	if a.CPU.State != b.CPU.State || a.CPU.Retired != b.CPU.Retired || a.Ticks != b.Ticks ||
+		a.Instructions != b.Instructions || a.Pstate != b.Pstate || a.SP != b.SP || !reflect.DeepEqual(a.Sys, b.Sys) {
+		t.Fatalf("system read native mismatch: state=%v/%v retired=%d/%d ticks=%d/%d pstate=%x/%x SP=%v/%v", a.CPU.State, b.CPU.State, a.CPU.Retired, b.CPU.Retired, a.Ticks, b.Ticks, a.Pstate, b.Pstate, a.SP, b.SP)
+	}
+}
+func runSystemReadBudget(t *testing.T, m *Machine, budget uint64) {
+	t.Helper()
+	end := m.CPU.Retired + budget
+	for m.CPU.Retired < end {
+		if _, err := m.RunQuantum(end - m.CPU.Retired); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+func TestNativeSystemReadRefreshBanksWritesAndUserTrap(t *testing.T) {
+	for _, selectSP := range []uint64{0, 1} {
+		var machines [2]*Machine
+		for i, mode := range []string{"native", "interpreter"} {
+			m := reviewMachine(t)
+			machines[i] = m
+			m.setPstate(4 | selectSP | 0x3c0)
+			m.CPU.State[aarch64.PC] = ramBase + 0x8000
+			m.CPU.State[aarch64.SP] = ramBase + 0x18000
+			m.SP[0] = ramBase + 0x19000
+			m.CPU.State[0], m.CPU.State[1] = 0x3c0, ramBase+0x1a000
+			// Read before and after interpreted DAIF/SP writes; increment live
+			// SP within native code before another SP_EL0 read; XZR discards.
+			ops := []uint32{0xd53b4222, 0xd51b4220, 0xd53b4223, 0xd5384104,
+				0xd5184101, 0xd5384105, 0x910043ff, 0xd5384106,
+				0xd53b423f, 0xd538411f, 0x17fffff6}
+			for j, op := range ops {
+				binary.LittleEndian.PutUint32(m.RAM[0x8000+4*j:], op)
+			}
+			if err := m.EnableJIT(mode); err != nil {
+				t.Fatal(err)
+			}
+			m.kernelThreshold = 64
+			t.Cleanup(m.CloseJIT)
+		}
+		for _, budget := range []uint64{8192, 1, 2, 3, 4, 63, 65, 1024} {
+			for _, m := range machines {
+				runSystemReadBudget(t, m, budget)
+			}
+			compareSystemReadMachines(t, machines[0], machines[1])
+		}
+		if machines[0].JIT.Stats.Native <= machines[0].CPU.Retired/2 {
+			t.Fatal("system reads did not run natively")
+		}
+		// Change inputs after code is warm, without changing any code bytes.
+		for _, m := range machines {
+			m.Pstate = m.Pstate&^0x3c0 | 0x280
+			m.SP[0] = ramBase + 0x1b000
+			m.CPU.State[0], m.CPU.State[1] = 0x180, ramBase+0x1c000
+		}
+		for _, m := range machines {
+			runSystemReadBudget(t, m, 511)
+		}
+		compareSystemReadMachines(t, machines[0], machines[1])
+		for _, op := range []uint32{0xd53b4222, 0xd5384104} {
+			// Reuse warmed code in EL0. The privilege guard must exit at the
+			// original PC and preserve the interpreter's trap syndrome/progress.
+			for _, m := range machines {
+				m.setPstate(0x3c0)
+				m.Sys[0xc600] = ramBase + 0x10000
+				m.CPU.State[aarch64.PC] = ramBase + 0x8000
+				if op == 0xd5384104 {
+					m.CPU.State[aarch64.PC] += 12
+				}
+				if _, err := m.RunQuantum(1); err != nil {
+					t.Fatal(err)
+				}
+			}
+			compareSystemReadMachines(t, machines[0], machines[1])
+			if machines[0].Sys[0xc290]>>26 != 0x18 {
+				t.Fatal("EL0 system read did not trap")
+			}
+		}
+	}
+}
+
+-- jit_test.go --
+package arm64machine
+
+import (
+	"encoding/binary"
+	"renvo.dev/emulators/aarch64"
+	"testing"
+)
+
+func jitMachine(t *testing.T, mode string) *Machine {
+	m := reviewMachine(t)
+	reviewTables(m, 3|1<<10|1<<6)
+	reviewWord(m, 0x4000+5*8, ramBase+0x9000|3|1<<10|1<<6|1<<54)
+	m.setPstate(0)
+	m.CPU.State[aarch64.PC] = reviewVA
+	m.CPU.State[1] = 0x5000
+	for i, op := range []uint32{0x91000400, 0xf9000020, 0xf9400022, 0x17fffffd} {
+		binary.LittleEndian.PutUint32(m.RAM[reviewData+uint64(i*4):], op)
+	}
+	if err := m.EnableJIT(mode); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { m.JIT.Close() })
+	if mode == "native" && !m.JIT.NativeAvailable() {
+		t.Skip("native host unavailable")
+	}
+	return m
+}
+func jitRun(t *testing.T, m *Machine, n uint64) {
+	t.Helper()
+	for n != 0 {
+		used, err := m.RunQuantum(n)
+		if err != nil || used == 0 || used > n {
+			t.Fatalf("progress %d/%d: %v", used, n, err)
+		}
+		n -= used
+	}
+}
+func TestUserJITDifferentialAndAliasInvalidation(t *testing.T) {
+	interpreted, native := jitMachine(t, "interpreter"), jitMachine(t, "native")
+	jitRun(t, interpreted, 4096)
+	jitRun(t, native, 4096)
+	if native.JIT.Stats.Native == 0 || native.JIT.Stats.NativeMemory == 0 {
+		t.Fatal("native memory tier never executed")
+	}
+	if native.CPU.State != interpreted.CPU.State || native.CPU.Retired != 4096 || native.Ticks != interpreted.Ticks || native.Instructions != interpreted.Instructions || binary.LittleEndian.Uint64(native.RAM[0x9000:]) != 1024 {
+		t.Fatal("native/interpreter state or time differs")
+	}
+	// Physical code mutation, including a different VA alias, must revoke the
+	// old translated ADD and prevent native writable aliases to observed code.
+	native.NativeRAM.NativeRefill(reviewVA)
+	if p := native.NativeRAM.NativeContext().Pages[(reviewVA>>12)&63]; p.Permissions&4 == 0 {
+		t.Fatal("code alias not write guarded")
+	}
+	if err := native.physicalWrite(ramBase+reviewData, 4, 0x91000800); err != nil {
+		t.Fatal(err)
+	}
+	x := native.CPU.State[0]
+	jitRun(t, native, 4)
+	if native.CPU.State[0] != x+2 {
+		t.Fatal("stale code executed after physical alias write")
+	}
+}
+func TestUserJITPreciseFaultAndTimerBoundary(t *testing.T) {
+	m := jitMachine(t, "native")
+	jitRun(t, m, 4096)
+	// A cross-page store faults after ADD; neither the ADD nor any preceding
+	// store may be replayed. The valid bytes before the boundary stay untouched.
+	m.CPU.State[1] = 0x5ffc
+	old := binary.LittleEndian.Uint32(m.RAM[0x9ffc:])
+	before := m.CPU.State[0]
+	jitRun(t, m, 2)
+	if m.CPU.State[0] != before+1 || m.Sys[0xc201] != reviewVA+4 || m.Sys[0xc300] != 0x6000 || binary.LittleEndian.Uint32(m.RAM[0x9ffc:]) != old {
+		t.Fatal("imprecise native store fault")
+	}
+	m = jitMachine(t, "native")
+	jitRun(t, m, 4096)
+	m.DistControl, m.CPUControl = 1, 1
+	m.IRQEnabled[27] = true
+	m.Sys[0xdf19] = 1
+	deadline := m.Ticks + 37
+	m.Sys[0xdf1a] = deadline
+	for m.Ticks < deadline {
+		_, err := m.RunQuantum(1000)
+		if err != nil || m.Ticks > deadline || m.Pstate&0xc != 0 {
+			t.Fatal("JIT crossed timer boundary", err)
+		}
+	}
+	pc, retired := m.CPU.State[aarch64.PC], m.CPU.Retired
+	used, err := m.RunQuantum(1000)
+	if err != nil || used != 1 || m.CPU.Retired != retired || m.Sys[0xc201] != pc || m.CPU.State[aarch64.PC] != 0x480 {
+		t.Fatal("timer IRQ was delayed past a guest instruction", err)
+	}
+}
+func TestUserJITPermissionRevocationAndMMIO(t *testing.T) {
+	m := jitMachine(t, "native")
+	jitRun(t, m, 4096)
+	m.NativeRAM.NativeRefill(0x5000)
+	context := m.NativeRAM.NativeContext()
+	if context.Pages[5].Data == nil {
+		t.Fatal("data descriptor absent")
+	}
+	// Page-table stores revoke all writable aliases BEFORE bytes change.
+	pte := ramBase + 0x4000 + 5*8
+	if err := m.physicalWrite(pte, 8, ramBase+0x9000|3|1<<10|3<<6|1<<54); err != nil {
+		t.Fatal(err)
+	}
+	m.flush()
+	if context.Pages[5].Data != nil {
+		t.Fatal("permission change retained native descriptor")
+	}
+	x := m.CPU.State[0]
+	jitRun(t, m, 2)
+	if m.CPU.State[0] != x+1 || m.Sys[0xc201] != reviewVA+4 || m.Sys[0xc300] != 0x5000 {
+		t.Fatal("readonly store escaped to native RAM")
+	}
+	m = jitMachine(t, "native")
+	reviewWord(m, 0x4000+5*8, uartBase|3|1<<10|1<<6)
+	m.flush()
+	m.NativeRAM.NativeRefill(0x5000)
+	if m.NativeRAM.NativeContext().Pages[5].Data != nil {
+		t.Fatal("MMIO admitted as host RAM")
+	}
+}
+
+-- machine.go --
+// Package arm64machine models a single-core AArch64 Linux system.
+// The 4 KiB EL1 page-table walker is adapted from TinyRangeX/trex
+// emulator/arm64/mmu.go (Apache-2.0; see the repository LICENSE).
+package arm64machine
+
+import (
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"io"
+	"math/bits"
+	"os"
+	"renvo.dev/emulators/aarch64"
+	"renvo.dev/internal/rfe/engine"
+	"renvo.dev/internal/rfe/systemclock"
+	"renvo.dev/internal/rfe/systemmemory"
+)
+
+const ramBase uint64 = 0x40000000
+const uartBase uint64 = 0x09000000
+const gicDist uint64 = 0x08000000
+const gicCPU uint64 = 0x08010000
+const timerFreq uint64 = 100000000
+
+type translationFault struct {
+	Address        uint64
+	Status         uint64
+	Write, Execute bool
+}
+
+func (f *translationFault) Error() string {
+	return fmt.Sprintf("translation fault VA=%#x status=%#x write=%t execute=%t", f.Address, f.Status, f.Write, f.Execute)
+}
+
+type tlbKey struct {
+	Page   uint64
+	Access uint8
+}
+type tlbFastEntry struct {
+	key      tlbKey
+	physical uint64
+	valid    bool
+}
+
+type Machine struct {
+	JITCache                              string // empty/default preserves correctness budgets; named performance presets are opt-in
+	ProfileJIT                            bool   // opt-in diagnostic perf symbols/JIT dump; disabled for scoring
+	NativeRAM                             *systemmemory.RAM
+	JIT                                   *engine.Engine
+	KernelJIT                             *engine.Engine
+	kernelThreshold                       uint64
+	adapter                               nativeCPU
+	CPU                                   aarch64.CPU
+	RAM                                   []byte
+	Out                                   io.Writer
+	Pstate                                uint64
+	SP                                    [2]uint64
+	Sys                                   map[uint32]uint64
+	Vectors                               [32][16]byte
+	TLB                                   map[tlbKey]uint64
+	fastTLB                               [256]tlbFastEntry
+	Ticks                                 uint64
+	Clock                                 *systemclock.Clock // nil preserves deterministic instruction timing
+	Instructions                          uint64
+	ExclusiveAddress                      uint64
+	ExclusiveSize                         int
+	Exclusive                             bool
+	SoftwarePending                       bool
+	IRQEnabled                            [128]bool
+	IRQPending                            [128]bool
+	IRQActive                             [128]bool
+	IRQPriority                           [128]byte
+	DistControl, CPUControl, PriorityMask uint32
+	UARTControl, UARTMask                 uint32
+	Input                                 []byte
+	Done                                  bool
+	ExitCode                              int
+	Trace                                 io.Writer
+}
+
+func New(memoryMiB int, out io.Writer) (*Machine, error) {
+	return newMachine(memoryMiB, out, false)
+}
+
+// NewWithDirectRAM explicitly owns mapped physical RAM until Close. Borrowed
+// RAM slices must not outlive the machine; ordinary New keeps Go RAM semantics.
+func NewWithDirectRAM(memoryMiB int, out io.Writer) (*Machine, error) {
+	return newMachine(memoryMiB, out, true)
+}
+
+func newMachine(memoryMiB int, out io.Writer, direct bool) (*Machine, error) {
+	if memoryMiB < 64 || memoryMiB > 2048 {
+		return nil, fmt.Errorf("memory must be 64..2048 MiB")
+	}
+	m := &Machine{Out: out, Pstate: 0x3c5, Sys: map[uint32]uint64{}, TLB: map[tlbKey]uint64{}, PriorityMask: 255}
+	m.CPU.Memory = m
+	if direct {
+		var err error
+		m.NativeRAM, err = systemmemory.NewDirect(memoryMiB<<20, m.nativeActive, m.nativeMapping)
+		if err != nil {
+			return nil, err
+		}
+		m.RAM = m.NativeRAM.Data
+	} else {
+		m.RAM = make([]byte, memoryMiB<<20)
+		m.NativeRAM = systemmemory.New(m.RAM, m.nativeActive, m.nativeMapping)
+	}
+	m.NativeRAM.ReadGuest, m.NativeRAM.WriteGuest = m.Read, m.Write
+	m.NativeRAM.Domain, m.NativeRAM.NativeAddress = m.nativeDomain, m.nativeAddress
+	m.Sys[0xc080] = 0x30d00800
+	m.Sys[0xc000] = 0x410fd034 // Arm Cortex-A53, baseline Armv8-A.
+	m.Sys[0xc005] = 0x80000000
+	m.Sys[0xc020] = 0x11 // EL0 and EL1 AArch64; base FP/ASIMD.
+	m.Sys[0xc028] = 0x6
+	m.Sys[0xc038] = 0x0f000005 // 48-bit PA, only 4 KiB translation granules.
+	m.Sys[0xd801] = 0x8444c004
+	m.Sys[0xd807] = 0x10 // DC ZVA is prohibited.
+	for i := range m.IRQPriority {
+		m.IRQPriority[i] = 128
+	}
+	return m, nil
+}
+func (m *Machine) r(i uint32) uint64 {
+	if i == 31 {
+		return 0
+	}
+	return m.CPU.State[i]
+}
+func (m *Machine) w(i uint32, v uint64, width int) {
+	if i == 31 {
+		return
+	}
+	if width == 32 {
+		v = uint64(uint32(v))
+	}
+	m.CPU.State[i] = v
+}
+func (m *Machine) flush() {
+	clear(m.TLB)
+	clear(m.fastTLB[:])
+	if m.NativeRAM != nil {
+		m.NativeRAM.ClearPageTableWatches()
+	}
+}
+func (m *Machine) setPstate(v uint64) {
+	old := m.Pstate
+	m.SP[m.Pstate&1] = m.CPU.State[aarch64.SP]
+	m.Pstate = v & 0x3ffffffff
+	m.CPU.State[aarch64.NZCV] = v & 0xf0000000
+	m.CPU.State[aarch64.SP] = m.SP[m.Pstate&1]
+	// translate keys BOTH TLB levels by exact access class and EL0 privilege.
+	// A Pstate/SP-bank/DAIF change does not change the translation roots or
+	// their permissions. Control-register writes and TLBI still flush both
+	// levels. Native descriptors still revoke on every privilege transition;
+	// a DAIF/NZCV/SP-bank change within the same EL changes no RAM authority.
+	if m.NativeRAM != nil && (old^m.Pstate)&0xc != 0 {
+		m.NativeRAM.ForgetData()
+	}
+}
+func (m *Machine) exception(ec, iss, pc uint64, irq bool) {
+	old := m.Pstate&^uint64(0xf0000000) | m.CPU.State[aarch64.NZCV]
+	offset := uint64(0)
+	if old&0xc == 0 {
+		offset = 0x400
+	} else if old&1 != 0 {
+		offset = 0x200
+	}
+	if irq {
+		offset += 0x80
+	}
+	m.Sys[0xc200], m.Sys[0xc201] = old, pc
+	if !irq {
+		m.Sys[0xc290] = ec<<26 | 1<<25 | iss
+	}
+	m.setPstate(0x3c5 | m.CPU.State[aarch64.NZCV])
+	m.CPU.State[aarch64.PC] = m.Sys[0xc600]&^2047 + offset
+	m.Exclusive = false
+}
+func (m *Machine) accessFault(err error, pc uint64) error {
+	var wrapped *aarch64.Exception
+	if errors.As(err, &wrapped) && wrapped.Cause != nil {
+		err = wrapped.Cause
+	}
+	var f *translationFault
+	if !errors.As(err, &f) {
+		return err
+	}
+	m.Sys[0xc300] = f.Address
+	ec := uint64(0x24)
+	if f.Execute {
+		ec = 0x20
+	}
+	if m.Pstate&0xc != 0 {
+		ec++
+	}
+	iss := f.Status
+	if f.Write {
+		iss |= 1 << 6
+	}
+	m.exception(ec, iss, pc, false)
+	return nil
+}
+func (m *Machine) translate(address uint64, write, execute bool) (uint64, error) {
+	if m.Sys[0xc080]&1 == 0 {
+		return address, nil
+	}
+	access := uint8(0)
+	if write {
+		access |= 1
+	}
+	if execute {
+		access |= 2
+	}
+	if m.Pstate&0xc == 0 {
+		access |= 4
+	}
+	key := tlbKey{address >> 12, access}
+	fast := &m.fastTLB[(key.Page^uint64(access)*37)&255]
+	if fast.valid && fast.key == key {
+		return fast.physical | address&4095, nil
+	}
+	if p, ok := m.TLB[key]; ok {
+		*fast = tlbFastEntry{key: key, physical: p, valid: true}
+		return p | address&4095, nil
+	}
+	// Evict before walking so this new translation re-establishes its table watches.
+	if len(m.TLB) >= 32768 {
+		m.flush()
+	}
+	fault := func(status uint64) (uint64, error) { return 0, &translationFault{address, status, write, execute} }
+	tcr := m.Sys[0xc102]
+	upper := address>>55&1 != 0
+	va := address
+	sz := tcr & 63
+	ttbr := m.Sys[0xc100]
+	disabled := tcr>>7&1 != 0
+	granule := tcr >> 14 & 3
+	if upper {
+		sz = tcr >> 16 & 63
+		ttbr = m.Sys[0xc101]
+		disabled = tcr>>23&1 != 0
+		granule = tcr >> 30 & 3
+		if granule == 2 {
+			granule = 0
+		} else {
+			granule = 3
+		}
+		if tcr>>38&1 != 0 {
+			va |= 0xff00000000000000
+		}
+	} else if tcr>>37&1 != 0 {
+		va &= 0x00ffffffffffffff
+	}
+	if granule != 0 || sz < 16 || sz > 39 {
+		return 0, fmt.Errorf("unsupported TCR_EL1 %#x", tcr)
+	}
+	vb := 64 - sz
+	high := va >> vb
+	expected := uint64(0)
+	if upper {
+		expected = (uint64(1) << sz) - 1
+	}
+	if high != expected {
+		return fault(0)
+	}
+	level := uint64(4) - (vb-12+8)/9
+	if disabled {
+		return fault(4 + level)
+	}
+	table := ttbr & 0x0000fffffffff000
+	ro, userDenied, pxn, uxn := false, false, false, false
+	for ; level <= 3; level++ {
+		shift := uint64(12 + 9*(3-level))
+		index := va >> shift & 511
+		if m.NativeRAM != nil && table+index*8 >= ramBase {
+			m.NativeRAM.MarkPageTable(table + index*8 - ramBase)
+		}
+		d, e := m.physicalRead(table+index*8, 8)
+		if e != nil {
+			return fault(0x14 + level)
+		}
+		kind := d & 3
+		if kind == 0 || kind == 2 || level == 0 && kind == 1 || level == 3 && kind != 3 {
+			return fault(4 + level)
+		}
+		if kind == 3 && level < 3 {
+			table = d & 0x0000fffffffff000
+			ro = ro || d>>62&1 != 0
+			userDenied = userDenied || d>>61&1 != 0
+			pxn = pxn || d>>59&1 != 0
+			uxn = uxn || d>>60&1 != 0
+			continue
+		}
+		if d>>10&1 == 0 {
+			return fault(8 + level)
+		}
+		ap := d >> 6 & 3
+		user := m.Pstate&0xc == 0
+		if write && (ro || ap&2 != 0) || user && (userDenied || ap&1 == 0) || execute && (!user && (pxn || d>>53&1 != 0) || user && (uxn || d>>54&1 != 0)) {
+			return fault(12 + level)
+		}
+		if execute && !ro && ap&2 == 0 && m.Sys[0xc080]>>19&1 != 0 {
+			return fault(12 + level)
+		}
+		mask := (uint64(1) << shift) - 1
+		pa := d&0x0000fffffffff000&^mask | va&mask
+		m.TLB[key] = pa &^ 4095
+		*fast = tlbFastEntry{key: key, physical: pa &^ 4095, valid: true}
+		return pa, nil
+	}
+	return fault(7)
+}
+func (m *Machine) Read(a uint64, n int, exec bool) (uint64, error) {
+	p, e := m.translate(a, false, exec)
+	if e != nil {
+		return 0, e
+	}
+	if a&4095+uint64(n) <= 4096 {
+		return m.physicalRead(p, n)
+	}
+	var v uint64
+	for i := 0; i < n; i++ {
+		p, e = m.translate(a+uint64(i), false, exec)
+		if e != nil {
+			return 0, e
+		}
+		b, e := m.physicalRead(p, 1)
+		if e != nil {
+			return 0, e
+		}
+		v |= b << uint(i*8)
+	}
+	return v, nil
+}
+func (m *Machine) Write(a uint64, n int, v uint64) error {
+	p, e := m.translate(a, true, false)
+	if e != nil {
+		return e
+	}
+	if a&4095+uint64(n) <= 4096 {
+		return m.physicalWrite(p, n, v)
+	}
+	var pa [8]uint64
+	for i := 0; i < n; i++ {
+		pa[i], e = m.translate(a+uint64(i), true, false)
+		if e != nil {
+			return e
+		}
+		if e = m.checkPhysical(pa[i], 1); e != nil {
+			return e
+		}
+	}
+	for i := 0; i < n; i++ {
+		if e = m.physicalWrite(pa[i], 1, v>>uint(i*8)); e != nil {
+			return e
+		}
+	}
+	return nil
+}
+func (m *Machine) ReadPair(a uint64, n int) (uint64, uint64, error) {
+	v, e := m.Read(a, n, false)
+	if e != nil {
+		return 0, 0, e
+	}
+	w, e := m.Read(a+uint64(n), n, false)
+	return v, w, e
+}
+func (m *Machine) WritePair(a uint64, n int, v, w uint64) error {
+	for i := 0; i < n*2; i++ {
+		p, e := m.translate(a+uint64(i), true, false)
+		if e != nil {
+			return e
+		}
+		if e = m.checkPhysical(p, 1); e != nil {
+			return e
+		}
+	}
+	if e := m.Write(a, n, v); e != nil {
+		return e
+	}
+	return m.Write(a+uint64(n), n, w)
+}
+func (m *Machine) inRAM(a uint64, n int) bool {
+	if n != 1 && n != 2 && n != 4 && n != 8 {
+		return false
+	}
+	if a < ramBase {
+		return false
+	}
+	off := a - ramBase
+	size := uint64(len(m.RAM))
+	return off <= size && uint64(n) <= size-off
+}
+func (m *Machine) checkPhysical(a uint64, n int) error {
+	if m.inRAM(a, n) {
+		return nil
+	}
+	if (n == 1 || n == 2 || n == 4 || n == 8) && (a >= uartBase && a <= uartBase+0x1000-uint64(n) || a >= gicDist && a <= gicDist+0x20000-uint64(n)) {
+		return nil
+	}
+	return fmt.Errorf("unmapped physical access %#x size %d PC=%#x", a, n, m.CPU.State[aarch64.PC])
+}
+func (m *Machine) physicalRead(a uint64, n int) (uint64, error) {
+	if m.inRAM(a, n) {
+		var v uint64
+		for i := 0; i < n; i++ {
+			v |= uint64(m.RAM[a-ramBase+uint64(i)]) << uint(i*8)
+		}
+		return v, nil
+	}
+	if e := m.checkPhysical(a, n); e != nil {
+		return 0, e
+	}
+	return m.readDevice(a, n), nil
+}
+func (m *Machine) physicalWrite(a uint64, n int, v uint64) error {
+	if m.Exclusive && a < m.ExclusiveAddress+uint64(m.ExclusiveSize) && a+uint64(n) > m.ExclusiveAddress {
+		m.Exclusive = false
+	}
+	if m.inRAM(a, n) {
+		if m.NativeRAM != nil {
+			m.NativeRAM.BeforeWrite(a-ramBase, n)
+		}
+		for i := 0; i < n; i++ {
+			m.RAM[a-ramBase+uint64(i)] = byte(v >> uint(i*8))
+		}
+		return nil
+	}
+	if e := m.checkPhysical(a, n); e != nil {
+		return e
+	}
+	m.writeDevice(a, n, v)
+	return nil
+}
+func (m *Machine) timerPending(ctl, cval uint32) bool {
+	return m.Sys[ctl]&3 == 1 && m.Ticks >= m.Sys[cval]
+}
+func (m *Machine) pendingIRQ() int {
+	if m.DistControl&3 == 0 || m.CPUControl&3 == 0 {
+		return 1023
+	}
+	m.IRQPending[30] = m.timerPending(0xdf11, 0xdf12)
+	m.IRQPending[27] = m.timerPending(0xdf19, 0xdf1a)
+	m.IRQPending[33] = m.uartStatus()&m.UARTMask != 0
+	best := 1023
+	priority := m.PriorityMask
+	for i, active := range m.IRQActive {
+		if active && uint32(m.IRQPriority[i]) < priority {
+			priority = uint32(m.IRQPriority[i])
+		}
+	}
+	for i := 0; i < len(m.IRQEnabled); i++ {
+		if m.IRQEnabled[i] && m.IRQPending[i] && !m.IRQActive[i] && uint32(m.IRQPriority[i]) < priority {
+			priority = uint32(m.IRQPriority[i])
+			best = i
+		}
+	}
+	return best
+}
+func (m *Machine) uartStatus() uint32 {
+	var v uint32
+	if m.UARTControl&0x101 == 0x101 {
+		v |= 0x20
+	}
+	if len(m.Input) != 0 {
+		v |= 0x10
+	}
+	return v
+}
+func (m *Machine) readDevice(a uint64, n int) uint64 {
+	if a >= uartBase && a < uartBase+0x1000 {
+		switch a - uartBase {
+		case 0:
+			if len(m.Input) > 0 {
+				v := m.Input[0]
+				m.Input = m.Input[1:]
+				return uint64(v)
+			}
+		case 0x18:
+			v := uint64(0x80)
+			if len(m.Input) == 0 {
+				v |= 0x10
+			}
+			return v
+		case 0x30:
+			return uint64(m.UARTControl)
+		case 0x38:
+			return uint64(m.UARTMask)
+		case 0x3c:
+			return uint64(m.uartStatus())
+		case 0x40:
+			return uint64(m.uartStatus() & m.UARTMask)
+		case 0xfe0:
+			return 0x11
+		case 0xfe4:
+			return 0x10
+		case 0xfe8:
+			return 0x14
+		case 0xfec:
+			return 0
+		case 0xff0:
+			return 0xd
+		case 0xff4:
+			return 0xf0
+		case 0xff8:
+			return 5
+		case 0xffc:
+			return 0xb1
+		}
+		return 0
+	}
+	if a >= gicCPU {
+		switch a - gicCPU {
+		case 0:
+			return uint64(m.CPUControl)
+		case 4:
+			return uint64(m.PriorityMask)
+		case 0xc:
+			i := m.pendingIRQ()
+			if i < 128 {
+				m.IRQActive[i] = true
+			}
+			return uint64(i)
+		case 0x18:
+			return uint64(m.pendingIRQ())
+		case 0xfc:
+			return 0x0202143b
+		}
+		return 0
+	}
+	off := a - gicDist
+	switch off {
+	case 0:
+		return uint64(m.DistControl)
+	case 4:
+		return 3
+	case 8:
+		return 0x0200043b
+	}
+	var v uint64
+	for j := 0; j < n; j++ {
+		o := off + uint64(j)
+		var b byte
+		switch {
+		case o >= 0x100 && o < 0x200:
+			base := int((o & 0x7f) * 8)
+			for k := 0; k < 8 && base+k < 128; k++ {
+				if m.IRQEnabled[base+k] {
+					b |= 1 << k
+				}
+			}
+		case o >= 0x200 && o < 0x300:
+			base := int((o & 0x7f) * 8)
+			for k := 0; k < 8 && base+k < 128; k++ {
+				if m.IRQPending[base+k] {
+					b |= 1 << k
+				}
+			}
+		case o >= 0x300 && o < 0x400:
+			base := int((o & 0x7f) * 8)
+			for k := 0; k < 8 && base+k < 128; k++ {
+				if m.IRQActive[base+k] {
+					b |= 1 << k
+				}
+			}
+		case o >= 0x400 && o < 0x480:
+			b = m.IRQPriority[o-0x400]
+		case o >= 0x800 && o < 0x880:
+			b = 1
+		}
+		v |= uint64(b) << uint(j*8)
+	}
+	return v
+}
+func (m *Machine) writeDevice(a uint64, n int, v uint64) {
+	if a >= uartBase && a < uartBase+0x1000 {
+		switch a - uartBase {
+		case 0:
+			if m.Out != nil {
+				m.Out.Write([]byte{byte(v)})
+			}
+		case 0x30:
+			m.UARTControl = uint32(v)
+		case 0x38:
+			m.UARTMask = uint32(v)
+		}
+		return
+	}
+	if a >= gicCPU {
+		switch a - gicCPU {
+		case 0:
+			m.CPUControl = uint32(v)
+		case 4:
+			m.PriorityMask = uint32(v) & 255
+		case 0x10, 0x1000:
+			if int(v&1023) < 128 {
+				m.IRQActive[v&1023] = false
+			}
+		}
+		return
+	}
+	off := a - gicDist
+	if off == 0 {
+		m.DistControl = uint32(v)
+		return
+	}
+	for j := 0; j < n; j++ {
+		o := off + uint64(j)
+		b := byte(v >> uint(j*8))
+		switch {
+		case o >= 0x100 && o < 0x200:
+			base := int((o & 0x7f) * 8)
+			for k := 0; k < 8 && base+k < 128; k++ {
+				if b&(1<<k) != 0 {
+					m.IRQEnabled[base+k] = o < 0x180
+				}
+			}
+		case o >= 0x200 && o < 0x300:
+			base := int((o & 0x7f) * 8)
+			for k := 0; k < 8 && base+k < 128; k++ {
+				if b&(1<<k) != 0 {
+					m.IRQPending[base+k] = o < 0x280
+					if o < 0x280 {
+						m.SoftwarePending = true
+					}
+				}
+			}
+		case o >= 0x300 && o < 0x400:
+			base := int((o & 0x7f) * 8)
+			for k := 0; k < 8 && base+k < 128; k++ {
+				if b&(1<<k) != 0 {
+					m.IRQActive[base+k] = o < 0x380
+				}
+			}
+		case o >= 0x400 && o < 0x480:
+			m.IRQPriority[o-0x400] = b
+		}
+	}
+}
+func (m *Machine) sysRead(reg uint32) (uint64, error) {
+	if reg >= 0xdf00 && reg <= 0xdf1a {
+		m.syncClock()
+	}
+	switch reg {
+	case 0xc212:
+		return m.Pstate & 0xc, nil
+	case 0xc210:
+		return m.Pstate & 1, nil
+	case 0xda10:
+		return m.CPU.State[aarch64.NZCV], nil
+	case 0xda11:
+		return m.Pstate & 0x3c0, nil
+	case 0xc208:
+		if m.Pstate&1 == 0 {
+			return m.CPU.State[aarch64.SP], nil
+		}
+		return m.SP[0], nil
+	case 0xdf00:
+		return timerFreq, nil
+	case 0xdf01, 0xdf02:
+		return m.Ticks, nil
+	case 0xdf10:
+		return uint64(uint32(m.Sys[0xdf12] - m.Ticks)), nil
+	case 0xdf18:
+		return uint64(uint32(m.Sys[0xdf1a] - m.Ticks)), nil
+	case 0xdf11, 0xdf19:
+		v := m.Sys[reg] & 3
+		if v&1 != 0 && m.Ticks >= m.Sys[reg+1] {
+			v |= 4
+		}
+		return v, nil
+	case 0xc801:
+		return 0, nil
+	case 0xc800, 0xc807:
+		return 0, nil
+	}
+	if v, ok := m.Sys[reg]; ok {
+		return v, nil
+	}
+	if reg >= 0xc000 && reg <= 0xc03f || reg >= 0x8000 && reg <= 0x80ff || reg >= 0xdce0 && reg <= 0xdcff || reg == 0xda20 || reg == 0xda21 || reg == 0xde82 || reg == 0xde83 || reg == 0xc684 || reg == 0xc681 || reg == 0xc708 || reg == 0xc082 || reg == 0xc518 {
+		return 0, nil
+	}
+	return 0, fmt.Errorf("unsupported system register read %#x PC=%#x", reg, m.CPU.State[aarch64.PC])
+}
+func (m *Machine) sysWrite(reg uint32, v uint64) error {
+	if reg >= 0xdf00 && reg <= 0xdf1a {
+		m.syncClock()
+	}
+	switch reg {
+	case 0xc210:
+		m.setPstate(m.Pstate&^uint64(0xf0000001) | m.CPU.State[aarch64.NZCV] | v&1)
+		return nil
+	case 0xda10:
+		m.CPU.State[aarch64.NZCV] = v & 0xf0000000
+		return nil
+	case 0xda11:
+		m.Pstate = m.Pstate&^0x3c0 | v&0x3c0
+		return nil
+	case 0xc208:
+		if m.Pstate&1 == 0 {
+			m.CPU.State[aarch64.SP] = v
+		} else {
+			m.SP[0] = v
+		}
+		return nil
+	case 0xdf10:
+		m.Sys[0xdf12] = uint64(int64(m.Ticks) + int64(int32(v)))
+		return nil
+	case 0xdf18:
+		m.Sys[0xdf1a] = uint64(int64(m.Ticks) + int64(int32(v)))
+		return nil
+	case 0xdf11, 0xdf19:
+		v &= 3
+	}
+	switch reg {
+	case 0xc080, 0xc082, 0xc100, 0xc101, 0xc102, 0xc200, 0xc201, 0xc290, 0xc300, 0xc3a0, 0xc510, 0xc518, 0xc600, 0xc681, 0xc684, 0xc708, 0xde82, 0xde83, 0xdf11, 0xdf12, 0xdf19, 0xdf1a, 0xd000, 0xda20, 0xda21, 0x8010, 0x8012, 0x8002, 0x8003, 0x8004, 0x8005:
+		m.Sys[reg] = v
+		if reg == 0xc080 || reg == 0xc100 || reg == 0xc101 || reg == 0xc102 {
+			m.flush()
+		}
+		return nil
+	}
+	if reg >= 0xdce0 && reg <= 0xdcff || reg >= 0xc4f0 && reg <= 0xc4ff || reg >= 0x8000 && reg <= 0x80ff {
+		m.Sys[reg] = v
+		return nil
+	}
+	return fmt.Errorf("unsupported system register write %#x=%#x PC=%#x", reg, v, m.CPU.State[aarch64.PC])
+}
+func (m *Machine) takePendingIRQ(pc uint64) bool {
+	if m.Pstate&0x80 == 0 && (m.timerPending(0xdf11, 0xdf12) || m.timerPending(0xdf19, 0xdf1a) || m.uartStatus()&m.UARTMask != 0 || m.SoftwarePending) && m.pendingIRQ() != 1023 {
+		m.exception(0, 0, pc, true)
+		return true
+	}
+	return false
+}
+
+func (m *Machine) Step() error {
+	m.syncClock()
+	pc := m.CPU.State[aarch64.PC]
+	if m.takePendingIRQ(pc) {
+		return nil
+	}
+	v, e := m.Read(pc, 4, true)
+	if e != nil {
+		return m.accessFault(e, pc)
+	}
+	return m.executeOpcode(uint32(v))
+}
+
+// executeOpcode is shared by fetched and execute-version-validated cached
+// instructions. It preserves all privilege traps, timer accounting and faults.
+func (m *Machine) executeOpcode(op uint32) error {
+	pc := m.CPU.State[aarch64.PC]
+	if m.Trace != nil {
+		fmt.Fprintf(m.Trace, "%012x %08x el%d x0=%x x1=%x x2=%x x3=%x sp=%x\n", pc, op, m.Pstate>>2&3, m.r(0), m.r(1), m.r(2), m.r(3), m.CPU.State[aarch64.SP])
+	}
+	handled, e := m.system(op)
+	if !handled {
+		handled, e = m.extra(op)
+	}
+	if !handled {
+		handled, e = m.simd(op)
+	}
+	if handled {
+		if e != nil {
+			return m.accessFault(e, pc)
+		}
+		m.CPU.Retired++
+	} else {
+		if op&0x3e000000 == 0x28000000 && op>>23&3 == 0 {
+			op |= 1 << 24
+		} // non-temporal pairs use offset addressing.
+		oldPstate := m.Pstate
+		if op&0x3b200c00 == 0x38000800 {
+			m.Pstate &^= 0xc
+			op &^= 0xc00
+		}
+		e = m.CPU.Execute(op)
+		m.Pstate = oldPstate
+		if e != nil {
+			var ex *aarch64.Exception
+			if errors.As(e, &ex) && ex.Kind == "svc" {
+				m.exception(0x15, uint64(op>>5&65535), pc+4, false)
+			} else {
+				return m.accessFault(e, pc)
+			}
+		}
+	}
+	if m.Clock == nil {
+		m.Ticks++
+	}
+	m.Instructions++
+	return nil
+}
+func (m *Machine) system(op uint32) (bool, error) {
+	pc := m.CPU.State[aarch64.PC]
+	if m.Pstate&0xc == 0 {
+		privileged := op == 0xd69f03e0 || op&0xffe0001f == 0xd4000002 || op&0xffe0001f == 0xd4000003 || op&0xfffff0df == 0xd50340df || op&0xfffff0ff == 0xd50040bf || op&0xfff80000 == 0xd5080000
+		if op&0xffd00000 == 0xd5100000 {
+			reg := op >> 5 & 65535
+			read := op>>21&1 != 0
+			allowed := reg == 0xda10 || reg == 0xda20 || reg == 0xda21 || reg == 0xde82 || read && reg == 0xde83 || read && (reg == 0xd801 || reg == 0xd807) || read && (reg == 0xdf00 || reg == 0xdf01 && m.Sys[0xc708]&1 != 0 || reg == 0xdf02 && m.Sys[0xc708]&2 != 0)
+			if !allowed {
+				iss := uint64(op>>21&1) | uint64(op>>8&15)<<1 | uint64(op&31)<<5 | uint64(op>>12&15)<<10 | uint64(op>>16&7)<<14 | uint64(op>>5&7)<<17 | uint64(op>>19&3)<<20
+				m.exception(0x18, iss, pc, false)
+				return true, nil
+			}
+		}
+		if privileged {
+			m.exception(0, 0, pc, false)
+			return true, nil
+		}
+	}
+	next := pc + 4
+	switch {
+	case op == 0xd69f03e0: // ERET
+		next = m.Sys[0xc201]
+		m.setPstate(m.Sys[0xc200])
+		m.Exclusive = false
+	case op&0xffe0001f == 0xd4000002 || op&0xffe0001f == 0xd4000003: // PSCI HVC/SMC
+		switch uint32(m.r(0)) {
+		case 0x84000000:
+			m.w(0, 2, 64)
+		case 0x8400000a:
+			fn := uint32(m.r(1))
+			v := uint64(0)
+			if fn != 0x84000000 && fn != 0x84000008 && fn != 0x84000009 && fn != 0x8400000a {
+				v = ^uint64(0)
+			}
+			m.w(0, v, 64)
+		case 0x84000008, 0x84000009:
+			m.Done = true
+			m.w(0, 0, 64)
+		default:
+			m.w(0, ^uint64(0), 64)
+		}
+	case op&0xfffff0df == 0xd50340df: // DAIFSet/Clr
+		mask := uint64(op>>8&15) << 6
+		if op&0x20 == 0 {
+			m.Pstate |= mask
+		} else {
+			m.Pstate &^= mask
+		}
+	case op&0xfffff0ff == 0xd50040bf: // SPSel immediate
+		m.setPstate(m.Pstate&^uint64(0xf0000001) | m.CPU.State[aarch64.NZCV] | uint64(op>>8&1))
+	case op&0xffd00000 == 0xd5100000:
+		reg := op >> 5 & 65535
+		if op>>21&1 != 0 {
+			v, e := m.sysRead(reg)
+			if e != nil {
+				return true, e
+			}
+			m.w(op&31, v, 64)
+		} else {
+			if e := m.sysWrite(reg, m.r(op&31)); e != nil {
+				return true, e
+			}
+		}
+	case op&0xfff80000 == 0xd5080000: // SYS cache/TLB/address operations
+		crn := op >> 12 & 15
+		crm := op >> 8 & 15
+		if crn == 8 {
+			m.flush()
+		} else if crn == 7 && crm == 8 {
+			write := op>>5&1 != 0
+			p, e := m.translate(m.r(op&31), write, false)
+			if e != nil {
+				var f *translationFault
+				if errors.As(e, &f) {
+					m.Sys[0xc3a0] = 1 | f.Status<<1
+				} else {
+					return true, e
+				}
+			} else {
+				m.Sys[0xc3a0] = p&0x0000fffffffff000 | 0xff00000000000800
+			}
+		} else if crn != 7 {
+			return true, fmt.Errorf("unsupported SYS %#08x", op)
+		}
+	case op&0xfffff0ff == 0xd503309f || op&0xfffff0ff == 0xd50330bf || op&0xfffff0ff == 0xd50330df: // DSB/DMB/ISB
+	case op&0xfffff0ff == 0xd503305f:
+		m.Exclusive = false
+	case op == 0xd503207f || op == 0xd503205f: // WFI/WFE: advance the deterministic clock to a programmed timer.
+		if m.pendingIRQ() == 1023 {
+			at := ^uint64(0)
+			for _, ctl := range []uint32{0xdf11, 0xdf19} {
+				if m.Sys[ctl]&3 == 1 && m.Sys[ctl+1] > m.Ticks && m.Sys[ctl+1] < at {
+					at = m.Sys[ctl+1]
+				}
+			}
+			if at != ^uint64(0) {
+				if m.Clock != nil {
+					m.Clock.WaitUntil(at)
+					m.syncClock()
+				} else {
+					m.Ticks = at
+				}
+			}
+		}
+	case op&0xfffff01f == 0xd503201f: // Architectural HINTs without their optional features.
+	default:
+		return false, nil
+	}
+	m.CPU.State[aarch64.PC] = next
+	return true, nil
+}
+func (m *Machine) extra(op uint32) (bool, error) {
+	pc := m.CPU.State[aarch64.PC]
+	rn, rt := op>>5&31, op&31
+	switch {
+	case op&0x3f000000 == 0x08000000:
+		n := 1 << uint(op>>30)
+		a := m.CPU.State[rn]
+		load := op>>22&1 != 0
+		pair := op>>21&1 != 0
+		ordered := op>>23&1 != 0
+		if pair && (n < 4 || ordered) {
+			return true, fmt.Errorf("reserved exclusive encoding %#08x", op)
+		}
+		total := n
+		if pair {
+			total *= 2
+		}
+		rt2 := op >> 10 & 31
+		if a&uint64(total-1) != 0 {
+			return true, &translationFault{a, 0x21, !load, false}
+		}
+		if load {
+			v, e := m.Read(a, n, false)
+			if e != nil {
+				return true, e
+			}
+			var second uint64
+			if pair {
+				second, e = m.Read(a+uint64(n), n, false)
+				if e != nil {
+					return true, e
+				}
+			}
+			m.w(rt, v, n*8)
+			if pair {
+				m.w(rt2, second, n*8)
+			}
+			if !ordered {
+				p, e := m.translate(a, false, false)
+				if e != nil {
+					return true, e
+				}
+				m.Exclusive = true
+				m.ExclusiveAddress = p
+				m.ExclusiveSize = total
+			}
+		} else if ordered {
+			if e := m.Write(a, n, m.r(rt)); e != nil {
+				return true, e
+			}
+		} else {
+			rs := op >> 16 & 31
+			p, e := m.translate(a, true, false)
+			if e != nil {
+				return true, e
+			}
+			ok := m.Exclusive && p == m.ExclusiveAddress && total == m.ExclusiveSize
+			m.Exclusive = false
+			if ok {
+				if pair {
+					e = m.WritePair(a, n, m.r(rt), m.r(rt2))
+				} else {
+					e = m.Write(a, n, m.r(rt))
+				}
+				if e != nil {
+					return true, e
+				}
+				m.w(rs, 0, 32)
+			} else {
+				m.w(rs, 1, 32)
+			}
+		}
+
+	case op&0x3f000000 == 0x18000000 && op>>30 == 3: // PRFM literal
+	case (op&0x3b000000 == 0x39000000 || op&0x3b000000 == 0x38000000) && op>>22&3 == 2 && op>>30 == 3: // PRFM immediate
+	default:
+		return false, nil
+	}
+	m.CPU.State[aarch64.PC] = pc + 4
+	return true, nil
+}
+
+var _ = binary.LittleEndian
+var _ = bits.OnesCount64
+var _ = os.Stderr
+
+-- review_test.go --
+package arm64machine
+
+import (
+	"bytes"
+	"encoding/binary"
+	"errors"
+	"renvo.dev/emulators/aarch64"
+	"testing"
+)
+
+const reviewVA = uint64(0x4000)
+const reviewData = uint64(0x8000)
+
+func reviewMachine(t *testing.T) *Machine {
+	t.Helper()
+	m, err := New(64, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+func reviewWord(m *Machine, offset, value uint64) {
+	binary.LittleEndian.PutUint64(m.RAM[offset:offset+8], value)
+}
+func reviewTables(m *Machine, flags uint64) {
+	// Independently constructed 48-bit, four-level, 4-KiB stage-1 tables.
+	reviewWord(m, 0x1000, ramBase+0x2000|3)
+	reviewWord(m, 0x2000, ramBase+0x3000|3)
+	reviewWord(m, 0x3000, ramBase+0x4000|3)
+	reviewWord(m, 0x4000+(reviewVA>>12)*8, ramBase+reviewData|flags)
+	m.Sys[0xc080] = 1
+	m.Sys[0xc100] = ramBase + 0x1000
+	m.Sys[0xc102] = 16 | 16<<16 | 2<<30
+	m.flush()
+}
+func reviewFault(t *testing.T, err error, address, status uint64, write, execute bool) {
+	t.Helper()
+	var fault *translationFault
+	if !errors.As(err, &fault) || fault.Address != address || fault.Status != status || fault.Write != write || fault.Execute != execute {
+		t.Fatalf("fault=%v; want VA=%#x status=%#x write=%t execute=%t", err, address, status, write, execute)
+	}
+}
+
+func TestReviewMMUPermissions(t *testing.T) {
+	m := reviewMachine(t)
+	const page = uint64(3 | 1<<10)
+	for _, test := range []struct {
+		name                  string
+		flags, state, control uint64
+		write, execute        bool
+		fault                 uint64
+	}{
+		{"kernel_read", page, 5, 1, false, false, 0},
+		{"user_read", page | 1<<6, 0, 1, false, false, 0},
+		{"user_kernel_denied", page, 0, 1, false, false, 15},
+		{"read_only_write", page | 3<<6, 0, 1, true, false, 15},
+		{"user_execute_never", page | 1<<6 | 1<<54, 0, 1, false, true, 15},
+		{"privileged_execute_never", page | 1<<53, 5, 1, false, true, 15},
+		{"access_flag", 3, 5, 1, false, false, 11},
+		{"write_execute_never", page, 5, 1 | 1<<19, false, true, 15},
+		{"wxn_read_only_exec", page | 1<<7, 5, 1 | 1<<19, false, true, 0},
+		{"tscxt_is_not_wxn", page, 5, 1 | 1<<20, false, true, 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			reviewTables(m, test.flags)
+			m.setPstate(test.state)
+			m.Sys[0xc080] = test.control
+			got, err := m.translate(reviewVA+17, test.write, test.execute)
+			if test.fault != 0 {
+				reviewFault(t, err, reviewVA+17, test.fault, test.write, test.execute)
+			} else if err != nil || got != ramBase+reviewData+17 {
+				t.Fatalf("translation=%#x error=%v", got, err)
+			}
+		})
+	}
+	// Table-level permissions must dominate permissive leaf descriptors.
+	reviewTables(m, page|1<<6)
+	m.setPstate(5)
+	reviewWord(m, 0x1000, ramBase+0x2000|3|1<<62)
+	_, err := m.translate(reviewVA, true, false)
+	reviewFault(t, err, reviewVA, 15, true, false)
+}
+
+func TestReviewCrossPageStoreIsAtomicOnFault(t *testing.T) {
+	m := reviewMachine(t)
+	reviewTables(m, 3|1<<10)
+	for i := reviewData; i < reviewData+4096; i++ {
+		m.RAM[i] = 0x6d
+	}
+	before := append([]byte(nil), m.RAM[reviewData:reviewData+4096]...)
+	err := m.Write(reviewVA+4092, 8, 0x123456789abcdef0)
+	reviewFault(t, err, reviewVA+4096, 7, true, false)
+	if !bytes.Equal(before, m.RAM[reviewData:reviewData+4096]) {
+		t.Fatal("scalar store changed the first page before the second page fault")
+	}
+	err = m.WritePair(reviewVA+4088, 8, 0xabcdef, 0x12345)
+	reviewFault(t, err, reviewVA+4096, 7, true, false)
+	if !bytes.Equal(before, m.RAM[reviewData:reviewData+4096]) {
+		t.Fatal("pair store changed the first page before the second page fault")
+	}
+}
+
+func TestReviewExceptionReturnAndStackBanks(t *testing.T) {
+	m := reviewMachine(t)
+	m.Sys[0xc600] = ramBase + 0x10000
+	m.CPU.State[aarch64.SP] = ramBase + 0x30000 // SP_EL1
+	m.SP[0] = 0x20000                           // SP_EL0
+	m.setPstate(0)
+	m.CPU.State[aarch64.NZCV] = 0xa0000000
+	m.Exclusive = true
+	m.exception(0x15, 0x1234, 0x401004, false)
+	if m.Sys[0xc200] != 0xa0000000 || m.Sys[0xc201] != 0x401004 || m.Sys[0xc290] != 0x56001234 {
+		t.Fatalf("saved exception state: SPSR=%#x ELR=%#x ESR=%#x", m.Sys[0xc200], m.Sys[0xc201], m.Sys[0xc290])
+	}
+	if m.CPU.State[aarch64.SP] != ramBase+0x30000 || m.CPU.State[aarch64.PC] != ramBase+0x10400 || m.CPU.State[aarch64.NZCV] != 0xa0000000 || m.Exclusive {
+		t.Fatal("exception did not select EL1 stack/vector and preserve flags")
+	}
+	m.CPU.State[aarch64.NZCV] = 0x50000000
+	if handled, err := m.system(0xd69f03e0); !handled || err != nil { // ERET
+		t.Fatal(handled, err)
+	}
+	if m.Pstate != 0xa0000000 || m.CPU.State[aarch64.NZCV] != 0xa0000000 || m.CPU.State[aarch64.SP] != 0x20000 || m.CPU.State[aarch64.PC] != 0x401004 {
+		t.Fatal("ERET did not restore EL0 PC/PSTATE/stack")
+	}
+	m.setPstate(5)
+	m.CPU.State[aarch64.NZCV] = 0x60000000
+	if err := m.sysWrite(0xc210, 0); err != nil {
+		t.Fatal(err)
+	}
+	if m.CPU.State[aarch64.NZCV] != 0x60000000 || m.CPU.State[aarch64.SP] != 0x20000 {
+		t.Fatal("SPSel changed live NZCV or selected wrong stack")
+	}
+}
+
+func TestReviewLoadFaultEntersGuestHandler(t *testing.T) {
+	m := reviewMachine(t)
+	reviewTables(m, 3|1<<10|3<<6)
+	binary.LittleEndian.PutUint32(m.RAM[reviewData:], 0xf9400020) // LDR X0,[X1]
+	m.Sys[0xc600] = ramBase + 0x10000
+	m.CPU.State[aarch64.PC] = reviewVA
+	m.CPU.State[0], m.CPU.State[1] = 0xfeedface, 0x9000
+	m.setPstate(0)
+	if err := m.Step(); err != nil {
+		t.Fatalf("host error instead of guest data abort: %v", err)
+	}
+	if m.CPU.State[aarch64.PC] != ramBase+0x10400 || m.Sys[0xc201] != reviewVA || m.Sys[0xc300] != 0x9000 || m.Sys[0xc290] != 0x92000007 || m.CPU.State[0] != 0xfeedface {
+		t.Fatalf("bad abort state PC=%#x ELR=%#x FAR=%#x ESR=%#x X0=%#x", m.CPU.State[aarch64.PC], m.Sys[0xc201], m.Sys[0xc300], m.Sys[0xc290], m.CPU.State[0])
+	}
+}
+
+func TestReviewTimerIRQAndAcknowledge(t *testing.T) {
+	m := reviewMachine(t)
+	m.DistControl, m.CPUControl = 1, 1
+	m.IRQEnabled[27] = true
+	m.Sys[0xdf19], m.Sys[0xdf1a] = 1, 10 // virtual timer enabled, expires at ten
+	m.Ticks = 9
+	if irq := m.pendingIRQ(); irq != 1023 {
+		t.Fatalf("premature timer interrupt %d", irq)
+	}
+	m.Ticks = 10
+	m.Sys[0xc600] = ramBase + 0x10000
+	m.CPU.State[aarch64.PC] = ramBase + 0x20000
+	m.Pstate &^= 0x80
+	if err := m.Step(); err != nil {
+		t.Fatal(err)
+	}
+	if m.CPU.State[aarch64.PC] != ramBase+0x10280 || m.Sys[0xc201] != ramBase+0x20000 || m.Instructions != 0 {
+		t.Fatal("IRQ entry should save interrupted PC without retiring an instruction")
+	}
+	if irq := m.readDevice(gicCPU+0xc, 4); irq != 27 || !m.IRQActive[27] {
+		t.Fatalf("timer acknowledge=%d active=%t", irq, m.IRQActive[27])
+	}
+	m.Sys[0xdf19] = 3 // mask source before EOI
+	m.writeDevice(gicCPU+0x10, 4, 27)
+	if irq := m.pendingIRQ(); irq != 1023 || m.IRQActive[27] {
+		t.Fatalf("masked/EOI timer still pending %d", irq)
+	}
+}
+
+func TestReviewEL0CannotWriteTranslationControl(t *testing.T) {
+	m := reviewMachine(t)
+	m.CPU.State[aarch64.PC] = ramBase
+	m.Sys[0xc600] = ramBase + 0x10000
+	original := m.Sys[0xc080]
+	m.setPstate(0)
+	m.CPU.State[0] = ^uint64(0)
+	binary.LittleEndian.PutUint32(m.RAM, 0xd5181000) // MSR SCTLR_EL1,X0
+	err := m.Step()
+	if m.Sys[0xc080] != original {
+		t.Fatal("EL0 MSR changed privileged translation controls")
+	}
+	if err != nil {
+		t.Fatalf("EL0 invalid instruction must take guest exception, not host failure: %v", err)
+	}
+	if m.Pstate&0xf != 5 || m.CPU.State[aarch64.PC] != ramBase+0x10400 || m.Sys[0xc201] != ramBase {
+		t.Fatal("EL0 privileged access did not enter synchronous guest exception")
+	}
+}
+
+func TestReviewBootBoundsAndPhysicalOverflow(t *testing.T) {
+	m := reviewMachine(t)
+	image := make([]byte, 64)
+	binary.LittleEndian.PutUint32(image[56:], 0x644d5241)
+	for _, test := range []struct {
+		name         string
+		offset, size uint64
+	}{
+		{"offset_beyond_ram", uint64(len(m.RAM)), 64},
+		{"huge_offset", ^uint64(0) - 16, 64},
+		{"huge_image", 0x80000, ^uint64(0)},
+		{"cross_ram_end", uint64(len(m.RAM)) - 32, 64},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			binary.LittleEndian.PutUint64(image[8:], test.offset)
+			binary.LittleEndian.PutUint64(image[16:], test.size)
+			if err := m.Boot(image, nil, ""); err == nil {
+				t.Fatal("accepted kernel placement outside RAM")
+			}
+		})
+	}
+	// Keep the test process alive if a host slice panic regresses.
+	defer func() {
+		if value := recover(); value != nil {
+			t.Errorf("guest physical overflow caused host panic: %v", value)
+		}
+	}()
+	for _, address := range []uint64{^uint64(0) - 1, ramBase + uint64(len(m.RAM)) - 4} {
+		if _, err := m.physicalRead(address, 8); err == nil {
+			t.Errorf("accepted overflowing/boundary physical read %#x", address)
+		}
+	}
+}
+
+-- simd.go --
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 the trex contributors.
+// Integer SIMD execution is adapted from tinyrange/trex emulator/arm64 at
+// c931e49 (cpu.go and decode.go), under the repository's Apache-2.0 license.
+// Modified for RFE architectural memory, vector state, and precise fault exits.
+package arm64machine
+
+import (
+	"encoding/binary"
+	"fmt"
+	"math/bits"
+	"renvo.dev/emulators/aarch64"
+)
+
+func simdSign(v uint64, width uint32) uint64 { return uint64(int64(v<<(64-width)) >> (64 - width)) }
+func simdMask(width uint32) uint64 {
+	if width == 64 {
+		return ^uint64(0)
+	}
+	return (uint64(1) << width) - 1
+}
+
+// SIMD transfers validate every byte before performing any writes. Register
+// state and address writeback are committed only after a successful transfer.
+func (m *Machine) simdRead(address uint64, data []byte) error {
+	if uint64(len(data)) > ^uint64(0)-address {
+		return fmt.Errorf("SIMD read address overflow")
+	}
+	var temporary [64]byte
+	if len(data) > len(temporary) {
+		return fmt.Errorf("SIMD transfer too large")
+	}
+	for j := range data {
+		v, err := m.Read(address+uint64(j), 1, false)
+		if err != nil {
+			return err
+		}
+		temporary[j] = byte(v)
+	}
+	copy(data, temporary[:len(data)])
+	return nil
+}
+func (m *Machine) simdWrite(address uint64, data []byte) error {
+	if uint64(len(data)) > ^uint64(0)-address {
+		return fmt.Errorf("SIMD write address overflow")
+	}
+	for j := range data {
+		p, err := m.translate(address+uint64(j), true, false)
+		if err != nil {
+			return err
+		}
+		if err = m.checkPhysical(p, 1); err != nil {
+			return err
+		}
+	}
+	for j, v := range data {
+		if err := m.Write(address+uint64(j), 1, uint64(v)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *Machine) simd(i uint32) (bool, error) {
+	pc := m.CPU.State[aarch64.PC]
+	rd, rn, rm := i&31, i>>5&31, i>>16&31
+	width := uint32(32)
+	if i>>31 != 0 {
+		width = 64
+	}
+	var transfer [64]byte
+	read := func(r uint32, stack bool) uint64 {
+		if stack {
+			return m.CPU.State[r]
+		}
+		return m.r(r)
+	}
+	write := func(r uint32, v uint64, w uint32, stack bool) {
+		if stack {
+			m.CPU.State[r] = v
+		} else {
+			m.w(r, v, int(w))
+		}
+	}
+	unsupported := func() (bool, error) { return false, nil }
+	switch {
+
+	case i&0xbf20fc00 == 0x0e20bc00 || i&0x9f20f400 == 0x0e20a400: // ADDP and signed/unsigned MAXP/MINP
+		size := 1 << (i >> 22 & 3)
+		n := 8
+		if i>>30&1 != 0 {
+			n = 16
+		}
+		add := i&0xbf20fc00 == 0x0e20bc00
+		if size == 8 && (!add || n == 8) {
+			return unsupported()
+		}
+		var value [16]byte
+		for half, reg := range []uint32{rn, rm} {
+			for j := 0; j < n/(2*size); j++ {
+				var a, b uint64
+				for k := 0; k < size; k++ {
+					a |= uint64(m.Vectors[reg][j*2*size+k]) << uint(8*k)
+					b |= uint64(m.Vectors[reg][j*2*size+size+k]) << uint(8*k)
+				}
+				v := a + b
+				if !add {
+					greater := a > b
+					if i>>29&1 == 0 {
+						greater = int64(simdSign(a, uint32(size*8))) > int64(simdSign(b, uint32(size*8)))
+					}
+					v = b
+					if greater != (i>>11&1 != 0) {
+						v = a
+					}
+				}
+				for k := 0; k < size; k++ {
+					value[half*n/2+j*size+k] = byte(v >> uint(8*k))
+				}
+			}
+		}
+		m.Vectors[rd] = value
+	case i&0x9f20fc00 == 0x0e203400 || i&0x9f20fc00 == 0x0e203c00: // CMGT/CMGE/CMHI/CMHS vector
+		size := 1 << (i >> 22 & 3)
+		n := 8
+		if i>>30&1 != 0 {
+			n = 16
+		}
+		if size == 8 && n == 8 {
+			return unsupported()
+		}
+		var value [16]byte
+		for j := 0; j < n; j += size {
+			var a, b uint64
+			for k := 0; k < size; k++ {
+				a |= uint64(m.Vectors[rn][j+k]) << uint(8*k)
+				b |= uint64(m.Vectors[rm][j+k]) << uint(8*k)
+			}
+			greater := a > b
+			if i>>29&1 == 0 {
+				greater = int64(simdSign(a, uint32(8*size))) > int64(simdSign(b, uint32(8*size)))
+			}
+			if greater || i>>11&1 != 0 && a == b {
+				for k := 0; k < size; k++ {
+					value[j+k] = 255
+				}
+			}
+		}
+		m.Vectors[rd] = value
+	case i&0xbf3ffc00 == 0x0e20a800: // CMLT vector elements, zero
+		size := 1 << (i >> 22 & 3)
+		n := 8
+		if i>>30&1 != 0 {
+			n = 16
+		}
+		if size == 8 && n == 8 {
+			return unsupported()
+		}
+		var value [16]byte
+		for j := 0; j < n; j += size {
+			if m.Vectors[rn][j+size-1]&0x80 != 0 {
+				for k := 0; k < size; k++ {
+					value[j+k] = 255
+				}
+			}
+		}
+		m.Vectors[rd] = value
+	case i&0xbfe0fc00 == 0x0e003c00 || i&0xbfe0fc00 == 0x0e002c00: // UMOV/SMOV vector lane to GPR
+		imm := i >> 16 & 31
+		if imm == 0 {
+			return unsupported()
+		}
+		log := uint32(bits.TrailingZeros32(imm))
+		size := uint32(1) << log
+		wide, signed := i>>30&1 != 0, i>>12&1 == 0
+		if log > 3 || !signed && (wide != (size == 8)) || signed && (size == 8 || size == 4 && !wide) {
+			return unsupported()
+		}
+		index := imm >> (log + 1)
+		var v uint64
+		for j := uint32(0); j < size; j++ {
+			v |= uint64(m.Vectors[rn][index*size+j]) << (8 * j)
+		}
+		if signed {
+			v = simdSign(v, size*8)
+		}
+		w := uint32(32)
+		if wide {
+			w = 64
+		}
+		write(rd, v, w, false)
+	case i&0x9f20dc00 == 0x0e201000: // SADDW/UADDW/SSUBW/USUBW
+		size := 1 << (i >> 22 & 3)
+		if size == 8 {
+			return unsupported()
+		}
+		base := 0
+		if i>>30&1 != 0 {
+			base = 8
+		}
+		var value [16]byte
+		for j := 0; j < 8/size; j++ {
+			var a, b uint64
+			for k := 0; k < 2*size; k++ {
+				a |= uint64(m.Vectors[rn][j*2*size+k]) << uint(8*k)
+			}
+			for k := 0; k < size; k++ {
+				b |= uint64(m.Vectors[rm][base+j*size+k]) << uint(8*k)
+			}
+			if i>>29&1 == 0 {
+				b = simdSign(b, uint32(size*8))
+			}
+			if i>>13&1 != 0 {
+				a -= b
+			} else {
+				a += b
+			}
+			for k := 0; k < 2*size; k++ {
+				value[j*2*size+k] = byte(a >> uint(8*k))
+			}
+		}
+		m.Vectors[rd] = value
+	case i&0xbf3ffc00 == 0x0e31b800: // ADDV
+		size := 1 << (i >> 22 & 3)
+		n := 8
+		if i>>30&1 != 0 {
+			n = 16
+		}
+		if size == 8 || size == 4 && n == 8 {
+			return unsupported()
+		}
+		var sum uint64
+		for j := 0; j < n; j += size {
+			for k := 0; k < size; k++ {
+				sum += uint64(m.Vectors[rn][j+k]) << uint(8*k)
+			}
+		}
+		m.Vectors[rd] = [16]byte{}
+		for k := 0; k < size; k++ {
+			m.Vectors[rd][k] = byte(sum >> uint(8*k))
+		}
+	case i&0x9f80fc00 == 0x0f00a400: // SSHLL/USHLL, including SXTL/UXTL aliases
+		imm := i >> 16 & 127
+		if imm < 8 || imm >= 64 {
+			return unsupported()
+		}
+		bitsPerLane := uint32(1) << uint(bits.Len32(imm)-1)
+		size, amount := int(bitsPerLane/8), imm-bitsPerLane
+		base := 0
+		if i>>30&1 != 0 {
+			base = 8
+		}
+		var value [16]byte
+		for j := 0; j < 8/size; j++ {
+			var lane uint64
+			for k := 0; k < size; k++ {
+				lane |= uint64(m.Vectors[rn][base+j*size+k]) << uint(8*k)
+			}
+			if i>>29&1 == 0 {
+				lane = simdSign(lane, bitsPerLane)
+			}
+			lane <<= amount
+			for k := 0; k < 2*size; k++ {
+				value[j*2*size+k] = byte(lane >> uint(8*k))
+			}
+		}
+		m.Vectors[rd] = value
+	case i&0xbf000000 == 0x0d000000: // LD/ST single SIMD structure elements
+		if i>>23&1 == 0 && rm != 0 {
+			return unsupported()
+		}
+		q, s, sz := i>>30&1, i>>12&1, i>>10&3
+		opcode := i >> 13 & 7
+		count := int((opcode&1)<<1|(i>>21&1)) + 1
+		scale := opcode >> 1
+		index := uint32(0)
+		load, replicate := i>>22&1 != 0, scale == 3
+		switch scale {
+		case 0:
+			index = q<<3 | s<<2 | sz
+		case 1:
+			if sz&1 != 0 {
+				return unsupported()
+			}
+			index = q<<2 | s<<1 | sz>>1
+		case 2:
+			if sz&2 != 0 {
+				return unsupported()
+			}
+			index = q<<1 | s
+			if sz&1 != 0 {
+				if s != 0 {
+					return unsupported()
+				}
+				scale, index = 3, q
+			}
+		case 3:
+			if !load || s != 0 {
+				return unsupported()
+			}
+			scale = sz
+		}
+		size := 1 << scale
+		address := read(rn, true)
+		data := transfer[:32]
+		if load {
+			if err := m.simdRead(address, data[:count*size]); err != nil {
+				return true, err
+			}
+			for j := 0; j < count; j++ {
+				reg := (rd + uint32(j)) & 31
+				if replicate {
+					m.Vectors[reg] = [16]byte{}
+					for k := 0; k < 8<<q; k += size {
+						copy(m.Vectors[reg][k:k+size], data[j*size:(j+1)*size])
+					}
+				} else {
+					copy(m.Vectors[reg][int(index)*size:int(index+1)*size], data[j*size:(j+1)*size])
+				}
+			}
+		} else {
+			for j := 0; j < count; j++ {
+				copy(data[j*size:(j+1)*size], m.Vectors[(rd+uint32(j))&31][int(index)*size:int(index+1)*size])
+			}
+			if err := m.simdWrite(address, data[:count*size]); err != nil {
+				return true, err
+			}
+		}
+		if i>>23&1 != 0 {
+			delta := uint64(count * size)
+			if rm != 31 {
+				delta = read(rm, false)
+			}
+			write(rn, address+delta, 64, true)
+		}
+	case i&0x9f20fc00 == 0x0e208400: // ADD/SUB vector elements
+		size := 1 << uint(i>>22&3)
+		n := 8
+		if i>>30&1 != 0 {
+			n = 16
+		}
+		if size == 8 && n == 8 {
+			return unsupported()
+		}
+		var value [16]byte
+		for j := 0; j < n; j += size {
+			var a, b uint64
+			for k := 0; k < size; k++ {
+				a |= uint64(m.Vectors[rn][j+k]) << uint(8*k)
+				b |= uint64(m.Vectors[rm][j+k]) << uint(8*k)
+			}
+			sum := a + b
+			if i>>29&1 != 0 {
+				sum = a - b
+			}
+			for k := 0; k < size; k++ {
+				value[j+k] = byte(sum >> uint(8*k))
+			}
+		}
+		m.Vectors[rd] = value
+	case i&0xffe0fc00 == 0x4e001c00: // INS vector element from general register (MOV alias)
+		imm := i >> 16 & 31
+		if imm == 0 {
+			return unsupported()
+		}
+		log := uint32(bits.TrailingZeros32(imm))
+		if log > 3 {
+			return unsupported()
+		}
+		size := uint32(1) << log
+		index := imm >> (log + 1)
+		value := read(rn, false)
+		for j := uint32(0); j < size; j++ {
+			m.Vectors[rd][index*size+j] = byte(value >> (8 * j))
+		}
+	case i&0x9f3ffc00 == 0x0e303800: // SADDLV/UADDLV
+		size := 1 << uint(i>>22&3)
+		n := 8
+		if i>>30&1 != 0 {
+			n = 16
+		}
+		if size == 8 || size == 4 && n == 8 {
+			return unsupported()
+		}
+		sum := uint64(0)
+		for j := 0; j < n; j += size {
+			var lane uint64
+			for k := 0; k < size; k++ {
+				lane |= uint64(m.Vectors[rn][j+k]) << uint(8*k)
+			}
+			if i>>29&1 == 0 {
+				lane = simdSign(lane, uint32(size*8))
+			}
+			sum += lane
+		}
+		m.Vectors[rd] = [16]byte{}
+		for j := 0; j < 2*size; j++ {
+			m.Vectors[rd][j] = byte(sum >> uint(8*j))
+		}
+	case i&0xbf80fc00 == 0x0f008400: // SHRN/SHRN2
+		imm := i >> 16 & 127
+		h := imm >> 3
+		if h == 0 || h >= 8 {
+			return unsupported()
+		}
+		elementBits := uint32(8) << uint(bits.Len32(h)-1)
+		amount := 2*elementBits - imm
+		size := int(elementBits / 8)
+		source := m.Vectors[rn]
+		value := [16]byte{}
+		base := 0
+		if i>>30&1 != 0 {
+			value = m.Vectors[rd]
+			base = 8
+		}
+		for j := 0; j < 8/size; j++ {
+			var lane uint64
+			for k := 0; k < 2*size; k++ {
+				lane |= uint64(source[j*2*size+k]) << uint(k*8)
+			}
+			lane >>= amount
+			for k := 0; k < size; k++ {
+				value[base+j*size+k] = byte(lane >> uint(k*8))
+			}
+		}
+		m.Vectors[rd] = value
+	case i&0xbf20fc00 == 0x2e208c00 || i&0xbf3ffc00 == 0x0e209800: // CMEQ vector elements or zero
+		size := 1 << uint(i>>22&3)
+		n := 8
+		if i>>30&1 != 0 {
+			n = 16
+		}
+		if size == 8 && n == 8 {
+			return unsupported()
+		}
+		var value [16]byte
+		for j := 0; j < n; j += size {
+			equal := true
+			for k := 0; k < size; k++ {
+				right := byte(0)
+				if i&0xbf20fc00 == 0x2e208c00 {
+					right = m.Vectors[rm][j+k]
+				}
+				equal = equal && m.Vectors[rn][j+k] == right
+			}
+			if equal {
+				for k := 0; k < size; k++ {
+					value[j+k] = 255
+				}
+			}
+		}
+		m.Vectors[rd] = value
+	case i&0xfffffc00 == 0x9e660000 || i&0xfffffc00 == 0x1e260000: // FMOV general register from SIMD scalar
+		write(rd, binary.LittleEndian.Uint64(m.Vectors[rn][:8]), width, false)
+	case i&0xfffffc00 == 0x9e670000 || i&0xfffffc00 == 0x1e270000: // FMOV SIMD scalar from general register
+		m.Vectors[rd] = [16]byte{}
+		binary.LittleEndian.PutUint64(m.Vectors[rd][:8], read(rn, false)&simdMask(width))
+	case i&0xbf200000 == 0x0c000000: // SIMD multiple structures
+		count := 0
+		interleave := false
+		switch i >> 12 & 15 {
+		case 8:
+			count = 2
+			interleave = true
+		case 4:
+			count = 3
+			interleave = true
+		case 0:
+			count = 4
+			interleave = true
+		case 7:
+			count = 1
+		case 10:
+			count = 2
+		case 6:
+			count = 3
+		case 2:
+			count = 4
+		default:
+			return unsupported()
+		}
+		size := 8
+		if i>>30&1 != 0 {
+			size = 16
+		}
+		element := 1 << (i >> 10 & 3)
+		if interleave && size == 8 && element == 8 {
+			return unsupported()
+		}
+		at := func(reg, laneByte int) int {
+			if interleave {
+				return ((laneByte/element)*count+reg)*element + laneByte%element
+			}
+			return reg*size + laneByte
+		}
+		address := read(rn, true)
+		data := transfer[:64]
+		load := i>>22&1 != 0
+		if load {
+			if err := m.simdRead(address, data[:count*size]); err != nil {
+				return true, err
+			}
+			for j := 0; j < count; j++ {
+				reg := (rd + uint32(j)) & 31
+				m.Vectors[reg] = [16]byte{}
+				for k := 0; k < size; k++ {
+					m.Vectors[reg][k] = data[at(j, k)]
+				}
+			}
+		} else {
+			for j := 0; j < count; j++ {
+				for k := 0; k < size; k++ {
+					data[at(j, k)] = m.Vectors[(rd+uint32(j))&31][k]
+				}
+			}
+			if err := m.simdWrite(address, data[:count*size]); err != nil {
+				return true, err
+			}
+		}
+		if i>>23&1 != 0 {
+			offset := read(rm, false)
+			if rm == 31 {
+				offset = uint64(count * size)
+			}
+			write(rn, address+offset, 64, true)
+		}
+	case i&0x9f20fc00 == 0x0e201c00: // vector logical operations and bit selection
+		n := 8
+		if i>>30&1 != 0 {
+			n = 16
+		}
+		var value [16]byte
+		for j := 0; j < n; j++ {
+			a, b, d := m.Vectors[rn][j], m.Vectors[rm][j], m.Vectors[rd][j]
+			switch (i>>29&1)<<2 | (i >> 22 & 3) {
+			case 0:
+				value[j] = a & b
+			case 1:
+				value[j] = a &^ b
+			case 2:
+				value[j] = a | b
+			case 3:
+				value[j] = a | ^b
+			case 4:
+				value[j] = a ^ b
+			case 5:
+				value[j] = a&d | b&^d // BSL
+			case 6:
+				value[j] = a&b | d&^b // BIT
+			case 7:
+				value[j] = a&^b | d&b // BIF
+			}
+		}
+		m.Vectors[rd] = value
+	case i&0xbfe0fc00 == 0x0e000c00: // DUP vector elements from a general register
+		element := i >> 16 & 31
+		if element != 1 && element != 2 && element != 4 && element != 8 {
+			return unsupported()
+		}
+		n := 8
+		if i>>30&1 != 0 {
+			n = 16
+		}
+		if element == 8 && n == 8 {
+			return unsupported()
+		}
+		v := read(rn, false)
+		m.Vectors[rd] = [16]byte{}
+		for j := 0; j < n; j++ {
+			m.Vectors[rd][j] = byte(v >> (8 * (uint32(j) % element)))
+		}
+	case i&0x9ff80c00 == 0x0f000400: // MOVI/MVNI and vector ORR/BIC immediate
+		v := uint64((i>>16&7)<<5 | i>>5&31)
+		mode, op := i>>12&15, i>>29&1
+		size := 4
+		merge := mode < 12 && mode&1 != 0
+		switch {
+		case mode < 8:
+			v <<= (mode >> 1) * 8
+		case mode < 12:
+			size = 2
+			v <<= ((mode >> 1) & 1) * 8
+		case mode < 14:
+			shift := uint32(8) * (mode - 11)
+			v = v<<shift | simdMask(shift)
+		case mode == 14:
+			size = 1
+			if op != 0 {
+				size = 8
+				immediate := v
+				v = 0
+				for j := uint32(0); j < 8; j++ {
+					if immediate>>j&1 != 0 {
+						v |= uint64(255) << (j * 8)
+					}
+				}
+			}
+		default:
+			return unsupported()
+		}
+		if op != 0 && mode != 14 {
+			v = ^v
+		}
+		previous := m.Vectors[rd]
+		m.Vectors[rd] = [16]byte{}
+		n := 8
+		if i>>30&1 != 0 {
+			n = 16
+		}
+		for j := 0; j < n; j++ {
+			b := byte(v >> uint(8*(j%size)))
+			if merge {
+				if op != 0 {
+					b &= previous[j]
+				} else {
+					b |= previous[j]
+				}
+			}
+			m.Vectors[rd][j] = b
+		}
+	default:
+		handled, err := m.simdMisc(i)
+		if !handled {
+			handled, err = m.simdMemory(i)
+		}
+		if !handled || err != nil {
+			return handled, err
+		}
+	}
+	m.CPU.State[aarch64.PC] = pc + 4
+	return true, nil
+}
+
+// SIMD load/store decodes share the integer addressing classes but access the
+// separate vector register bank; a fault leaves vector registers and base intact.
+func (m *Machine) simdMemory(i uint32) (bool, error) {
+	if i>>26&1 == 0 {
+		return false, nil
+	}
+	rd, rn := i&31, i>>5&31
+	if rn == 31 && m.CPU.State[aarch64.SP]&15 != 0 {
+		return true, fmt.Errorf("unaligned SIMD stack access")
+	}
+	base := m.CPU.State[rn]
+	var address, updated uint64
+	var size, count int
+	var load, writeback bool
+	switch {
+	case i&0x3a000000 == 0x28000000:
+		size = 4 << uint(i>>30)
+		if size > 16 {
+			return false, nil
+		}
+		count = 2
+		mode := i >> 23 & 3
+		offset := simdSign(uint64(i>>15&127), 7) * uint64(size)
+		updated = base + offset
+		address = updated
+		if mode == 1 {
+			address = base
+		}
+		load = i>>22&1 != 0
+		if load && rd == i>>10&31 {
+			return false, nil
+		}
+		writeback = mode == 1 || mode == 3
+	case i&0x3b000000 == 0x39000000 || i&0x3b000000 == 0x38000000:
+		opc := i >> 22 & 3
+		size = 1 << uint(i>>30)
+		if opc&2 != 0 {
+			if size != 1 {
+				return false, nil
+			}
+			size = 16
+		}
+		count = 1
+		load = opc&1 != 0
+		address = base
+		if i&0x3b000000 == 0x39000000 {
+			address += uint64(i>>10&4095) * uint64(size)
+		} else if i>>21&1 != 0 {
+			if i>>10&3 != 2 {
+				return false, nil
+			}
+			offset := m.r(i >> 16 & 31)
+			switch i >> 13 & 7 {
+			case 2:
+				offset = uint64(uint32(offset))
+			case 3, 7:
+			case 6:
+				offset = simdSign(offset, 32)
+			default:
+				return false, nil
+			}
+			if i>>12&1 != 0 {
+				offset *= uint64(size)
+			}
+			address += offset
+		} else {
+			mode := i >> 10 & 3
+			if mode == 2 {
+				return false, nil
+			}
+			updated = base + simdSign(uint64(i>>12&511), 9)
+			if mode != 1 {
+				address = updated
+			}
+			writeback = mode == 1 || mode == 3
+		}
+	case i&0x3b000000 == 0x18000000:
+		size = 4 << uint(i>>30)
+		if size > 16 {
+			return false, nil
+		}
+		count = 1
+		load = true
+		address = m.CPU.State[aarch64.PC] + (simdSign(uint64(i>>5&0x7ffff), 19) << 2)
+	default:
+		return false, nil
+	}
+	var data [32]byte
+	second := i >> 10 & 31
+	if load {
+		if err := m.simdRead(address, data[:size*count]); err != nil {
+			return true, err
+		}
+		m.Vectors[rd] = [16]byte{}
+		copy(m.Vectors[rd][:], data[:size])
+		if count == 2 {
+			m.Vectors[second] = [16]byte{}
+			copy(m.Vectors[second][:], data[size:size*2])
+		}
+	} else {
+		copy(data[:size], m.Vectors[rd][:])
+		if count == 2 {
+			copy(data[size:size*2], m.Vectors[second][:])
+		}
+		if err := m.simdWrite(address, data[:size*count]); err != nil {
+			return true, err
+		}
+	}
+	if writeback {
+		m.CPU.State[rn] = updated
+	}
+	return true, nil
+}
+
+// Additional lane permutations used by AArch64 libc memory/string routines.
+func (m *Machine) simdMisc(i uint32) (bool, error) {
+	rd, rn, rm := i&31, i>>5&31, i>>16&31
+	n := 8
+	if i>>30&1 != 0 {
+		n = 16
+	}
+	source := m.Vectors[rn]
+	var result [16]byte
+	switch {
+	case i&0xbfe08400 == 0x2e000000: // EXT
+		offset := int(i >> 11 & 15)
+		if offset >= n {
+			return false, nil
+		}
+		for j := 0; j < n; j++ {
+			at := offset + j
+			if at < n {
+				result[j] = source[at]
+			} else {
+				result[j] = m.Vectors[rm][at-n]
+			}
+		}
+	case i&0xbf3ffc00 == 0x0e200800 || i&0xbf3ffc00 == 0x2e200800 || i&0xbf3ffc00 == 0x0e201800: // REV64/REV32/REV16
+		size := 1 << uint(i>>22&3)
+		group := 8
+		if i>>29&1 != 0 {
+			group = 4
+		} else if i>>12&1 != 0 {
+			group = 2
+		}
+		if size >= group {
+			return false, nil
+		}
+		for j := 0; j < n; j += size {
+			from := j/group*group + group - size - j%group
+			copy(result[j:j+size], source[from:from+size])
+		}
+	case i&0xbf80fc00 == 0x0f000400 || i&0xbf80fc00 == 0x2f000400 || i&0xbf80fc00 == 0x2f004400 || i&0xbf80fc00 == 0x0f005400 || i&0xbf80fc00 == 0x2f005400: // SSHR/USHR/SRI/SHL/SLI immediate
+		imm := i >> 16 & 127
+		immh := imm >> 3
+		if immh == 0 {
+			return false, nil
+		}
+		width := uint32(8) << uint(bits.Len32(immh)-1)
+		size := int(width / 8)
+		if size == 8 && n == 8 {
+			return false, nil
+		}
+		left := i>>12&7 == 5
+		insert := i>>12&7 == 4 || left && i>>29&1 != 0
+		shift := 2*width - imm
+		if left {
+			shift = imm - width
+		}
+		for j := 0; j < n; j += size {
+			var lane, previous uint64
+			for k := 0; k < size; k++ {
+				lane |= uint64(source[j+k]) << uint(8*k)
+				previous |= uint64(m.Vectors[rd][j+k]) << uint(8*k)
+			}
+			value := lane >> shift
+			if left {
+				value = lane << shift
+			} else if i>>29&1 == 0 {
+				value = uint64(int64(simdSign(lane, width)) >> shift)
+			}
+			if insert {
+				if left {
+					value |= previous & simdMask(shift)
+				} else {
+					value |= previous &^ simdMask(width-shift)
+				}
+			}
+			for k := 0; k < size; k++ {
+				result[j+k] = byte(value >> uint(8*k))
+			}
+		}
+	case i&0xbffffc00 == 0x2e205800: // NOT
+		for j := 0; j < n; j++ {
+			result[j] = ^source[j]
+		}
+	case i&0x9f3efc00 == 0x0e30a800: // SMAXV/SMINV/UMAXV/UMINV
+		size := 1 << uint(i>>22&3)
+		if size == 8 || size == 4 && n == 8 {
+			return false, nil
+		}
+		best := uint64(0)
+		for j := 0; j < n; j += size {
+			lane := uint64(0)
+			for k := 0; k < size; k++ {
+				lane |= uint64(source[j+k]) << uint(8*k)
+			}
+			less := lane < best
+			if i>>29&1 == 0 {
+				less = int64(simdSign(lane, uint32(size*8))) < int64(simdSign(best, uint32(size*8)))
+			}
+			if j == 0 || less == (i>>16&1 != 0) {
+				best = lane
+			}
+		}
+		for k := 0; k < size; k++ {
+			result[k] = byte(best >> uint(8*k))
+		}
+	case i&0xfffffc00 == 0x5ef1b800: // ADDP Dd,Vn.2D
+		binary.LittleEndian.PutUint64(result[:8], binary.LittleEndian.Uint64(source[:8])+binary.LittleEndian.Uint64(source[8:]))
+	case i&0xfffffc00 == 0x9eae0000: // FMOV Xd,Vn.D[1]
+		m.w(rd, binary.LittleEndian.Uint64(source[8:]), 64)
+		return true, nil
+	case i&0xfffffc00 == 0x9eaf0000: // FMOV Vd.D[1],Xn
+		result = m.Vectors[rd]
+		binary.LittleEndian.PutUint64(result[8:], m.r(rn))
+	case i&0xbfe0fc00 == 0x0e000400 || i&0xffe0fc00 == 0x5e000400: // DUP vector/scalar element
+		imm := i >> 16 & 31
+		if imm == 0 {
+			return false, nil
+		}
+		log := uint32(bits.TrailingZeros32(imm))
+		if log > 3 {
+			return false, nil
+		}
+		size := 1 << log
+		index := imm >> (log + 1)
+		if i&0xffe0fc00 == 0x5e000400 {
+			n = int(size)
+		} else if size == 8 && n == 8 {
+			return false, nil
+		}
+		for j := 0; j < n; j += int(size) {
+			copy(result[j:j+int(size)], source[int(index)*int(size):int(index+1)*int(size)])
+		}
+	case i&0xffe08400 == 0x6e000400: // INS vector element
+		imm := i >> 16 & 31
+		if imm == 0 {
+			return false, nil
+		}
+		log := uint32(bits.TrailingZeros32(imm))
+		if log > 3 {
+			return false, nil
+		}
+		size := uint32(1) << log
+		index := imm >> (log + 1)
+		other := i >> 11 & 15
+		if other&(size-1) != 0 {
+			return false, nil
+		}
+		other >>= log
+		result = m.Vectors[rd]
+		copy(result[index*size:(index+1)*size], source[other*size:(other+1)*size])
+	default:
+		return false, nil
+	}
+	m.Vectors[rd] = result
+	return true, nil
+}
+
+-- simd_test.go --
+package arm64machine
+
+import (
+	"bytes"
+	"encoding/binary"
+	"renvo.dev/emulators/aarch64"
+	"testing"
+)
+
+// Literal encodings assembled independently with GNU AArch64 binutils.
+func runSIMD(t *testing.T, m *Machine, opcode uint32) {
+	t.Helper()
+	pc, retired := m.CPU.State[aarch64.PC], m.CPU.Retired
+	handled, err := m.simd(opcode)
+	if !handled || err != nil || m.CPU.State[aarch64.PC] != pc+4 || m.CPU.Retired != retired {
+		t.Fatalf("SIMD %08x: handled=%t err=%v PC=%#x retired=%d", opcode, handled, err, m.CPU.State[aarch64.PC], m.CPU.Retired)
+	}
+}
+
+func TestSIMDRegisterSaveAndScalarZeroing(t *testing.T) {
+	m := reviewMachine(t)
+	for i := 0; i < 16; i++ {
+		m.Vectors[0][i], m.Vectors[1][i] = byte(i), byte(i+16)
+	}
+	m.CPU.State[2] = ramBase + 0x120
+	runSIMD(t, m, 0xadbf0440) // STP Q0,Q1,[X2,#-32]!
+	if m.CPU.State[2] != ramBase+0x100 {
+		t.Fatal("pair preindex")
+	}
+	for i, b := range m.RAM[0x100:0x120] {
+		if b != byte(i) {
+			t.Fatal("pair did not preserve all 256 vector bits")
+		}
+	}
+	runSIMD(t, m, 0xacc11043) // LDP Q3,Q4,[X2],#32
+	if m.Vectors[3] != m.Vectors[0] || m.Vectors[4] != m.Vectors[1] || m.CPU.State[2] != ramBase+0x120 {
+		t.Fatal("pair load/postindex")
+	}
+	m.CPU.State[2] = ramBase + 0x100
+	runSIMD(t, m, 0xbd400043) // LDR S3,[X2]
+	want := [16]byte{0, 1, 2, 3}
+	if m.Vectors[3] != want {
+		t.Fatal("scalar load did not clear upper vector bits", m.Vectors[3])
+	}
+}
+
+func TestSIMDMemoryFaultDoesNotCommit(t *testing.T) {
+	m := reviewMachine(t)
+	reviewTables(m, 3|1<<10)
+	m.CPU.State[2] = reviewVA + 4088
+	m.CPU.State[aarch64.PC] = 0x800
+	for i := range m.Vectors[0] {
+		m.Vectors[0][i], m.Vectors[3][i] = 0xaa, 0xbb
+	}
+	before := append([]byte(nil), m.RAM[reviewData:reviewData+4096]...)
+	handled, err := m.simd(0x3c810440) // STR Q0,[X2],#16
+	if !handled || err == nil || m.CPU.State[2] != reviewVA+4088 || m.CPU.State[aarch64.PC] != 0x800 || !bytes.Equal(before, m.RAM[reviewData:reviewData+4096]) {
+		t.Fatal("faulting SIMD store committed memory/base/PC", handled, err)
+	}
+	previous := m.Vectors[3]
+	handled, err = m.simd(0x3cc10443) // LDR Q3,[X2],#16
+	if !handled || err == nil || m.Vectors[3] != previous || m.CPU.State[2] != reviewVA+4088 || m.CPU.State[aarch64.PC] != 0x800 {
+		t.Fatal("faulting SIMD load committed vector/base/PC", handled, err)
+	}
+}
+
+func TestSIMDIntegerCompareNarrowReduce(t *testing.T) {
+	m := reviewMachine(t)
+	runSIMD(t, m, 0x4f00e640) // MOVI V0.16B,#0x12
+	m.CPU.State[2] = 0x12
+	runSIMD(t, m, 0x4e010c41) // DUP V1.16B,W2
+	m.Vectors[1][7] = 0x34
+	runSIMD(t, m, 0x6e218c02) // CMEQ V2.16B,V0.16B,V1.16B
+	for i, b := range m.Vectors[2] {
+		want := byte(255)
+		if i == 7 {
+			want = 0
+		}
+		if b != want {
+			t.Fatalf("compare lane %d=%d", i, b)
+		}
+	}
+	runSIMD(t, m, 0x6e22a443) // UMAXP V3.16B,V2.16B,V2.16B
+	runSIMD(t, m, 0x4e083c64) // UMOV X4,V3.D[0]
+	if m.CPU.State[4] != ^uint64(0) {
+		t.Fatal("pairwise max/extract")
+	}
+	runSIMD(t, m, 0x0f0c8444) // SHRN V4.8B,V2.8H,#4
+	if m.Vectors[4] != ([16]byte{255, 255, 255, 15, 255, 255, 255, 255}) {
+		t.Fatal("SHRN", m.Vectors[4])
+	}
+	runSIMD(t, m, 0x4e31b805) // ADDV B5,V0.16B
+	if m.Vectors[5] != ([16]byte{0x20}) {
+		t.Fatal("byte reduction truncation")
+	}
+	m.CPU.State[2] = 0xff
+	runSIMD(t, m, 0x4e010c41)
+	runSIMD(t, m, 0x0e303826) // SADDLV H6,V1.8B
+	if m.Vectors[6] != ([16]byte{0xf8, 0xff}) {
+		t.Fatal("signed widening reduction")
+	}
+	runSIMD(t, m, 0x2f09a407) // USHLL V7.8H,V0.8B,#1
+	runSIMD(t, m, 0x2e2010e8) // UADDW V8.8H,V7.8H,V0.8B
+	for i := 0; i < 16; i += 2 {
+		if binary.LittleEndian.Uint16(m.Vectors[8][i:]) != 54 {
+			t.Fatal("widen/shift/add")
+		}
+	}
+	runSIMD(t, m, 0x4e208409) // ADD V9.16B,V0.16B,V0.16B
+	runSIMD(t, m, 0x4e071c49) // INS V9.B[3],W2
+	runSIMD(t, m, 0x4e072d2a) // SMOV X10,V9.B[3]
+	if m.CPU.State[10] != ^uint64(0) {
+		t.Fatal("signed extraction")
+	}
+	runSIMD(t, m, 0x9e66012b) // FMOV X11,D9
+	runSIMD(t, m, 0x9e67016a) // FMOV D10,X11
+	if binary.LittleEndian.Uint64(m.Vectors[10][:]) != 0x24242424ff242424 || binary.LittleEndian.Uint64(m.Vectors[10][8:]) != 0 {
+		t.Fatal("FMOV bit preservation / upper clearing")
+	}
+}
+
+func TestSIMDStructureInterleaveAndLanes(t *testing.T) {
+	m := reviewMachine(t)
+	for i := 0; i < 16; i++ {
+		m.RAM[0x100+i] = byte(i)
+	}
+	m.CPU.State[2] = ramBase + 0x100
+	runSIMD(t, m, 0x0cdf8040) // LD2 {V0.8B,V1.8B},[X2],#16
+	if m.Vectors[0] != ([16]byte{0, 2, 4, 6, 8, 10, 12, 14}) || m.Vectors[1] != ([16]byte{1, 3, 5, 7, 9, 11, 13, 15}) || m.CPU.State[2] != ramBase+0x110 {
+		t.Fatal("deinterleaved load")
+	}
+	runSIMD(t, m, 0x0c9f8040) // ST2 {V0.8B,V1.8B},[X2],#16
+	if !bytes.Equal(m.RAM[0x100:0x110], m.RAM[0x110:0x120]) {
+		t.Fatal("interleaved store")
+	}
+	m.RAM[0x120], m.RAM[0x121] = 0xab, 0xcd
+	runSIMD(t, m, 0x0ddf1443) // LD1 {V3.B}[5],[X2],#1
+	if m.Vectors[3] != ([16]byte{0, 0, 0, 0, 0, 0xab}) || m.CPU.State[2] != ramBase+0x121 {
+		t.Fatal("structure element load")
+	}
+	runSIMD(t, m, 0x4d40c044) // LD1R {V4.16B},[X2]
+	for _, b := range m.Vectors[4] {
+		if b != 0xcd {
+			t.Fatal("replicated load")
+		}
+	}
+}
+
+func TestSIMDPermutationsAndUnsupportedState(t *testing.T) {
+	m := reviewMachine(t)
+	for i := 0; i < 16; i++ {
+		m.Vectors[0][i], m.Vectors[1][i] = byte(i), byte(i+16)
+	}
+	runSIMD(t, m, 0x6e013805) // EXT V5.16B,V0.16B,V1.16B,#7
+	for i, b := range m.Vectors[5] {
+		if b != byte(i+7) {
+			t.Fatal("EXT")
+		}
+	}
+	runSIMD(t, m, 0x4e200806) // REV64 V6.16B,V0.16B
+	if m.Vectors[6] != ([16]byte{7, 6, 5, 4, 3, 2, 1, 0, 15, 14, 13, 12, 11, 10, 9, 8}) {
+		t.Fatal("REV64")
+	}
+	runSIMD(t, m, 0x6e30a808) // UMAXV B8,V0.16B
+	runSIMD(t, m, 0x6e31a809) // UMINV B9,V0.16B
+	if m.Vectors[8] != ([16]byte{15}) || m.Vectors[9] != ([16]byte{}) {
+		t.Fatal("unsigned min/max reduction")
+	}
+	runSIMD(t, m, 0x4e070401) // DUP V1.16B,V0.B[3]
+	for _, b := range m.Vectors[1] {
+		if b != 3 {
+			t.Fatal("lane duplicate")
+		}
+	}
+	runSIMD(t, m, 0x6e0b1c02) // INS V2.B[5],V0.B[3]
+	if m.Vectors[2] != ([16]byte{0, 0, 0, 0, 0, 3}) {
+		t.Fatal("vector lane insert")
+	}
+	before, state := m.Vectors, m.CPU.State
+	if handled, err := m.simd(0xffffffff); handled || err != nil || before != m.Vectors || state != m.CPU.State {
+		t.Fatal("unsupported SIMD changed state")
+	}
+}
+
+func TestSIMDReverseGroupsAndImmediateShifts(t *testing.T) {
+	m := reviewMachine(t)
+	for j := 0; j < 16; j++ {
+		m.Vectors[0][j] = byte(j)
+	}
+	runSIMD(t, m, 0x6e200801) // REV32 V1.16B,V0.16B
+	if m.Vectors[1] != ([16]byte{3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12}) {
+		t.Fatal("REV32", m.Vectors[1])
+	}
+	runSIMD(t, m, 0x0e201801) // REV16 V1.8B,V0.8B, clears upper half
+	if m.Vectors[1] != ([16]byte{1, 0, 3, 2, 5, 4, 7, 6}) {
+		t.Fatal("REV16", m.Vectors[1])
+	}
+	for j, word := range []uint32{0x12345678, 0xfedcba98, 0xffffffff, 0} {
+		binary.LittleEndian.PutUint32(m.Vectors[0][j*4:], word)
+	}
+	runSIMD(t, m, 0x6f390401) // USHR V1.4S,V0.4S,#7
+	runSIMD(t, m, 0x6f395401) // SLI V1.4S,V0.4S,#25: combine a rotate right
+	for j, word := range []uint32{0x12345678, 0xfedcba98, 0xffffffff, 0} {
+		if got := binary.LittleEndian.Uint32(m.Vectors[1][j*4:]); got != word>>7|word<<25 {
+			t.Fatalf("rotation lane %d=%#x", j, got)
+		}
+	}
+	// The maximum encoded right shift distinguishes signed and unsigned lanes.
+	runSIMD(t, m, 0x4f200401) // SSHR V1.4S,V0.4S,#32
+	if m.Vectors[1] != ([16]byte{0, 0, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255}) {
+		t.Fatal("SSHR", m.Vectors[1])
+	}
+	runSIMD(t, m, 0x6f200401) // USHR V1.4S,V0.4S,#32
+	if m.Vectors[1] != ([16]byte{}) {
+		t.Fatal("USHR width", m.Vectors[1])
+	}
+	m.Vectors[1] = m.Vectors[0]
+	runSIMD(t, m, 0x6f204401) // SRI #32 preserves all destination bits
+	if m.Vectors[1] != m.Vectors[0] {
+		t.Fatal("SRI width", m.Vectors[1])
+	}
+	before := m.Vectors
+	if handled, err := m.simd(0x6ea00801); handled || err != nil || m.Vectors != before {
+		t.Fatal("reserved REV32 doubleword changed state")
+	}
+}
+
+func TestSIMDScalarDuplicate(t *testing.T) {
+	m := reviewMachine(t)
+	for j := 0; j < 16; j++ {
+		m.Vectors[3][j], m.Vectors[19][j] = byte(j+1), 255
+	}
+	runSIMD(t, m, 0x5e180473) // DUP D19,V3.D[1]
+	if m.Vectors[19] != ([16]byte{9, 10, 11, 12, 13, 14, 15, 16}) {
+		t.Fatal("scalar lane duplicate/upper clearing", m.Vectors[19])
+	}
+}
+
+-- table_capacity_test.go --
+package arm64machine
+
+import "testing"
+
+func TestTLBCapacityEvictionRewatchesCurrentWalk(t *testing.T) {
+	m := reviewMachine(t)
+	reviewTables(m, 3|1<<10)
+	for i := uint64(0); i < 32768; i++ {
+		m.TLB[tlbKey{Page: 0x1000000 + i}] = 0
+	}
+	if _, err := m.translate(reviewVA, false, false); err != nil {
+		t.Fatal(err)
+	}
+	before := m.NativeRAM.CodeContext()
+	if err := m.physicalWrite(ramBase+0x4000+(reviewVA>>12)*8, 8, ramBase+0x9000|3|1<<10); err != nil {
+		t.Fatal(err)
+	}
+	if m.NativeRAM.CodeContext() == before {
+		t.Fatal("capacity flush dropped the newly cached walk's table barrier")
+	}
+}
+
+-- table_watch_lifetime_test.go --
+package arm64machine
+
+import "testing"
+
+func TestRetiredPageTableFrameCanBeReusedWithoutCodeInvalidation(t *testing.T) {
+	m := reviewMachine(t)
+	reviewTables(m, 3|1<<10)
+	if _, err := m.translate(reviewVA, false, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.sysWrite(0xc080, 0); err != nil {
+		t.Fatal(err)
+	} // Full MMU/TLB revocation.
+	before := m.NativeRAM.CodeContext()
+	if err := m.physicalWrite(ramBase+0x1000, 8, 0x12345678); err != nil {
+		t.Fatal(err)
+	}
+	if m.NativeRAM.CodeContext() != before {
+		t.Fatal("retired page-table frame remained a permanent write barrier")
+	}
+	// Reusing it as a table must restore the write barrier before native entry.
+	reviewWord(m, 0x1000, ramBase+0x2000|3)
+	if err := m.sysWrite(0xc080, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.translate(reviewVA, false, false); err != nil {
+		t.Fatal(err)
+	}
+	m.NativeRAM.NativeRefill(reviewVA)
+	ctx := m.NativeRAM.NativeContext()
+	before = m.NativeRAM.CodeContext()
+	if err := m.physicalWrite(ramBase+0x4000+(reviewVA>>12)*8, 8, ramBase+0x9000|3|1<<10); err != nil {
+		t.Fatal(err)
+	}
+	if m.NativeRAM.CodeContext() == before || ctx.Pages[(reviewVA>>12)&63].Data != nil {
+		t.Fatal("active page-table write retained native authority")
+	}
+	if handled, err := m.system(0xd508871f); !handled || err != nil {
+		t.Fatal("TLBI", handled, err)
+	}
+	if p, err := m.translate(reviewVA, false, false); err != nil || p != ramBase+0x9000 {
+		t.Fatal("remap survived incorrectly", p, err)
+	}
+}
+
+-- tlb_fast_test.go --
+package arm64machine
+
+import "testing"
+
+func TestTranslationFastCachePermissionsRemapAndCollision(t *testing.T) {
+	m := reviewMachine(t)
+	reviewTables(m, 3|1<<10|1<<6)
+	m.setPstate(0)
+	for _, access := range [][2]bool{{false, false}, {true, false}, {false, true}} {
+		for j := 0; j < 2; j++ {
+			p, err := m.translate(reviewVA+31, access[0], access[1])
+			if err != nil || p != ramBase+reviewData+31 {
+				t.Fatalf("initial access %v: p=%#x err=%v", access, p, err)
+			}
+		}
+	}
+	// Another mapped page forces replacement without conferring the first page's identity.
+	collision := reviewVA + 256*4096
+	reviewWord(m, 0x4000+(collision>>12)*8, ramBase+0x9000|3|1<<10|1<<6)
+	for j := 0; j < 16; j++ {
+		p, err := m.translate(collision+31, false, false)
+		if err != nil || p != ramBase+0x9000+31 {
+			t.Fatalf("collision p=%#x err=%v", p, err)
+		}
+		p, err = m.translate(reviewVA+31, false, false)
+		if err != nil || p != ramBase+reviewData+31 {
+			t.Fatalf("original p=%#x err=%v", p, err)
+		}
+	}
+	// TLBI-equivalent invalidation must revoke cached write/execute grants and remap reads.
+	reviewWord(m, 0x4000+(reviewVA>>12)*8, ramBase+0xa000|3|1<<10|3<<6|1<<54)
+	m.flush()
+	p, err := m.translate(reviewVA+31, false, false)
+	if err != nil || p != ramBase+0xa000+31 {
+		t.Fatalf("remap p=%#x err=%v", p, err)
+	}
+	if _, err = m.translate(reviewVA, true, false); err == nil {
+		t.Fatal("stale write grant")
+	}
+	if _, err = m.translate(reviewVA, false, true); err == nil {
+		t.Fatal("stale execute grant")
+	}
+	// A supervisor-only read cached at EL1 cannot be reused at EL0.
+	reviewTables(m, 3|1<<10)
+	m.setPstate(5)
+	if _, err = m.translate(reviewVA, false, false); err != nil {
+		t.Fatal(err)
+	}
+	m.setPstate(0)
+	if _, err = m.translate(reviewVA, false, false); err == nil {
+		t.Fatal("supervisor cache leaked into user domain")
+	}
+}
+
+-- tlb_privilege_retention_test.go --
+package arm64machine
+
+import "testing"
+
+func TestPrivilegeTaggedTLBRetainsMappingsWithoutLeakingPermissions(t *testing.T) {
+	m := reviewMachine(t)
+	const page = uint64(3 | 1<<10)
+	// Supervisor-only RW and user-readable readonly, with user execute denied.
+	reviewTables(m, page)
+	m.Sys[0xc101] = ramBase + 0x1000 // Same independently checked high-bank root.
+	reviewWord(m, 0x4000+5*8, ramBase+0x9000|page|3<<6|1<<54)
+	m.setPstate(5)
+	for _, access := range [][2]bool{{false, false}, {true, false}, {false, true}} {
+		if _, err := m.translate(reviewVA, access[0], access[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := m.translate(0x5000, false, false); err != nil {
+		t.Fatal(err)
+	}
+	m.NativeRAM.NativeRefill(0x5000)
+	if m.NativeRAM.NativeContext().Pages[5].Data == nil {
+		t.Fatal("kernel descriptor did not warm")
+	}
+	count := len(m.TLB)
+	for _, state := range []uint64{0, 0x3c0, 5, 4, 0x3c5, 0} {
+		m.setPstate(state)
+		if len(m.TLB) < count {
+			t.Fatal("Pstate discarded privilege-tagged TLB")
+		}
+		if m.NativeRAM.NativeContext().Pages[5].Data != nil {
+			t.Fatal("native descriptor survived privilege transition")
+		}
+		if state&0xc == 0 {
+			for _, access := range [][2]bool{{false, false}, {true, false}, {false, true}} {
+				if _, err := m.translate(reviewVA, access[0], access[1]); err == nil {
+					t.Fatal("supervisor TLB authority leaked into EL0", access)
+				}
+			}
+			if _, err := m.translate(0x5000, true, false); err == nil {
+				t.Fatal("readonly TLB acquired write authority")
+			}
+			if _, err := m.translate(0x5000, false, true); err == nil {
+				t.Fatal("user NX bypassed by kernel cache")
+			}
+		} else {
+			if p, err := m.translate(reviewVA+17, true, false); err != nil || p != ramBase+reviewData+17 {
+				t.Fatal("kernel mapping changed on round trip", p, err)
+			}
+		}
+		if p, err := m.translate(0x5000+31, false, false); err != nil || p != ramBase+0x9000+31 {
+			t.Fatal("readonly read lost", p, err)
+		}
+	}
+	m.setPstate(5)
+	// The architectural control operations must still revoke BOTH levels and
+	// all native pointers. Same-value writes also retain their original flush.
+	for _, reg := range []uint32{0xc100, 0xc101, 0xc102, 0xc080} {
+		if err := m.sysWrite(reg, m.Sys[reg]); err != nil {
+			t.Fatal(err)
+		}
+		if len(m.TLB) != 0 {
+			t.Fatal("control register failed to revoke tagged TLB", reg)
+		}
+		for _, cached := range m.fastTLB {
+			if cached.valid {
+				t.Fatal("fast TLB survived control-register write", reg)
+			}
+		}
+		if _, err := m.translate(0x5000, false, false); err != nil {
+			t.Fatal(err)
+		}
+		m.NativeRAM.NativeRefill(0x5000)
+	}
+	if err := m.physicalWrite(ramBase+0x4000+5*8, 8, ramBase+0xa000|page|1<<6); err != nil {
+		t.Fatal(err)
+	}
+	// Execute the actual modeled TLBI VMALLE1 instruction, not a test shortcut.
+	if handled, err := m.system(0xd508871f); !handled || err != nil {
+		t.Fatal("TLBI did not execute", handled, err)
+	}
+	if p, err := m.translate(0x5000, false, false); err != nil || p != ramBase+0xa000 {
+		t.Fatal("stale physical mapping after TLBI", p, err)
+	}
+	if _, err := m.translate(0x5000, true, false); err != nil {
+		t.Fatal("new writable mapping lost", err)
+	}
+	m.setPstate(0)
+	if _, err := m.translate(0x5000, false, true); err != nil {
+		t.Fatal("new executable mapping lost", err)
+	}
+}
+
+func TestSameELPstateChangePreservesDataButPermissionWritesRevokeIt(t *testing.T) {
+	m := jitKernelMachine(t, "native")
+	jitRun(t, m, 4096)
+	const key = uint64(0x800000005000)
+	m.NativeRAM.NativeRefill(key)
+	ctx := m.NativeRAM.NativeContext()
+	index := (key >> 12) & 63
+	before := ctx.Pages[index]
+	if before.Data == nil {
+		t.Fatal("data mapping never warmed")
+	}
+	for _, state := range []uint64{0x3c4, 0x3c5, 5, 4, 0xf00003c5} {
+		m.setPstate(state)
+		after := m.NativeRAM.NativeContext().Pages[index]
+		if after.Data != before.Data || after.Permissions != before.Permissions || after.Epoch != before.Epoch {
+			t.Fatal("same-EL Pstate changed data authority")
+		}
+	}
+	// Physical page-table writes preserve the old conservative write barrier.
+	if err := m.physicalWrite(ramBase+0x4000+5*8, 8, ramBase+0x9000|3|1<<10|3<<6|1<<54); err != nil {
+		t.Fatal(err)
+	}
+	m.flush()
+	if ctx.Pages[index].Data != nil {
+		t.Fatal("PTE mutation retained native authority")
+	}
+	m.NativeRAM.NativeRefill(key)
+	if ctx.Pages[index].Data == nil || ctx.Pages[index].Permissions&2 != 0 {
+		t.Fatal("readonly PTE gained write authority")
+	}
+	m.setPstate(0)
+	if ctx.Pages[index].Data != nil {
+		t.Fatal("privilege change retained supervisor mapping")
+	}
+}

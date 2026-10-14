@@ -7,42 +7,21 @@ import (
 
 func (e *Engine) stepMemory(c CPU, block *compiledBlock) error {
 	memory, ok := c.MemoryBus().(NativeMemory)
-	if !ok || e.native == nil || block.visits < e.config.NativeThreshold {
+	if !ok || e.native == nil || block.visits < e.nativeThreshold(block) {
 		return e.interpret(c)
 	}
 	context := memory.NativeContext()
 	if context == nil {
 		return e.interpret(c)
 	}
-	if !block.attempted {
-		block.attempted = true
-		var b emu.Builder
-		pc := c.Registers()[e.arch.PC]
-		b.Store(e.arch.PC, b.Constant(pc))
-		for i, ins := range block.instructions {
-			if !e.arch.Lower(&b, ins, i) {
-				e.Stats.CompileFailures++
-				e.discard(pc)
-				return e.interpret(c)
-			}
-		}
-		b.Checkpoint(e.arch.StateWords, len(block.instructions))
-		block.ops = b.FinishMemory(e.arch.StateWords)
-		entry, err := e.native.CompileMemory(block.ops, e.arch.StateWords)
-		if err != nil {
-			e.Stats.CompileFailures++
-		} else {
-			block.entry, block.native = entry, true
-			_ = e.native.NameEntry(entry, fmt.Sprintf("%s_%x_memory_%d_ops", e.arch.Name, pc, len(block.ops)))
-			e.Stats.ProfileErrors = e.native.SymbolErrors
-			e.Stats.Promotions++
-		}
-		e.Stats.NativeBytes = e.native.Bytes
+	if !e.prepareMemoryBlock(c, block) {
+		return e.interpret(c)
 	}
 	if !block.native {
 		return e.interpret(c)
 	}
-	if err := e.native.CallMemory(block.entry, c.Registers(), context); err != nil {
+	err := e.native.CallMemory(block.entry, c.Registers(), context)
+	if err != nil {
 		return err
 	}
 	return e.accountMemory(c, block, memory, context)
@@ -61,6 +40,9 @@ func (e *Engine) accountMemory(c CPU, block *compiledBlock, memory NativeMemory,
 	e.Stats.NativeMemory += uint64(block.memoryPrefix[retired])
 	if context.Status != 0 {
 		e.Stats.MemoryExits++
+		if e.config.ProfileNative {
+			e.recordMemoryExit(c.Registers()[e.arch.PC], context)
+		}
 		if context.Status == 1 {
 			memory.NativeRefill(context.Address)
 		}
@@ -68,4 +50,37 @@ func (e *Engine) accountMemory(c CPU, block *compiledBlock, memory NativeMemory,
 	}
 	e.observeEdge(block.instructions[len(block.instructions)-1], c.Registers()[e.arch.PC])
 	return nil
+}
+
+func (e *Engine) prepareMemoryBlock(c CPU, block *compiledBlock) bool {
+	if block.attempted {
+		return true
+	}
+	defer pauseTranslationClock(c)()
+	if !block.attempted {
+		block.attempted = true
+		var b emu.Builder
+		pc := c.Registers()[e.arch.PC]
+		b.Store(e.arch.PC, b.Constant(pc))
+		for i, ins := range block.instructions {
+			if !e.arch.Lower(&b, ins, i) {
+				e.Stats.CompileFailures++
+				e.discard(pc)
+				return false
+			}
+		}
+		b.Checkpoint(e.arch.StateWords, len(block.instructions))
+		block.ops = b.FinishMemory(e.arch.StateWords)
+		entry, err := e.native.CompileMemory(block.ops, e.arch.StateWords)
+		if err != nil {
+			e.Stats.CompileFailures++
+		} else {
+			block.entry, block.native = entry, true
+			_ = e.native.NameEntry(entry, fmt.Sprintf("%s_%x_memory_%d_ops", e.arch.Name, pc, len(block.ops)))
+			e.Stats.ProfileErrors = e.native.SymbolErrors
+			e.Stats.Promotions++
+		}
+		e.Stats.NativeBytes = e.native.Bytes
+	}
+	return true
 }

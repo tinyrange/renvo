@@ -1,0 +1,2284 @@
+RFE 1
+
+-- rfe.json --
+{
+  "format": 1,
+  "name": "linux-amd64-machine",
+  "import": "renvo.dev/emulators/amd64machine",
+  "entry": "Main",
+  "requires": [
+    {
+      "name": "amd64"
+    }
+  ]
+}
+
+-- boot_bounds_test.go --
+package amd64machine
+
+import (
+	"encoding/binary"
+	"testing"
+)
+
+func TestBootRejectsTruncatedBzImageHeader(t *testing.T) {
+	m := &Machine{RAM: make([]byte, 20<<20)}
+	kernel := make([]byte, 0x269)
+	copy(kernel[0x202:], "HdrS")
+	if err := m.Boot(kernel, nil, ""); err == nil {
+		t.Fatal("truncated bzImage header accepted")
+	}
+}
+
+func TestBootRejectsOversizedInitramfsWithoutPlacementUnderflow(t *testing.T) {
+	// A valid, minimal ELF reaches placement independently of bzImage parsing.
+	kernel := make([]byte, 64)
+	copy(kernel, "\x7fELF")
+	kernel[4], kernel[5], kernel[6] = 2, 1, 1
+	binary.LittleEndian.PutUint16(kernel[16:], 2)
+	binary.LittleEndian.PutUint16(kernel[18:], 62)
+	binary.LittleEndian.PutUint32(kernel[20:], 1)
+	binary.LittleEndian.PutUint64(kernel[24:], 0x100000)
+	binary.LittleEndian.PutUint16(kernel[52:], 64)
+	m := &Machine{RAM: make([]byte, 20<<20)}
+	if err := m.Boot(kernel, make([]byte, 5<<20), ""); err == nil {
+		t.Fatal("oversized initramfs accepted")
+	}
+}
+
+-- clock.go --
+package amd64machine
+
+import (
+	"renvo.dev/emulators/amd64"
+	"renvo.dev/internal/rfe/engine"
+	"renvo.dev/internal/rfe/systemclock"
+)
+
+// UseRealtimeClock is selected before enabling JIT so native counter reads
+// use oscillator snapshots rather than retired-instruction timestamp prefixes.
+// Constructors retain deterministic timing for embedding and reproducible tests.
+func (m *Machine) UseRealtimeClock() {
+	m.Clock = systemclock.New(uint64(m.System.TSCCrystalHz) * pitClocksPerTick)
+	m.System.ExternalClock = true
+}
+
+func (m *Machine) syncClock() {
+	if m.Clock == nil {
+		return
+	}
+	ticks := m.Clock.Read()
+	if ticks > m.ticks {
+		m.System.TSC += (ticks - m.ticks) * amd64.TSCTicksPerInstruction
+		m.ticks = ticks
+	}
+}
+
+func (c *nativeCPU) PauseTranslationClock() {
+	if c.m.Clock != nil {
+		c.m.Clock.Pause()
+	}
+}
+func (c *nativeCPU) ResumeTranslationClock() {
+	if c.m.Clock != nil {
+		c.m.Clock.Resume()
+	}
+}
+
+var _ engine.TranslationClock = (*nativeCPU)(nil)
+
+-- clock_boundary_test.go --
+package amd64machine
+
+import (
+	"renvo.dev/emulators/amd64"
+	"renvo.dev/internal/rfe/systemclock"
+	"testing"
+	"time"
+)
+
+func TestRealtimeNativeCounterReadEndsSliceBeforeFollowingInstruction(t *testing.T) {
+	m := jitMachine(t, "native")
+	m.JIT.Close()
+	m.Clock = systemclock.WithSource(119318200, func() time.Duration { return 100 * time.Millisecond }, func(time.Duration) { t.Fatal("unexpected wait") })
+	m.System.ExternalClock = true
+	copy(m.RAM[0x10000:], []byte{0x0f, 0x31, 0x49, 0xff, 0xc1, 0xeb, 0xf9}) // RDTSC; INC R9; JMP back.
+	if err := m.EnableJIT("native"); err != nil {
+		t.Fatal(err)
+	}
+	jitRun(t, m, 8192)
+	m.CPU.PC, m.CPU.R[9] = 0x8000, 0
+	retired, native := m.CPU.Retired, m.JIT.Stats.Native
+	if err := m.RunQuantum(65536); err != nil {
+		t.Fatal(err)
+	}
+	if m.CPU.Retired-retired != 1 || m.CPU.PC != 0x8002 || m.CPU.R[9] != 0 || m.CPU.R[amd64.RAX] != 1193182000 {
+		t.Fatal("native read held stale clock for whole slice", m.CPU.Retired-retired, m.CPU.PC, m.CPU.R)
+	}
+	if m.JIT.Stats.Native-native != 1 {
+		t.Fatal("counter did not return through native boundary", m.JIT.Stats)
+	}
+}
+
+-- clock_test.go --
+package amd64machine
+
+import (
+	"encoding/binary"
+	"renvo.dev/emulators/amd64"
+	"renvo.dev/internal/rfe/systemclock"
+	"testing"
+	"time"
+)
+
+func TestRealtimeClockFrozenNativeRetirementAndCounterReads(t *testing.T) {
+	for _, mode := range []string{"interpreter", "ir", "native"} {
+		m := jitMachine(t, mode)
+		m.JIT.Close()
+		elapsed := 100 * time.Millisecond
+		m.Clock = systemclock.WithSource(119318200, func() time.Duration { return elapsed }, func(time.Duration) { t.Fatal("busy CPU waited") })
+		m.System.ExternalClock = true
+		// RDTSC; MOV RSI,RAX; INC R9; JMP back. Real clock reads must not
+		// synthesize an instruction-prefix increment inside native regions.
+		copy(m.RAM[0x10000:], []byte{0x0f, 0x31, 0x48, 0x89, 0xc6, 0x49, 0xff, 0xc1, 0xeb, 0xf6})
+		if err := m.EnableJIT(mode); err != nil {
+			t.Fatal(err)
+		}
+		m.syncClock()
+		start, tsc := m.ticks, m.System.TSC
+		pitProgram(m, 0, 2, 1193)
+		jitRun(t, m, 8192)
+		m.servicePIT()
+		if m.ticks != start || m.System.TSC != tsc || m.CPU.R[amd64.RSI] != tsc || m.pitEdges != 0 || m.CPU.Retired != 8192 {
+			t.Fatal(mode, "retirement fabricated clock time", m.ticks, m.System.TSC, m.CPU.R, m.pitEdges)
+		}
+		elapsed += 20 * time.Millisecond
+		jitRun(t, m, 16)
+		m.servicePIT()
+		if m.ticks != 14318184 || m.System.TSC != 1431818400 || m.CPU.R[amd64.RSI] != m.System.TSC || m.pitEdges != 20 || m.pitCoalesced != 19 {
+			t.Fatal(mode, "elapsed host time/counter/PIT diverged", m.ticks, m.System.TSC, m.CPU.R, m.pitEdges, m.pitCoalesced)
+		}
+		if mode == "native" && m.JIT.NativeAvailable() && m.JIT.Stats.Native == 0 {
+			t.Fatal("no native execution tested")
+		}
+	}
+}
+
+func TestRealtimeClockIdleWaitKeepsRetirementAndTSCOffset(t *testing.T) {
+	m := pitDevice(t)
+	elapsed := time.Duration(0)
+	waits := 0
+	m.Clock = systemclock.WithSource(119318200, func() time.Duration { return elapsed }, func(d time.Duration) { elapsed += d; waits++ })
+	m.System.ExternalClock = true
+	m.System.TSC = 77 // Architectural offset survives clock synchronization.
+	m.CPU.Flags = 2 | amd64.FlagIF
+	m.CPU.R[amd64.RSP] = 0x8000
+	m.System.EFER = 1 << 10
+	m.System.GDTR = amd64.Table{Base: 0x3000, Limit: 31}
+	m.System.IDTR = amd64.Table{Base: 0x2000, Limit: 4095}
+	m.System.Segments[1] = amd64.Segment{Selector: 8, Limit: 0xffffffff, Flags: 0xaf9a}
+	binary.LittleEndian.PutUint64(m.RAM[0x3008:], 0x00af9a000000ffff)
+	binary.LittleEndian.PutUint64(m.RAM[0x2000+32*16:], 0x00008e0000084000)
+	copy(m.RAM[0x4000:], []byte{0x0f, 0x31, 0x49, 0x89, 0xc0, 0x66, 0xba, 0xf9, 0x0c, 0xb0, 0x06, 0xee})
+	m.PIC[0].mask, m.PIC[0].vector = 0, 32
+	m.System.Halted = true
+	pitProgram(m, 0, 0, 5)
+	if err := m.Run(100); err != nil {
+		t.Fatal(err)
+	}
+	if waits != 1 || m.CPU.Retired != 5 || m.ticks != 500 || m.System.TSC != 50077 || m.CPU.R[8] != 50077 {
+		t.Fatal("idle fabricated time/retirement or lost TSC offset", waits, m.CPU.Retired, m.ticks, m.System.TSC, m.CPU.R)
+	}
+}
+
+-- code_epoch.go --
+package amd64machine
+
+func (m *Machine) CodeEpoch(address uint64) uint64 {
+	if address >= uint64(len(m.RAM)) {
+		return 0
+	}
+	return m.versions[address>>12]
+}
+
+-- invlpg_native_test.go --
+package amd64machine
+
+import (
+	"renvo.dev/emulators/amd64"
+	"testing"
+)
+
+func TestINVLPGRevokesNativeDescriptorsRefilledBeforeArchitecturalFlush(t *testing.T) {
+	m := jitMachine(t, "native")
+	jitRun(t, m, 4096)
+	m.System.CPL = 0
+	m.CPU.R[amd64.RBX] = 0x9000
+	m.CPU.PC = 0x8000
+	// PTE mutation revokes native grants, but the old architectural TLB may
+	// still be used until INVLPG. A refill in this interval must be revoked too.
+	if err := m.Write(0x4048, 8, 0x12067|1<<63); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Write(0x10000, 3, 0x3b010f); err != nil { // INVLPG [RBX]
+		t.Fatal(err)
+	}
+	m.NativeRAM.NativeRefill(0x9000)
+	ctx := m.NativeRAM.NativeContext()
+	if ctx.Pages[9].Data != (*[4096]byte)(m.RAM[0x11000:0x12000]) {
+		t.Fatal("test did not establish a pre-INVLPG descriptor")
+	}
+	before := m.NativeRAM.CodeContext()
+	if err := m.CPU.Step(); err != nil {
+		t.Fatal(err)
+	}
+	if ctx.Pages[9].Data != nil || m.NativeRAM.CodeContext() == before {
+		t.Fatal("INVLPG preserved stale native mapping authority")
+	}
+	m.NativeRAM.NativeRefill(0x9000)
+	if ctx.Pages[9].Data != (*[4096]byte)(m.RAM[0x12000:0x13000]) {
+		t.Fatal("refill did not use the new PTE")
+	}
+	// Single-page invalidation does not revoke other architectural TLB entries;
+	// therefore it must not retire active page-table watches.
+	before = m.NativeRAM.CodeContext()
+	if err := m.Write(0x4048, 8, 0x11067|1<<63); err != nil {
+		t.Fatal(err)
+	}
+	if m.NativeRAM.CodeContext() == before {
+		t.Fatal("INVLPG incorrectly retired live page-table protection")
+	}
+}
+
+-- irq_slice_test.go --
+package amd64machine
+
+import (
+	"renvo.dev/emulators/amd64"
+	"testing"
+)
+
+func TestBlockedPICPendingDoesNotSingleStepNativeCode(t *testing.T) {
+	m := jitMachine(t, "native")
+	jitRun(t, m, 8192)
+	for _, active := range []byte{0, 1} {
+		m.PIC[0].mask, m.PIC[0].irr, m.PIC[0].isr = 0, 1, active
+		m.CPU.Flags = 2
+		if active != 0 {
+			m.CPU.Flags |= amd64.FlagIF
+		}
+		before := m.CPU.Retired
+		if err := m.RunQuantum(64); err != nil {
+			t.Fatal(err)
+		}
+		if used := m.CPU.Retired - before; used <= 1 || used > 64 {
+			t.Fatal("undeliverable PIC request single-stepped native code", active, used)
+		}
+		if m.PIC[0].irr != 1 || m.PIC[0].isr != active {
+			t.Fatal("pending IRQ lost or delivered while blocked")
+		}
+	}
+	m.PIC[0].isr = 0
+	m.CPU.Flags |= amd64.FlagIF
+	before := m.CPU.Retired
+	if err := m.RunQuantum(64); err != nil || m.CPU.Retired-before != 1 {
+		t.Fatal("deliverable IRQ boundary crossed", err, m.CPU.Retired-before)
+	}
+}
+
+-- jit.go --
+package amd64machine
+
+import (
+	"fmt"
+	"os"
+	"renvo.dev/emulators/amd64"
+	"renvo.dev/internal/rfe/engine"
+	emu "renvo.dev/internal/rfe/runtime"
+	"renvo.dev/internal/rfe/systemmemory"
+)
+
+func (m *Machine) nativeActive() bool {
+	return (m.System.CPL == 0 || m.System.CPL == 3) && m.System.EFER&(1<<10) != 0 && !m.System.Halted && m.System.IRQShadow == 0
+}
+func (m *Machine) nativeDomain() int {
+	if m.System.CPL == 3 {
+		return 0
+	}
+	return 1
+}
+func (m *Machine) nativeAddress(a uint64) uint64 {
+	if m.nativeDomain() == 0 {
+		a = systemmemory.UnfoldPageCacheAddress(a)
+	}
+	if m.nativeDomain() == 1 && a&(1<<47) != 0 {
+		return a | 0xffff000000000000
+	}
+	return a
+}
+func (m *Machine) InvalidateMappings() {
+	// System.Flush has already revoked the complete architectural TLB.
+	// Root-tagged CR3 switches use SwitchAddressSpace instead and keep their
+	// table watches until such a full revocation.
+	if m.NativeRAM != nil {
+		m.NativeRAM.ClearPageTableWatches()
+	}
+}
+
+// A single-page TLB invalidation keeps other cached translations live. Revoke
+// native authority without retiring any of their page-table write barriers.
+func (m *Machine) InvalidateNativeMappings() {
+	if m.NativeRAM != nil {
+		m.NativeRAM.InvalidateMappings()
+	}
+}
+func (m *Machine) SwitchAddressSpace() {
+	if m.NativeRAM != nil {
+		m.NativeRAM.SwitchAddressSpace()
+	}
+}
+func (m *Machine) MarkPageTable(address uint64) {
+	if m.NativeRAM != nil {
+		m.NativeRAM.MarkPageTable(address)
+	}
+}
+func (m *Machine) EnableJIT(mode string) error {
+	m.kernelThreshold = 4096
+	config := engine.DefaultEngineConfig()
+	config.Mode = mode
+	config.EvictCold = true
+	config.RecycleNative = true
+	config.DiscoveryThreshold = 32
+	e, err := m.newJIT(config)
+	if err == nil {
+		m.JIT = e
+	}
+	return err
+}
+func (m *Machine) newJIT(config engine.EngineConfig) (*engine.Engine, error) {
+	arch := amd64.TimedSystemArchitecture()
+	if m.Clock != nil {
+		arch = amd64.SampledSystemArchitecture()
+	}
+	lower, fetch := arch.Lower, arch.Fetch
+	arch.Fetch = func(memory engine.Memory, pc uint64) (engine.Instruction, error) {
+		ins, err := fetch(memory, pc)
+		if m.nativeDomain() != 0 {
+			ins.NativeThreshold = m.kernelThreshold
+		}
+		return ins, err
+	}
+	arch.Lower = func(b *emu.Builder, ins engine.Instruction, completed int) bool {
+		b.MemoryAddress = systemmemory.PageCacheAddress
+		if m.nativeDomain() == 1 {
+			b.MemoryAddress = systemmemory.X86KernelAddress
+		}
+		return lower(b, ins, completed)
+	}
+	return engine.New(config, arch)
+}
+func (m *Machine) printJITStats() {
+	fmt.Fprintf(os.Stderr, "page-table hardware metadata updates=%d\n", m.ADUpdates)
+	fmt.Fprintf(os.Stderr, "mapping changes [page-table code-write root-switch invalidation]=%v\n", m.NativeRAM.ProfileMappingCounters())
+	if m.Clock != nil {
+		fmt.Fprintf(os.Stderr, "clock mode=realtime translation_paused_ns=%d\n", m.Clock.PausedDuration())
+	}
+	fmt.Fprintf(os.Stderr, "clock ticks=%d tsc=%d tsc_offset=%d tsc_writes=%d pit_edges=%d pit_delivered=%d pit_coalesced=%d\n", m.ticks, m.System.TSC, m.System.TSC-m.ticks*amd64.TSCTicksPerInstruction, m.System.TSCWrites, m.pitEdges, m.pitDelivered, m.pitCoalesced)
+	m.printKernelJITStats()
+	if m.ProfileJIT {
+		if m.JIT != nil {
+			fmt.Fprintf(os.Stderr, "jit user hot link misses=%+v\n", m.JIT.LinkMissProfile())
+			fmt.Fprintf(os.Stderr, "jit user timeline=%s\n", m.JIT.DispatchProfileJSON())
+		}
+		if m.KernelJIT != nil {
+			fmt.Fprintf(os.Stderr, "jit kernel hot link misses=%+v\n", m.KernelJIT.LinkMissProfile())
+			fmt.Fprintf(os.Stderr, "jit kernel timeline=%s\n", m.KernelJIT.DispatchProfileJSON())
+		}
+	}
+	if m.JIT != nil {
+		s := m.JIT.Stats
+		fmt.Fprintf(os.Stderr, "jit available=%t native=%d linked=%d interpreted=%d promotions=%d failures=%d bytes=%d\n", m.JIT.NativeAvailable(), s.Native, s.Linked, s.Interpreted, s.Promotions, s.CompileFailures, s.NativeBytes)
+		fmt.Fprintf(os.Stderr, "jit stats=%+v cached=%d\n", s, m.JIT.CachedBlocks())
+	}
+}
+
+type nativeCPU struct {
+	*amd64.SystemAdapter
+	m         *Machine
+	accounted uint64
+}
+
+func (c *nativeCPU) Registers() []uint64      { return c.SystemAdapter.TimedRegisters() }
+func (c *nativeCPU) MemoryBus() engine.Memory { return c.m.NativeRAM }
+func (c *nativeCPU) sync() {
+	count := c.m.CPU.Retired - c.accounted
+	if c.m.Clock == nil {
+		c.m.ticks += count
+		c.m.System.TSC += count * amd64.TSCTicksPerInstruction
+	} else {
+		c.m.syncClock()
+	}
+	c.accounted = c.m.CPU.Retired
+}
+func (c *nativeCPU) Step() error {
+	c.Export()
+	c.sync()
+	err := c.m.CPU.Step()
+	if err == nil && c.m.Clock == nil {
+		c.m.ticks++
+	}
+	c.accounted = c.m.CPU.Retired
+	c.Import()
+	return err
+}
+func (c *nativeCPU) ExecuteInstruction(ins engine.Instruction) error {
+	c.Export()
+	c.sync()
+	err := c.m.CPU.ExecuteCachedInstruction(ins.Decoded.(amd64.Instruction))
+	if err == nil && c.m.Clock == nil {
+		c.m.ticks++
+	}
+	c.accounted = c.m.CPU.Retired
+	c.Import()
+	return err
+}
+func (m *Machine) RunQuantum(remaining uint64) error {
+	m.syncClock()
+	if m.JIT == nil || !m.nativeActive() {
+		err := m.CPU.Step()
+		if err == nil && m.Clock == nil {
+			m.ticks++
+		}
+		return err
+	}
+	budget := uint64(emu.NativeSessionLimit)
+	// A live console preserves the original polling bound. Once EOF has
+	// been observed there is no external input boundary to amortize across.
+	if m.Input != nil {
+		budget = 1024
+	}
+	if remaining < budget {
+		budget = remaining
+	}
+	if m.Clock == nil && m.nextTimer > m.ticks && m.nextTimer-m.ticks < budget {
+		budget = m.nextTimer - m.ticks
+	}
+	// Only deliverable PIC requests require the one-instruction boundary.
+	// An IRR bit with IF clear or another IRQ in service cannot interrupt:
+	// single-stepping it starves precisely the handler that must unblock it.
+	if m.System.Interruptible() && m.PIC[0].isr == 0 && m.PIC[0].irr & ^m.PIC[0].mask != 0 {
+		budget = 1
+	}
+	if m.adapter == nil {
+		m.adapter = &nativeCPU{SystemAdapter: amd64.NewSystemAdapter(&m.CPU), m: m}
+	}
+	cpu := m.adapter
+	cpu.Import()
+	cpu.accounted = m.CPU.Retired
+	err := m.activeJIT().RunQuanta(cpu, budget)
+	cpu.sync()
+	cpu.Export()
+	return err
+}
+
+-- jit_cached_control_test.go --
+package amd64machine
+
+import (
+	"renvo.dev/emulators/amd64"
+	"testing"
+)
+
+func TestCheckedCachedKernelControlInstructionsKeepTimeShadowAndLiveState(t *testing.T) {
+	native, interpreted := jitKernelMachine(t, "native"), jitKernelMachine(t, "interpreter")
+	// CLI; SWAPGS; RDMSR GSBASE; STI; NOP; JMP back. Control operations
+	// remain interpreted, and STI's shadow requires its old scheduling edge.
+	code := []byte{0xfa, 0x0f, 0x01, 0xf8, 0x0f, 0x32, 0xfb, 0x90, 0xeb, 0xf6}
+	for _, m := range []*Machine{native, interpreted} {
+		for n, b := range code {
+			if err := m.Write(0x10000+uint64(n), 1, uint64(b)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		m.CPU.R[amd64.RCX] = 0xc0000101
+		m.System.GSBase, m.System.KernelGSBase = 0x1122334455667788, 0x8877665544332211
+		m.CPU.Flags = 2 | amd64.FlagIF
+	}
+	for _, budget := range []uint64{8192, 1, 2, 3, 65, 4096} {
+		jitRun(t, native, budget)
+		jitRun(t, interpreted, budget)
+		if native.CPU.R != interpreted.CPU.R || native.CPU.Flags != interpreted.CPU.Flags || native.CPU.PC != interpreted.CPU.PC || native.CPU.Retired != interpreted.CPU.Retired || native.ticks != interpreted.ticks || native.System.TSC != interpreted.System.TSC || native.System.IRQShadow != interpreted.System.IRQShadow || native.System.GSBase != interpreted.System.GSBase || native.System.KernelGSBase != interpreted.System.KernelGSBase {
+			t.Fatal("cached kernel control state/time/shadow differs", budget)
+		}
+	}
+	if native.JIT.Stats.Interpreted == 0 || native.JIT.Stats.CodeReads >= native.CPU.Retired/4 {
+		t.Fatal("validated control opcodes were not cached")
+	}
+	// Remapping execution to NX must revoke the cached opcode; no SWAPGS or
+	// mask operation may run from a formerly valid decoded instruction.
+	for _, m := range []*Machine{native, interpreted} {
+		if err := m.Write(0x4040, 8, 0x10067|1<<63); err != nil {
+			t.Fatal(err)
+		}
+		m.System.Flush()
+		m.CPU.PC = 0xffff800000008000
+	}
+	beforeGS, beforeFlags := native.System.GSBase, native.CPU.Flags
+	// No IDT is installed: both paths fail delivering the execute fault.
+	nativeErr, interpErr := native.RunQuantum(1), interpreted.RunQuantum(1)
+	if nativeErr == nil || interpErr == nil || native.System.GSBase != beforeGS || native.CPU.Flags != beforeFlags || native.CPU.Retired != interpreted.CPU.Retired {
+		t.Fatal("cached opcode bypassed execute revoke", nativeErr, interpErr)
+	}
+}
+
+-- jit_decode_mapping_test.go --
+package amd64machine
+
+import (
+	"renvo.dev/emulators/amd64"
+	"testing"
+)
+
+func TestSystemDecodeCacheRemapAndExecuteRevocation(t *testing.T) {
+	m := jitMachine(t, "interpreter")
+	if err := m.CPU.Step(); err != nil {
+		t.Fatal(err)
+	}
+	if m.CPU.R[amd64.RAX] != 1 {
+		t.Fatal("initial instruction")
+	}
+	// Same virtual PC, different physical code: cached INC RAX must not survive.
+	copy(m.RAM[0x12000:], []byte{0x48, 0xff, 0xc3})
+	if err := m.Write(0x4040, 8, 0x12067); err != nil {
+		t.Fatal(err)
+	}
+	m.System.Flush()
+	m.CPU.PC = 0x8000
+	before := m.CPU.R[amd64.RBX]
+	if err := m.CPU.Step(); err != nil {
+		t.Fatal(err)
+	}
+	if m.CPU.R[amd64.RAX] != 1 || m.CPU.R[amd64.RBX] != before+1 {
+		t.Fatal("stale physical decode")
+	}
+	if err := m.Write(0x4040, 8, 0x12067|1<<63); err != nil {
+		t.Fatal(err)
+	}
+	m.System.Flush()
+	m.CPU.PC = 0x8000
+	before = m.CPU.R[amd64.RBX]
+	if err := m.CPU.Step(); err == nil || m.System.CR[2] != 0x8000 || m.CPU.R[amd64.RBX] != before {
+		t.Fatal("stale execute grant")
+	}
+}
+
+func TestSystemDecodeCacheStraddlingSecondPageRemap(t *testing.T) {
+	m := jitMachine(t, "interpreter")
+	if err := m.Write(0x4048, 8, 0x11067); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Write(0x10fff, 1, 0xb8); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Write(0x11000, 4, 0x12345678); err != nil {
+		t.Fatal(err)
+	}
+	m.System.Flush()
+	m.CPU.PC = 0x8fff
+	if err := m.CPU.Step(); err != nil {
+		t.Fatal(err)
+	}
+	if m.CPU.R[amd64.RAX] != 0x12345678 {
+		t.Fatal("initial straddling instruction")
+	}
+	if err := m.Write(0x12000, 4, 0x98765432); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Write(0x4048, 8, 0x12067); err != nil {
+		t.Fatal(err)
+	}
+	m.System.Flush()
+	m.CPU.PC = 0x8fff
+	if err := m.CPU.Step(); err != nil {
+		t.Fatal(err)
+	}
+	if m.CPU.R[amd64.RAX] != 0x98765432 {
+		t.Fatal("stale second-page instruction bytes")
+	}
+}
+
+-- jit_domains.go --
+package amd64machine
+
+import (
+	"fmt"
+	"os"
+	"renvo.dev/internal/rfe/engine"
+)
+
+func (m *Machine) activeJIT() *engine.Engine {
+	if m.nativeDomain() != 0 && m.KernelJIT != nil {
+		return m.KernelJIT
+	}
+	return m.JIT
+}
+func (m *Machine) EnableSystemJIT(mode string) error {
+	cache, err := engine.SystemCachePreset(m.JITCache)
+	if err != nil {
+		return err
+	}
+	m.kernelThreshold = 256
+	m.NativeRAM.Profile = m.ProfileJIT
+	user := engine.DefaultEngineConfig()
+	user.Mode = mode
+	user.ProfileNative = m.ProfileJIT
+	user.ProfileNativeMonotonic = m.ProfileJIT
+	user.EvictCold, user.RecycleNative = true, true
+	user.DiscoveryThreshold = 8
+	user.MaxBlocks, user.NativeBytes = cache.UserBlocks, cache.UserBytes
+	kernel := user
+	kernel.DiscoveryThreshold = 64
+	kernel.MaxBlocks, kernel.NativeBytes = cache.KernelBlocks, cache.KernelBytes
+	kernel.MaxRegionInstructions = 64
+	first, err := m.newJIT(user)
+	if err != nil {
+		return err
+	}
+	second, err := m.newJIT(kernel)
+	if err != nil {
+		first.Close()
+		return err
+	}
+	m.JIT, m.KernelJIT = first, second
+	m.NativeRAM.MultipleArenas = true
+	return nil
+}
+
+// Close ends the machine/RAM lifetime; CloseJIT alone still permits interpreting.
+func (m *Machine) Close() error {
+	m.CloseJIT()
+	err := m.NativeRAM.Close()
+	m.RAM = nil
+	return err
+}
+
+func (m *Machine) CloseJIT() {
+	if m.JIT != nil {
+		m.JIT.Close()
+	}
+	if m.KernelJIT != nil {
+		m.KernelJIT.Close()
+	}
+}
+func (m *Machine) printKernelJITStats() {
+	if m.KernelJIT != nil {
+		fmt.Fprintf(os.Stderr, "jit kernel stats=%+v cached=%d\n", m.KernelJIT.Stats, m.KernelJIT.CachedBlocks())
+	}
+}
+
+-- jit_domains_test.go --
+package amd64machine
+
+import (
+	"renvo.dev/emulators/amd64"
+	"testing"
+)
+
+func TestSystemJITSeparateDomainsDifferential(t *testing.T) {
+	native, interpreted := jitKernelMachine(t, "native"), jitKernelMachine(t, "interpreter")
+	for _, item := range []struct {
+		m    *Machine
+		mode string
+	}{{native, "native"}, {interpreted, "interpreter"}} {
+		item.m.CloseJIT()
+		if err := item.m.EnableSystemJIT(item.mode); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(item.m.CloseJIT)
+	}
+	for cycle := 0; cycle < 3; cycle++ {
+		for _, m := range []*Machine{native, interpreted} {
+			m.System.CPL = 0
+			m.CPU.PC = 0xffff800000008000
+			m.CPU.R[amd64.RBX] = 0xffff800000009000
+			jitRun(t, m, 16384)
+			m.System.CPL = 3
+			m.CPU.PC = 0x8000
+			m.CPU.R[amd64.RBX] = 0x9000
+			jitRun(t, m, 16384)
+		}
+		if native.CPU.R != interpreted.CPU.R || native.CPU.Flags != interpreted.CPU.Flags || native.CPU.PC != interpreted.CPU.PC || native.CPU.Retired != interpreted.CPU.Retired || native.ticks != interpreted.ticks || native.System.TSC != interpreted.System.TSC {
+			t.Fatal("domain switch differs from interpreter")
+		}
+	}
+	if native.JIT.Stats.NativeMemory == 0 || native.KernelJIT.Stats.NativeMemory == 0 {
+		t.Fatal("both domain arenas must execute actual native RAM operations")
+	}
+	if native.JIT.CachedBlocks()+native.KernelJIT.CachedBlocks() > 4096 || native.JIT.Stats.NativeBytes > 6<<20 || native.KernelJIT.Stats.NativeBytes > 2<<20 {
+		t.Fatal("system JIT expanded aggregate resource limits")
+	}
+}
+
+-- jit_kernel_test.go --
+package amd64machine
+
+import (
+	"encoding/binary"
+	"renvo.dev/emulators/amd64"
+	"testing"
+)
+
+func jitKernelMachine(t *testing.T, mode string) *Machine {
+	m := jitMachine(t, mode)
+	m.kernelThreshold = 64
+	if err := m.Write(0x1800, 8, 0x2007); err != nil {
+		t.Fatal(err)
+	}
+	m.System.CPL = 0
+	m.System.Flush()
+	m.CPU.PC = 0xffff800000008000
+	m.CPU.R[amd64.RBX] = 0xffff800000009000
+	return m
+}
+func TestKernelJITHighVirtualRAMAndDomainRevocation(t *testing.T) {
+	native, interpreted := jitKernelMachine(t, "native"), jitKernelMachine(t, "interpreter")
+	jitRun(t, native, 4096)
+	jitRun(t, interpreted, 4096)
+	if native.JIT.Stats.NativeMemory == 0 || native.CPU.R != interpreted.CPU.R || native.CPU.PC != interpreted.CPU.PC || native.CPU.Flags != interpreted.CPU.Flags || native.ticks != interpreted.ticks || native.System.TSC != interpreted.System.TSC || binary.LittleEndian.Uint64(native.RAM[0x11000:]) != 1024 {
+		t.Fatal("high kernel JIT differs from interpreter")
+	}
+	key := uint64(0x800000009000)
+	native.NativeRAM.NativeRefill(key)
+	context := native.NativeRAM.NativeContext()
+	if context.Pages[(key>>12)&63].Data == nil {
+		t.Fatal("high kernel descriptor missing")
+	}
+	// The same low-48-bit key is NONCANONICAL in CPL3. The former kernel
+	// descriptor must be gone before user native code could attempt access.
+	native.System.CPL = 3
+	if native.NativeRAM.NativeContext().Pages[(key>>12)&63].Data != nil {
+		t.Fatal("kernel descriptor leaked across privilege domain")
+	}
+	native.NativeRAM.NativeRefill(key)
+	if context.Pages[(key>>12)&63].Data != nil {
+		t.Fatal("noncanonical user address admitted kernel RAM")
+	}
+}
+
+-- jit_low_kernel_test.go --
+package amd64machine
+
+import (
+	"renvo.dev/emulators/amd64"
+	"testing"
+)
+
+func TestKernelJITCanonicalLowBankUsesOriginalMapping(t *testing.T) {
+	native, interpreted := jitKernelMachine(t, "native"), jitKernelMachine(t, "interpreter")
+	for _, m := range []*Machine{native, interpreted} {
+		m.CPU.R[amd64.RBX] = 0x9000
+		jitRun(t, m, 16384)
+	}
+	if native.CPU.R != interpreted.CPU.R || native.CPU.Flags != interpreted.CPU.Flags || native.CPU.PC != interpreted.CPU.PC || native.CPU.Retired != interpreted.CPU.Retired || native.ticks != interpreted.ticks {
+		t.Fatal("kernel low-bank native mapping differs from architecture")
+	}
+	if native.JIT.Stats.NativeMemory < 4096 {
+		t.Fatalf("canonical low-bank accesses never executed natively: %+v", native.JIT.Stats)
+	}
+	// A bit-47 key only sign-extends in the kernel; it cannot become a
+	// canonical user address by inheriting a previous native descriptor.
+	native.System.CPL = 3
+	key := uint64(0x800000009000)
+	native.NativeRAM.NativeRefill(key)
+	if native.NativeRAM.NativeContext().Pages[(key>>12)&63].Data != nil {
+		t.Fatal("kernel key leaked into noncanonical user address")
+	}
+}
+
+-- jit_native_clock_test.go --
+package amd64machine
+
+import (
+	"renvo.dev/emulators/amd64"
+	"testing"
+)
+
+func TestNativeTimestampReadsExactPrefixesAndWrap(t *testing.T) {
+	for _, cpl := range []int{0, 3} {
+		native, expected := jitMachine(t, "native"), jitMachine(t, "interpreter")
+		code := []byte{0x0f, 0x31, 0x48, 0x89, 0xc3, 0x49, 0xff, 0xc1, 0x0f, 0x01, 0xf9, 0xeb, 0xf3}
+		for _, m := range []*Machine{native, expected} {
+			copy(m.RAM[0x10000:], code)
+			m.System.CPL = uint8(cpl)
+			m.kernelThreshold = 64
+			m.System.TSC = ^uint64(0) - 500
+			m.CPU.R[amd64.RCX] = 0x8877665544332211
+		}
+		for _, budget := range []uint64{8192, 1, 2, 3, 4, 65, 1024} {
+			jitRun(t, native, budget)
+			jitRun(t, expected, budget)
+			if native.CPU.R != expected.CPU.R || native.CPU.PC != expected.CPU.PC || native.CPU.Flags != expected.CPU.Flags || native.CPU.Retired != expected.CPU.Retired || native.ticks != expected.ticks || native.System.TSC != expected.System.TSC {
+				t.Fatal("native clock drift", cpl, budget, native.CPU.R, expected.CPU.R, native.System.TSC, expected.System.TSC)
+			}
+		}
+		if native.JIT.Stats.Native <= native.CPU.Retired*3/4 {
+			t.Fatal("timestamp reads stayed interpreted")
+		}
+		for _, m := range []*Machine{native, expected} {
+			m.System.TSC += 12345678
+			m.CPU.PC = 0x8000
+		}
+		jitRun(t, native, 127)
+		jitRun(t, expected, 127)
+		if native.CPU.R != expected.CPU.R || native.System.TSC != expected.System.TSC {
+			t.Fatal("stale native clock base")
+		}
+	}
+}
+
+-- jit_rmw_test.go --
+package amd64machine
+
+import (
+	"encoding/binary"
+	"testing"
+)
+
+func TestKernelJITReadModifyWriteRetirement(t *testing.T) {
+	native, interpreted := jitKernelMachine(t, "native"), jitKernelMachine(t, "interpreter")
+	for _, m := range []*Machine{native, interpreted} {
+		// INC [RBX], four NOPs, backedge: one memory instruction, two accesses.
+		for i, v := range []byte{0x48, 0xff, 0x03, 0x90, 0x90, 0x90, 0x90, 0xeb, 0xf7} {
+			if err := m.Write(0x10000+uint64(i), 1, uint64(v)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		jitRun(t, m, 12288)
+	}
+	if native.JIT.Stats.NativeMemory == 0 || native.JIT.Stats.Regions == 0 {
+		t.Fatalf("RMW native region never executed: %+v", native.JIT.Stats)
+	}
+	if native.CPU.R != interpreted.CPU.R || native.CPU.Flags != interpreted.CPU.Flags || native.CPU.PC != interpreted.CPU.PC || native.CPU.Retired != interpreted.CPU.Retired || native.ticks != interpreted.ticks || binary.LittleEndian.Uint64(native.RAM[0x11000:]) != 2048 {
+		t.Fatal("native RMW state/retirement differs from interpreter")
+	}
+}
+
+-- jit_root_switch_test.go --
+package amd64machine
+
+import (
+	"renvo.dev/emulators/amd64"
+	"testing"
+)
+
+func TestCheckedCR3RootSwitchRoundTripAndMutation(t *testing.T) {
+	m := jitMachine(t, "native")
+	jitRun(t, m, 4096)
+	first := m.NativeRAM.CodeContext()
+	m.NativeRAM.NativeRefill(0x9000)
+	// Independent second root, with all accessed bits already set. Code is at a
+	// different physical page; a matching virtual PC must not reuse root A code.
+	for a, v := range map[uint64]uint64{0x5000: 0x6027, 0x6000: 0x7027, 0x7000: 0x8027, 0x8040: 0x12067, 0x8048: 0x13067 | 1<<63} {
+		if err := m.Write(a, 8, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, at := range []uint64{0x10000, 0x12000} {
+		if err := m.Write(at, 3, 0xd8220f); err != nil {
+			t.Fatal(err)
+		} // MOV CR3,RAX
+	}
+	// Physical code mutation refreshes the baseline before the pure root test.
+	m.System.Flush()
+	m.CPU.PC = 0x8000
+	first = m.NativeRAM.CodeContext()
+	m.System.CPL = 0
+	m.CPU.R[amd64.RAX] = 0x5000
+	if err := m.CPU.Step(); err != nil {
+		t.Fatal(err)
+	}
+	m.System.CPL = 3
+	second := m.NativeRAM.CodeContext()
+	if second.Identity == first.Identity {
+		t.Fatal("CR3 switch reused user root identity")
+	}
+	if m.NativeRAM.NativeContext().Pages[9].Data != nil {
+		t.Fatal("old root retained a data descriptor")
+	}
+	offset, _, err := m.System.NativeMapping(0x8000, true)
+	if err != nil || offset != 0x12000 {
+		t.Fatal("new root reused physical code mapping", offset, err)
+	}
+	m.System.CPL = 0
+	m.CPU.PC = 0x8000
+	m.CPU.R[amd64.RAX] = 0x1000
+	if err = m.CPU.Step(); err != nil {
+		t.Fatal(err)
+	}
+	m.System.CPL = 3
+	if got := m.NativeRAM.CodeContext(); got != first {
+		t.Fatal("unchanged user root lost its proof on KPTI-style round trip", first, got)
+	}
+	// A PTE physical alias mutation, even while another root is selected, must
+	// revoke the old proof. Reloading CR3 cannot resurrect its execute grant.
+	if err = m.Write(0x4040, 8, 0x10067|1<<63); err != nil {
+		t.Fatal(err)
+	}
+	if m.NativeRAM.CodeContext() == first {
+		t.Fatal("PTE update preserved stale root proof")
+	}
+	m.System.CPL = 0
+	m.CPU.PC = 0x8000
+	if _, _, err = m.System.NativeMapping(0x8000, true); err == nil {
+		t.Fatal("revoked NX grant survived")
+	}
+}
+
+-- jit_segments_test.go --
+package amd64machine
+
+import (
+	"bytes"
+	"renvo.dev/emulators/amd64"
+	"testing"
+)
+
+func TestSystemJITSegmentsSwapGSAndAddress32(t *testing.T) {
+	for _, addr32 := range []bool{false, true} {
+		native, interpreted := jitKernelMachine(t, "native"), jitKernelMachine(t, "interpreter")
+		// SWAPGS must update dynamic native state before each subsequent load.
+		code := []byte{0x0f, 0x01, 0xf8}
+		for _, ins := range [][]byte{
+			{0x65, 0x48, 0x8b, 0x03},    // MOV RAX, GS:[RBX]
+			{0x65, 0x48, 0x83, 0x03, 1}, // ADD GS:[RBX], 1
+			{0x64, 0x48, 0x89, 0x01},    // MOV FS:[RCX], RAX
+			{0x65, 0x48, 0x8d, 0x13},    // LEA RDX,[RBX] ignores GS
+		} {
+			if addr32 {
+				code = append(code, 0x67)
+			}
+			code = append(code, ins...)
+		}
+		code = append(code, 0xeb, byte(-len(code)-2))
+		for _, m := range []*Machine{native, interpreted} {
+			for a, v := range map[uint64]uint64{0x4050: 0x12067 | 1<<63, 0x4058: 0x13067 | 1<<63} {
+				if err := m.Write(a, 8, v); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for i, v := range code {
+				if err := m.Write(0x10000+uint64(i), 1, uint64(v)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			m.System.GSBase, m.System.KernelGSBase = 0xffff800000009000, 0xffff80000000a000
+			m.System.FSBase = 0xffff80000000b000
+			m.CPU.R[amd64.RBX], m.CPU.R[amd64.RCX] = 0, 0
+			if addr32 {
+				m.CPU.R[amd64.RBX], m.CPU.R[amd64.RCX] = 1<<32, 1<<32
+			}
+			m.System.Flush()
+		}
+		for _, n := range []uint64{16384, 1, 2, 3, 63, 65, 4096} {
+			jitRun(t, native, n)
+			jitRun(t, interpreted, n)
+			if native.CPU.R != interpreted.CPU.R || native.CPU.PC != interpreted.CPU.PC || native.CPU.Flags != interpreted.CPU.Flags ||
+				native.CPU.Retired != interpreted.CPU.Retired || native.ticks != interpreted.ticks || native.System.TSC != interpreted.System.TSC ||
+				native.System.GSBase != interpreted.System.GSBase || native.System.KernelGSBase != interpreted.System.KernelGSBase ||
+				!bytes.Equal(native.RAM[0x11000:0x14000], interpreted.RAM[0x11000:0x14000]) {
+				t.Fatal("dynamic segments differ from architectural execution", addr32, n)
+			}
+		}
+		if native.JIT.Stats.NativeMemory == 0 {
+			t.Fatal("segment instructions never executed natively")
+		}
+		// Revoke FS store permission after warm native execution. Both engines
+		// must fault at the original virtual address without partial retirement.
+		for _, m := range []*Machine{native, interpreted} {
+			if err := m.Write(0x4058, 8, 0x13065|1<<63); err != nil {
+				t.Fatal(err)
+			}
+			m.System.Flush()
+			m.CPU.PC = 0xffff800000008000 + uint64(3+4+5)
+			if addr32 {
+				m.CPU.PC += 2
+			}
+		}
+		before := native.CPU.Retired
+		errNative, errInterpreted := native.RunQuantum(1), interpreted.RunQuantum(1)
+		if errNative == nil || errInterpreted == nil || native.CPU.Retired != before || native.CPU.Retired != interpreted.CPU.Retired ||
+			native.CPU.PC != interpreted.CPU.PC || native.CPU.R != interpreted.CPU.R || native.CPU.Flags != interpreted.CPU.Flags ||
+			native.System.CR[2] != 0xffff80000000b000 || native.System.CR[2] != interpreted.System.CR[2] {
+			t.Fatal("segment write fault committed state", addr32, errNative, errInterpreted)
+		}
+	}
+}
+
+-- jit_slice_test.go --
+package amd64machine
+
+import "testing"
+
+func TestNativeSessionConsoleAndTimerSlice(t *testing.T) {
+	m := jitMachine(t, "native")
+	jitRun(t, m, 8192)
+	m.nextTimer = m.ticks + 100000
+	m.Input = make(chan byte)
+	before := m.CPU.Retired
+	if err := m.RunQuantum(65536); err != nil || m.CPU.Retired-before > 1024 {
+		t.Fatal("live console polling bound crossed", err)
+	}
+	m.Input = nil // The run loop makes this transition only after observing EOF.
+	before = m.CPU.Retired
+	if err := m.RunQuantum(65536); err != nil || m.CPU.Retired-before > 65536 || m.CPU.Retired-before <= 1024 {
+		t.Fatal("closed console failed to amortize native session", err, m.CPU.Retired-before)
+	}
+	m.nextTimer = m.ticks + 37
+	end := m.nextTimer
+	for m.ticks < end {
+		if err := m.RunQuantum(65536); err != nil || m.ticks > end {
+			t.Fatal("long native session crossed architectural timer", err)
+		}
+	}
+}
+
+-- jit_test.go --
+package amd64machine
+
+import (
+	"encoding/binary"
+	"io"
+	"renvo.dev/emulators/amd64"
+	"testing"
+)
+
+func jitMachine(t *testing.T, mode string) *Machine {
+	m, err := New(128, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := m.System
+	s.CR[0] = 1<<31 | 1<<16 | 1
+	s.CR[3] = 0x1000
+	s.CR[4] = 1 << 5
+	s.EFER = 1<<10 | 1<<11 | 1
+	s.CPL = 3
+	for a, v := range map[uint64]uint64{0x1000: 0x2007, 0x2000: 0x3007, 0x3000: 0x4007, 0x4040: 0x10067, 0x4048: 0x11067 | 1<<63} {
+		if err = m.Write(a, 8, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	copy(m.RAM[0x10000:], []byte{0x48, 0xff, 0xc0, 0x48, 0x89, 0x03, 0x48, 0x8b, 0x0b, 0xeb, 0xf5})
+	m.CPU.PC = 0x8000
+	m.CPU.R[amd64.RBX] = 0x9000
+	m.CPU.Flags = 2
+	if err = m.EnableJIT(mode); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { m.JIT.Close() })
+	if mode == "native" && !m.JIT.NativeAvailable() {
+		t.Skip("native host unavailable")
+	}
+	return m
+}
+func jitRun(t *testing.T, m *Machine, n uint64) {
+	t.Helper()
+	end := m.CPU.Retired + n
+	for m.CPU.Retired < end {
+		before := m.CPU.Retired
+		if err := m.RunQuantum(end - before); err != nil {
+			t.Fatal(err)
+		}
+		if m.CPU.Retired <= before || m.CPU.Retired > end {
+			t.Fatal("invalid native progress")
+		}
+	}
+}
+func TestUserJITDifferentialAndPhysicalCodeWrite(t *testing.T) {
+	interpreted, native := jitMachine(t, "interpreter"), jitMachine(t, "native")
+	jitRun(t, interpreted, 4096)
+	jitRun(t, native, 4096)
+	if native.JIT.Stats.Native == 0 || native.JIT.Stats.NativeMemory == 0 {
+		t.Fatal("native memory tier never executed")
+	}
+	if native.CPU.R != interpreted.CPU.R || native.CPU.Flags != interpreted.CPU.Flags || native.CPU.PC != interpreted.CPU.PC || native.ticks != interpreted.ticks || native.System.TSC != interpreted.System.TSC || native.CPU.Retired != 4096 || binary.LittleEndian.Uint64(native.RAM[0x11000:]) != 1024 {
+		t.Fatal("native/interpreter state or time differs")
+	}
+	// Replace INC with same-length DEC through physical RAM, not the code VA.
+	if err := native.Write(0x10002, 1, 0xc8); err != nil {
+		t.Fatal(err)
+	}
+	x := native.CPU.R[amd64.RAX]
+	jitRun(t, native, 4)
+	if native.CPU.R[amd64.RAX] != x-1 {
+		t.Fatal("stale physical code alias")
+	}
+}
+func TestUserJITQuietMMUProbeDirtyBitsAndRevocation(t *testing.T) {
+	m := jitMachine(t, "native")
+	// A refill must not set D before an actual write, even when the page is RW.
+	if err := m.Write(0x4048, 8, 0x11007|1<<63); err != nil {
+		t.Fatal(err)
+	}
+	m.System.Flush()
+	m.NativeRAM.NativeRefill(0x9000)
+	pte := binary.LittleEndian.Uint64(m.RAM[0x4048:])
+	if pte&64 != 0 || m.NativeRAM.NativeContext().Pages[9].Permissions&2 != 0 {
+		t.Fatal("speculative native refill set dirty or admitted writes")
+	}
+	jitRun(t, m, 4)
+	if binary.LittleEndian.Uint64(m.RAM[0x4048:])&64 == 0 {
+		t.Fatal("architectural store failed to set dirty")
+	}
+	m.NativeRAM.NativeRefill(0x9000)
+	if m.NativeRAM.NativeContext().Pages[9].Permissions&2 == 0 {
+		t.Fatal("dirty writable data never admitted")
+	}
+	cr2, count, trace := m.System.CR[2], m.System.FaultCount, m.System.FaultTrace
+	if _, _, err := m.System.NativeMapping(0xa000, true); err == nil {
+		t.Fatal("unmapped probe accepted")
+	}
+	if m.System.CR[2] != cr2 || m.System.FaultCount != count || m.System.FaultTrace != trace {
+		t.Fatal("speculative mapping probe changed architectural fault state")
+	}
+	if _, err := m.System.NativeRead(0xa000, 1, true); err == nil {
+		t.Fatal("unmapped speculative fetch accepted")
+	}
+	if m.System.CR[2] != cr2 || m.System.FaultCount != count || m.System.FaultTrace != trace {
+		t.Fatal("speculative fetch changed architectural fault state")
+	}
+	context := m.NativeRAM.NativeContext()
+	if err := m.Write(0x4048, 8, 0x11065|1<<63); err != nil {
+		t.Fatal(err)
+	}
+	m.System.Flush()
+	if context.Pages[9].Data != nil {
+		t.Fatal("permission revocation retained descriptor")
+	}
+	m.NativeRAM.NativeRefill(0x9000)
+	if context.Pages[9].Permissions&2 != 0 {
+		t.Fatal("readonly mapping admitted native writes")
+	}
+}
+func TestUserJITTimerSliceAndKernelBoundary(t *testing.T) {
+	m := jitMachine(t, "native")
+	jitRun(t, m, 4096)
+	m.nextTimer = m.ticks + 37
+	deadline := m.nextTimer
+	for m.ticks < deadline {
+		if err := m.RunQuantum(1000); err != nil || m.ticks > deadline {
+			t.Fatal("JIT crossed timer boundary", err)
+		}
+	}
+	if m.System.TSC != m.CPU.Retired*100 {
+		t.Fatal("native TSC progress lost")
+	}
+	userContext := m.NativeRAM.CodeContext()
+	m.System.CPL = 0
+	if m.NativeRAM.CodeContext().Identity == userContext.Identity {
+		t.Fatal("kernel reused user code-context authority")
+	}
+}
+
+-- machine.go --
+package amd64machine
+
+import (
+	"bytes"
+	"compress/gzip"
+	"debug/elf"
+	"encoding/binary"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"renvo.dev/emulators/amd64"
+	"renvo.dev/internal/rfe/engine"
+	"renvo.dev/internal/rfe/systemclock"
+	"renvo.dev/internal/rfe/systemmemory"
+)
+
+type pic struct {
+	mask, vector, irr, isr, phase byte
+	readISR                       bool
+}
+type Machine struct {
+	JITCache        string // empty/default preserves correctness budgets; named performance presets are opt-in
+	ProfileJIT      bool   // opt-in diagnostic perf symbols/JIT dump; disabled for scoring
+	NativeRAM       *systemmemory.RAM
+	JIT             *engine.Engine
+	KernelJIT       *engine.Engine
+	kernelThreshold uint64
+	adapter         *nativeCPU
+	versions        []uint64
+
+	pitLatched  [3]bool
+	pitLatch    [3]uint16
+	pitReadHigh [3]bool
+	thre        bool
+
+	pitStart        [3]uint64
+	pitElapsedTicks [3]uint64
+	pitLoaded       [3]bool
+	pitRunning      [3]bool
+	pitTimerActive  bool
+	ADUpdates       uint64
+	pitEdges        uint64
+	pitDelivered    uint64
+	pitCoalesced    uint64
+
+	CPU       amd64.CPU
+	System    *amd64.System
+	RAM       []byte
+	Output    io.Writer
+	Input     <-chan byte
+	UART      [8]byte
+	rx        []byte
+	PIC       [2]pic
+	CMOS      byte
+	ticks     uint64
+	Clock     *systemclock.Clock // nil preserves deterministic instruction timing
+	PIT       [3]uint16
+	pitLow    [3]byte
+	pitHigh   [3]bool
+	pitAccess [3]byte
+	pitMode   [3]byte
+	speaker   byte
+	nextTimer uint64
+	Stopped   bool
+}
+
+func New(memoryMiB int, output io.Writer) (*Machine, error) {
+	return newMachine(memoryMiB, output, false)
+}
+
+// NewWithDirectRAM explicitly owns mapped physical RAM until Close. Borrowed
+// RAM slices must not outlive the machine; ordinary New keeps Go RAM semantics.
+func NewWithDirectRAM(memoryMiB int, output io.Writer) (*Machine, error) {
+	return newMachine(memoryMiB, output, true)
+}
+
+func newMachine(memoryMiB int, output io.Writer, direct bool) (*Machine, error) {
+	if memoryMiB < 128 || memoryMiB > 2048 {
+		return nil, fmt.Errorf("memory must be 128..2048 MiB")
+	}
+	m := &Machine{Output: output}
+	m.System = amd64.NewSystem(&m.CPU, m, m)
+	// PIT and TSC derive from the same virtual oscillator, including idle
+	// fast-forward. Describe that implemented clock, without a kernel override.
+	m.System.TSCCrystalHz = 1193182
+	m.System.TSCNumerator = uint32(pitClocksPerTick * amd64.TSCTicksPerInstruction)
+	m.System.TSCDenominator = 1
+	m.System.InvariantTSC = true
+	if direct {
+		var err error
+		m.NativeRAM, err = systemmemory.NewDirect(memoryMiB<<20, m.nativeActive, m.System.NativeMapping)
+		if err != nil {
+			return nil, err
+		}
+		m.RAM = m.NativeRAM.Data
+	} else {
+		m.RAM = make([]byte, memoryMiB<<20)
+		m.NativeRAM = systemmemory.New(m.RAM, m.nativeActive, m.System.NativeMapping)
+	}
+	m.versions = make([]uint64, len(m.RAM)/4096)
+	m.NativeRAM.ReadGuest, m.NativeRAM.WriteGuest = m.System.NativeRead, m.System.Write
+	m.NativeRAM.Domain, m.NativeRAM.NativeAddress = m.nativeDomain, m.nativeAddress
+	m.NativeRAM.AddressSpace = func() uint64 { return m.System.CR[3] }
+	m.UART[5] = 0x60
+	m.PIC[0].mask = 255
+	m.PIC[1].mask = 255
+	m.PIC[0].vector = 8
+	m.PIC[1].vector = 0x70
+	m.nextTimer = ^uint64(0)
+	return m, nil
+}
+func (m *Machine) Read(a uint64, n int, x bool) (uint64, error) {
+	if n < 1 || n > 8 || a > uint64(len(m.RAM)) || uint64(n) > uint64(len(m.RAM))-a {
+		return 0, fmt.Errorf("physical read %#x/%d outside RAM", a, n)
+	}
+	var v uint64
+	for j := 0; j < n; j++ {
+		v |= uint64(m.RAM[a+uint64(j)]) << uint(j*8)
+	}
+	return v, nil
+}
+func (m *Machine) Write(a uint64, n int, v uint64) error {
+	if n < 1 || n > 8 || a > uint64(len(m.RAM)) || uint64(n) > uint64(len(m.RAM))-a {
+		return fmt.Errorf("physical write %#x/%d outside RAM", a, n)
+	}
+	if m.NativeRAM != nil {
+		m.NativeRAM.BeforeWrite(a, n)
+	}
+	m.versions[a>>12]++
+	if a>>12 != (a+uint64(n)-1)>>12 {
+		m.versions[(a+uint64(n)-1)>>12]++
+	}
+	for j := 0; j < n; j++ {
+		m.RAM[a+uint64(j)] = byte(v >> uint(j*8))
+	}
+	return nil
+}
+func (m *Machine) irq(n int) {
+	if n < 8 {
+		m.PIC[0].irr |= 1 << n
+	} else {
+		m.PIC[1].irr |= 1 << (n - 8)
+		m.PIC[0].irr |= 4
+	}
+}
+func (m *Machine) serialIRQ() {
+	if len(m.rx) > 0 && m.UART[1]&1 != 0 || m.UART[1]&2 != 0 && m.thre {
+		m.irq(4)
+	}
+}
+func (m *Machine) In(p uint16, n int) uint32 {
+	if p >= 0x3f8 && p <= 0x3ff {
+		r := p - 0x3f8
+		if m.UART[3]&0x80 != 0 && r < 2 {
+			return uint32(m.UART[r])
+		}
+		switch r {
+		case 0:
+			if len(m.rx) > 0 {
+				b := m.rx[0]
+				m.rx = m.rx[1:]
+				m.serialIRQ()
+				return uint32(b)
+			}
+			return 0
+		case 2:
+			if len(m.rx) > 0 && m.UART[1]&1 != 0 {
+				return 4
+			}
+			if m.UART[1]&2 != 0 && m.thre {
+				m.thre = false
+				return 2
+			}
+			return 1
+		case 5:
+			v := uint32(0x60)
+			if len(m.rx) > 0 {
+				v |= 1
+			}
+			return v
+		case 6:
+			return 0xb0
+		}
+		return uint32(m.UART[r])
+	}
+	if p == 0x20 || p == 0x21 || p == 0xa0 || p == 0xa1 {
+		j := 0
+		if p >= 0xa0 {
+			j = 1
+		}
+		c := &m.PIC[j]
+		if p&1 != 0 {
+			return uint32(c.mask)
+		}
+		if c.readISR {
+			return uint32(c.isr)
+		}
+		return uint32(c.irr)
+	}
+	switch p {
+	case 0x40, 0x41, 0x42:
+		j := int(p - 0x40)
+		count := m.pitCount(j)
+		if m.pitLatched[j] {
+			count = m.pitLatch[j]
+		}
+		v := byte(count)
+		if m.pitReadHigh[j] || m.pitAccess[j] == 2 {
+			v = byte(count >> 8)
+		}
+		if m.pitAccess[j] == 3 {
+			m.pitReadHigh[j] = !m.pitReadHigh[j]
+			if !m.pitReadHigh[j] {
+				m.pitLatched[j] = false
+			}
+		} else {
+			m.pitLatched[j] = false
+		}
+		return uint32(v)
+	case 0x61:
+		out := uint32(0)
+		if m.pitOut(2) {
+			out = 32
+		}
+		return uint32(m.speaker&3) | out | uint32((m.ticks/1000)&1)<<4
+	case 0x71:
+		bcd := func(v uint64) uint32 { return uint32(v/10*16 + v%10) }
+		switch m.CMOS & 0x7f {
+		case 0:
+			return bcd(m.ticks / 100000000 % 60)
+		case 2:
+			return 0
+		case 4:
+			return 0x12
+		case 6:
+			return 1
+		case 7:
+			return 0x11
+		case 8:
+			return 0x10
+		case 9:
+			return 0x26
+		case 0xa:
+			return 0x26
+		case 0xb:
+			return 2
+		case 0xd:
+			return 0x80
+		case 0x32:
+			return 0x20
+		}
+		return 0
+	case 0x64:
+		return 0
+	case 0x60:
+		return 0
+	case 0xcfc, 0xcfd, 0xcfe, 0xcff:
+		return ^uint32(0)
+	}
+	return 0
+}
+func (m *Machine) Out(p uint16, n int, v uint32) {
+	b := byte(v)
+	if p >= 0x3f8 && p <= 0x3ff {
+		r := p - 0x3f8
+		if r == 0 && m.UART[3]&0x80 == 0 {
+			if m.Output != nil {
+				m.Output.Write([]byte{b})
+				m.thre = true
+			}
+		} else {
+			if r == 1 && b&2 != 0 && m.UART[1]&2 == 0 {
+				m.thre = true
+			}
+			m.UART[r] = b
+		}
+		m.serialIRQ()
+		return
+	}
+	if p == 0x20 || p == 0x21 || p == 0xa0 || p == 0xa1 {
+		j := 0
+		if p >= 0xa0 {
+			j = 1
+		}
+		c := &m.PIC[j]
+		if p&1 == 0 {
+			if b&0x10 != 0 {
+				c.phase = 1
+				c.mask = 0
+				c.irr = 0
+				c.isr = 0
+			} else if b&0x20 != 0 {
+				for k := 0; k < 8; k++ {
+					if c.isr&(1<<k) != 0 {
+						c.isr &^= 1 << k
+						break
+					}
+				}
+			} else if b&8 != 0 {
+				c.readISR = b&1 != 0
+			}
+		} else {
+			switch c.phase {
+			case 1:
+				c.vector = b & 0xf8
+				c.phase = 2
+			case 2:
+				c.phase = 3
+			case 3:
+				c.phase = 0
+			default:
+				c.mask = b
+			}
+		}
+		return
+	}
+	switch p {
+	case 0x43:
+		j := int(b >> 6)
+		if j < 3 {
+			access := (b >> 4) & 3
+			if access == 0 {
+				if !m.pitLatched[j] {
+					m.pitLatch[j] = m.pitCount(j)
+					m.pitLatched[j] = true
+					m.pitReadHigh[j] = false
+				}
+			} else {
+				m.pitAccess[j] = access
+				m.pitMode[j] = (b >> 1) & 7
+				if m.pitMode[j] >= 6 {
+					m.pitMode[j] -= 4 // Encodings 6/7 alias modes 2/3.
+				}
+				m.pitHigh[j], m.pitReadHigh[j], m.pitLatched[j] = false, false, false
+				m.pitLoaded[j], m.pitRunning[j] = false, false
+				m.pitElapsedTicks[j] = 0
+				if j == 0 {
+					m.pitTimerActive = false
+					m.nextTimer = ^uint64(0)
+				}
+			}
+		}
+	case 0x40, 0x41, 0x42:
+		j := int(p - 0x40)
+		switch m.pitAccess[j] {
+		case 2:
+			m.loadPIT(j, uint16(b)<<8)
+		case 3:
+			if !m.pitHigh[j] {
+				m.pitLow[j], m.pitHigh[j] = b, true
+				// A mode-0 two-byte write stops counting until the MSB.
+				if m.pitMode[j] == 0 {
+					m.pitElapsedTicks[j] = m.pitTicks(j)
+					m.pitRunning[j] = false
+					if j == 0 {
+						m.pitTimerActive = false
+						m.nextTimer = ^uint64(0)
+					}
+				}
+			} else {
+				m.pitHigh[j] = false
+				m.loadPIT(j, uint16(m.pitLow[j])|uint16(b)<<8)
+			}
+		default:
+			m.loadPIT(j, uint16(b))
+		}
+	case 0x61:
+		m.setPITGate(b)
+	case 0x70:
+		m.CMOS = b
+	case 0x64:
+		if b == 0xfe {
+			m.Stopped = true
+		}
+	case 0xcf9:
+		if b&6 == 6 {
+			m.Stopped = true
+		}
+	case 0x604:
+		if v&0x2000 != 0 {
+			m.Stopped = true
+		}
+	}
+}
+func (m *Machine) Run(limit uint64) error {
+	for m.CPU.Retired < limit && !m.Stopped {
+		m.syncClock()
+		if m.Input != nil {
+			select {
+			case b, ok := <-m.Input:
+				if ok && len(m.rx) < 4096 {
+					m.rx = append(m.rx, b)
+					m.serialIRQ()
+				} else if !ok {
+					m.Input = nil
+				}
+			default:
+			}
+		}
+		if m.System.Halted {
+			if m.CPU.Flags&amd64.FlagIF == 0 {
+				return nil
+			}
+			pending := m.PIC[0].irr &^ m.PIC[0].mask
+			if pending == 0 || m.PIC[0].isr != 0 {
+				if !m.pitTimerActive {
+					return fmt.Errorf("halted CPU has no scheduled timer event")
+				}
+				if m.Clock != nil {
+					m.Clock.WaitUntil(m.nextTimer)
+					m.syncClock()
+				} else {
+					m.advanceIdleClock(m.nextTimer)
+				}
+			}
+		} else {
+			if err := m.RunQuantum(limit - m.CPU.Retired); err != nil {
+				return fmt.Errorf("retired=%d: %w", m.CPU.Retired, err)
+			}
+		}
+		m.servicePIT()
+		if m.System.Interruptible() {
+			c := &m.PIC[0]
+			pending := c.irr &^ c.mask
+			for j := 0; j < 8; j++ {
+				if pending&(1<<j) != 0 && c.isr == 0 {
+					c.irr &^= 1 << j
+					c.isr |= 1 << j
+					if err := m.System.Interrupt(c.vector+byte(j), 0, false); err != nil {
+						return err
+					}
+					if j == 0 {
+						m.pitDelivered++
+					}
+					break
+				}
+			}
+		}
+	}
+	if m.Stopped {
+		return nil
+	}
+	return fmt.Errorf("instruction budget exhausted after %d instructions at pc=%#x; faults=%d fault-trace=%#x cr=%#x cpl=%d pic=%+v", m.CPU.Retired, m.CPU.PC, m.System.FaultCount, m.System.FaultTrace, m.System.CR, m.System.CPL, m.PIC)
+}
+
+// Boot loads an unmodified ELF kernel, or the gzip ELF payload of a Linux
+// bzImage, at its ELF physical addresses. The documented startup_64 entry
+// accepts the same boot_params and identity mapping as its decompressor.
+func (m *Machine) Boot(kernel, initrd []byte, command string) error {
+	if len(command) > 2047 {
+		return fmt.Errorf("command line exceeds 2047 bytes")
+	}
+	const initReserve = uint64(0x1000000)
+	if uint64(len(m.RAM)) < initReserve || uint64(len(initrd)) > uint64(len(m.RAM))-initReserve {
+		return fmt.Errorf("initramfs does not fit guest RAM")
+	}
+	image := kernel
+	header := []byte(nil)
+	if len(kernel) > 0x268 && string(kernel[0x202:0x206]) == "HdrS" {
+		if len(kernel) < 4096 {
+			return fmt.Errorf("truncated bzImage boot header")
+		}
+		header = kernel[:4096]
+		off := (uint64(kernel[0x1f1]) + 1) * 512
+		if kernel[0x1f1] == 0 {
+			off = 5 * 512
+		}
+		po := uint64(binary.LittleEndian.Uint32(kernel[0x248:]))
+		pn := uint64(binary.LittleEndian.Uint32(kernel[0x24c:]))
+		if off+po > uint64(len(kernel)) || pn > uint64(len(kernel))-off-po {
+			return fmt.Errorf("invalid kernel payload range")
+		}
+		zr, e := gzip.NewReader(bytes.NewReader(kernel[off+po : off+po+pn]))
+		if e != nil {
+			return fmt.Errorf("kernel ELF gzip payload: %w", e)
+		}
+		image, e = io.ReadAll(io.LimitReader(zr, 256<<20))
+		closeErr := zr.Close()
+		if e != nil {
+			return e
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		if len(image) >= 256<<20 {
+			return fmt.Errorf("kernel payload too large")
+		}
+	}
+	f, e := elf.NewFile(bytes.NewReader(image))
+	if e != nil {
+		return e
+	}
+	defer f.Close()
+	if f.Machine != elf.EM_X86_64 || f.Class != elf.ELFCLASS64 || f.Data != elf.ELFDATA2LSB {
+		return fmt.Errorf("kernel must be little-endian x86-64 ELF")
+	}
+	entry := f.Entry
+	highest := uint64(0)
+	for _, p := range f.Progs {
+		if p.Type != elf.PT_LOAD {
+			continue
+		}
+		if p.Paddr > uint64(len(m.RAM)) || p.Memsz > uint64(len(m.RAM))-p.Paddr || p.Filesz > p.Memsz || p.Off > uint64(len(image)) || p.Filesz > uint64(len(image))-p.Off {
+			return fmt.Errorf("kernel load range outside RAM")
+		}
+		copy(m.RAM[p.Paddr:p.Paddr+p.Filesz], image[p.Off:p.Off+p.Filesz])
+		if end := p.Paddr + p.Memsz; end > highest {
+			highest = end
+		}
+		if entry >= p.Vaddr && entry-p.Vaddr < p.Memsz {
+			entry = p.Paddr + (entry - p.Vaddr)
+		}
+	}
+	if entry >= uint64(len(m.RAM)) {
+		return fmt.Errorf("kernel entry outside RAM")
+	}
+	initAddr := (uint64(len(m.RAM)) - uint64(len(initrd)) - 0x1000000) &^ 4095
+	if initAddr <= highest {
+		return fmt.Errorf("initramfs overlaps kernel")
+	}
+	copy(m.RAM[initAddr:], initrd)
+	const params = 0x90000
+	const cmd = 0x20000
+	const tables = 0x10000
+	const gdt = 0x18000
+	clear(m.RAM[params : params+4096])
+	if header != nil {
+		copy(m.RAM[params+0x1f1:params+0x290], header[0x1f1:0x290])
+	}
+	p := m.RAM[params : params+4096]
+	p[0x210] = 0xff
+	p[0x211] |= 0x80
+	binary.LittleEndian.PutUint32(p[0x218:], uint32(initAddr))
+	binary.LittleEndian.PutUint32(p[0x21c:], uint32(len(initrd)))
+	binary.LittleEndian.PutUint32(p[0x228:], cmd)
+	binary.LittleEndian.PutUint64(p[0x250:], 0)
+	binary.LittleEndian.PutUint32(p[0x238:], 2048)
+	copy(m.RAM[cmd:], command)
+	m.RAM[cmd+len(command)] = 0
+	// Legacy E820 excludes the PC ROM/VGA hole. No firmware services are needed.
+	p[0x1e8] = 3
+	regions := [][3]uint64{{0, 0x9f000, 1}, {0x9f000, 0x61000, 2}, {0x100000, uint64(len(m.RAM)) - 0x100000, 1}}
+	for j, r := range regions {
+		o := 0x2d0 + j*20
+		binary.LittleEndian.PutUint64(p[o:], r[0])
+		binary.LittleEndian.PutUint64(p[o+8:], r[1])
+		binary.LittleEndian.PutUint32(p[o+16:], uint32(r[2]))
+	}
+	clear(m.RAM[tables : tables+0x6000])
+	m.Write(tables, 8, tables+0x1000|3)
+	for g := 0; g < 4; g++ {
+		m.Write(tables+0x1000+uint64(g)*8, 8, tables+0x2000+uint64(g)*0x1000|3)
+		for j := 0; j < 512; j++ {
+			m.Write(tables+0x2000+uint64(g)*0x1000+uint64(j)*8, 8, (uint64(g)<<30)|(uint64(j)<<21)|0x83)
+		}
+	}
+	m.Write(gdt+16, 8, 0x00af9a000000ffff)
+	m.Write(gdt+24, 8, 0x00cf92000000ffff)
+	s := m.System
+	s.CR[0] = 0x80010033
+	s.CR[3] = tables
+	s.CR[4] = 0x20
+	s.EFER = 0x500
+	s.GDTR = amd64.Table{Base: gdt, Limit: 31}
+	s.Segments[1] = amd64.Segment{Selector: 16, Limit: 0xffffffff, Flags: 0xaf9a}
+	for _, j := range []int{0, 2, 3} {
+		s.Segments[j] = amd64.Segment{Selector: 24, Limit: 0xffffffff, Flags: 0xcf92}
+	}
+	m.CPU.PC = entry
+	m.CPU.Flags = 2
+	m.CPU.R[amd64.RSI] = params
+	m.CPU.R[amd64.RSP] = 0x80000
+	return nil
+}
+func Main(args []string) int {
+	f := flag.NewFlagSet("linux-amd64-machine", flag.ContinueOnError)
+	kernel := f.String("kernel", "", "Linux x86-64 bzImage or ELF")
+	initrd := f.String("initrd", "", "initramfs")
+	memory := f.Int("memory", 256, "guest RAM in MiB")
+	steps := f.Uint64("steps", 1000000000, "guest instruction limit")
+	clockMode := f.String("clock", "deterministic", "system clock: realtime or deterministic")
+	mode := f.String("engine", "native", "execution tier: native, ir, interpreter")
+	jitProfile := f.Bool("jit-profile", false, "emit native JIT profiling symbols (diagnostic only)")
+	jitCache := f.String("jit-cache", "default", "native cache preset: default, balanced8, balanced32, kernel32, balanced64")
+	appendLine := f.String("append", "console=ttyS0,115200 rdinit=/init panic=-1 nokaslr", "kernel command line")
+	if e := f.Parse(args); e != nil {
+		return 2
+	}
+	if *kernel == "" || *initrd == "" {
+		fmt.Fprintln(os.Stderr, "-kernel and -initrd are required")
+		return 2
+	}
+	k, e := os.ReadFile(*kernel)
+	if e != nil {
+		fmt.Fprintln(os.Stderr, e)
+		return 1
+	}
+	r, e := os.ReadFile(*initrd)
+	if e != nil {
+		fmt.Fprintln(os.Stderr, e)
+		return 1
+	}
+	// The checked RAM path remains the default. Fault-assisted direct RAM
+	// is an explicit constructor experiment, not selected by execution tier.
+	m, e := New(*memory, os.Stdout)
+	if e != nil {
+		fmt.Fprintln(os.Stderr, e)
+		return 1
+	}
+	defer m.Close()
+	if e = m.Boot(k, r, *appendLine+" noapic nolapic acpi=off"); e != nil {
+		fmt.Fprintln(os.Stderr, e)
+		return 1
+	}
+	if *clockMode == "realtime" {
+		m.UseRealtimeClock()
+	} else if *clockMode != "deterministic" {
+		fmt.Fprintln(os.Stderr, "clock must be realtime or deterministic")
+		return 2
+	}
+	m.ProfileJIT = *jitProfile
+	m.JITCache = *jitCache
+	if e = m.EnableSystemJIT(*mode); e != nil {
+		fmt.Fprintln(os.Stderr, e)
+		return 1
+	}
+	defer m.CloseJIT()
+	defer m.printJITStats()
+	input := make(chan byte, 1024)
+	m.Input = input
+	go func() {
+		defer close(input)
+		var b [1]byte
+		for {
+			n, e := os.Stdin.Read(b[:])
+			if n > 0 {
+				input <- b[0]
+			}
+			if e != nil {
+				return
+			}
+		}
+	}()
+	if e = m.Run(*steps); e != nil {
+		fmt.Fprintf(os.Stderr, "%v\nregisters=%#x\n", e, m.CPU.R)
+		return 1
+	}
+	return 0
+}
+
+-- page_metadata.go --
+package amd64machine
+
+import "fmt"
+
+func (m *Machine) SetPageTableBits(address, bits uint64) error {
+	if address&7 != 0 || bits&^uint64(32|64) != 0 {
+		return fmt.Errorf("invalid hardware page-table metadata update")
+	}
+	value, err := m.Read(address, 8, false)
+	if err != nil {
+		return err
+	}
+	updated := value | bits
+	if updated == value {
+		if m.NativeRAM != nil {
+			m.NativeRAM.ForgetData()
+		}
+		return nil
+	}
+	if m.NativeRAM != nil {
+		m.NativeRAM.BeforePageTableMetadata(address, 8)
+	}
+	for i := 0; i < 8; i++ {
+		m.RAM[address+uint64(i)] = byte(updated >> uint(i*8))
+	}
+	m.versions[address>>12]++
+	m.ADUpdates++
+	return nil
+}
+
+-- page_metadata_test.go --
+package amd64machine
+
+import "testing"
+
+func TestHardwareAccessDirtyBitsDoNotInvalidateExecutableMappings(t *testing.T) {
+	m := jitMachine(t, "native")
+	// A fresh writable data leaf: neither hardware accessed nor dirty is set.
+	if err := m.Write(0x4048, 8, 0x11007|1<<63); err != nil {
+		t.Fatal(err)
+	}
+	m.System.Flush()
+	if _, err := m.NativeRAM.CodeVersion(0x8000); err != nil {
+		t.Fatal(err)
+	}
+	before := m.NativeRAM.CodeContext()
+	if _, err := m.System.Read(0x9000, 1, false); err != nil {
+		t.Fatal(err)
+	}
+	if m.NativeRAM.CodeContext() != before {
+		t.Fatal("hardware accessed bit invalidated executable mappings")
+	}
+	m.NativeRAM.NativeRefill(0x9000)
+	ctx := m.NativeRAM.NativeContext()
+	if ctx.Pages[9].Data == nil || ctx.Pages[9].Permissions&2 != 0 {
+		t.Fatal("native write bypassed pending architectural dirty update")
+	}
+	if err := m.System.Write(0x9000, 1, 7); err != nil {
+		t.Fatal(err)
+	}
+	if m.NativeRAM.CodeContext() != before || ctx.Pages[9].Data != nil {
+		t.Fatal("dirty update invalidated code or kept stale data permission")
+	}
+	m.NativeRAM.NativeRefill(0x9000)
+	if ctx.Pages[9].Permissions&2 == 0 {
+		t.Fatal("dirty update failed to enable checked native data writes")
+	}
+}
+
+-- pit.go --
+package amd64machine
+
+import "renvo.dev/emulators/amd64"
+
+const pitClocksPerTick = uint64(100)
+
+func (m *Machine) pitReload(j int) uint64 {
+	if m.PIT[j] == 0 {
+		return 65536
+	}
+	return uint64(m.PIT[j])
+}
+func (m *Machine) pitTicks(j int) uint64 {
+	elapsed := m.pitElapsedTicks[j]
+	if m.pitRunning[j] {
+		elapsed += m.ticks - m.pitStart[j]
+	}
+	return elapsed
+}
+func (m *Machine) pitCount(j int) uint16 {
+	n := m.pitReload(j)
+	d := m.pitTicks(j) / pitClocksPerTick
+	switch m.pitMode[j] {
+	case 0, 1, 4, 5:
+		// One-shot OUT stops transitioning, but the 16-bit counter continues.
+		return uint16(n - d)
+	case 3:
+		phase := d % n
+		if n&1 == 0 {
+			return uint16(n - (2*phase)%n)
+		}
+		// Odd reloads count one first, then two; the high half is one clock longer.
+		if phase == 0 {
+			return uint16(n)
+		}
+		if phase < (n+1)/2 {
+			return uint16(n + 1 - 2*phase)
+		}
+		return uint16(n - 1 - 2*(phase-(n+1)/2))
+	default:
+		return uint16(n - d%n)
+	}
+}
+func (m *Machine) pitOut(j int) bool {
+	if !m.pitLoaded[j] {
+		return m.pitMode[j] != 0
+	}
+	if j == 2 && m.speaker&1 == 0 && (m.pitMode[j] == 2 || m.pitMode[j] == 3) {
+		return true
+	}
+	if (m.pitMode[j] == 1 || m.pitMode[j] == 5) && !m.pitRunning[j] {
+		return true
+	}
+	n, d := m.pitReload(j), m.pitTicks(j)/pitClocksPerTick
+	switch m.pitMode[j] {
+	case 0:
+		return !(m.pitAccess[j] == 3 && m.pitHigh[j]) && d >= n
+	case 1:
+		return d >= n
+	case 2:
+		return d%n != n-1
+	case 3:
+		return d%n < (n+1)/2
+	case 4, 5:
+		return d != n
+	}
+	return false
+}
+func (m *Machine) loadPIT(j int, value uint16) {
+	m.PIT[j], m.pitStart[j], m.pitElapsedTicks[j] = value, m.ticks, 0
+	m.pitLoaded[j] = true
+	mode := m.pitMode[j]
+	m.pitRunning[j] = (j != 2 || m.speaker&1 != 0) && mode != 1 && mode != 5
+	if j == 0 {
+		m.pitTimerActive = m.pitRunning[j]
+		m.nextTimer = ^uint64(0)
+		if m.pitTimerActive {
+			cycles := m.pitReload(j)
+			if mode == 4 {
+				cycles++ // Strobe returns high one clock after terminal count.
+			}
+			m.nextTimer = m.ticks + cycles*pitClocksPerTick
+		}
+	}
+}
+func (m *Machine) setPITGate(value byte) {
+	old := m.speaker & 1
+	m.speaker = value
+	gate := value & 1
+	if old == gate || !m.pitLoaded[2] {
+		return
+	}
+	mode := m.pitMode[2]
+	if mode == 1 || mode == 5 {
+		if gate != 0 {
+			m.pitStart[2], m.pitElapsedTicks[2], m.pitRunning[2] = m.ticks, 0, true
+		}
+		return
+	}
+	if gate == 0 {
+		m.pitElapsedTicks[2] = m.pitTicks(2)
+		m.pitRunning[2] = false
+		if mode == 2 || mode == 3 {
+			m.pitElapsedTicks[2] = 0
+		}
+	} else {
+		m.pitStart[2], m.pitRunning[2] = m.ticks, true
+	}
+}
+func (m *Machine) servicePIT() {
+	if !m.pitTimerActive || m.ticks < m.nextTimer {
+		return
+	}
+	events := uint64(1)
+	if m.pitMode[0] == 2 || m.pitMode[0] == 3 {
+		events += (m.ticks - m.nextTimer) / (m.pitReload(0) * pitClocksPerTick)
+	}
+	m.pitEdges += events
+	m.pitCoalesced += events - 1
+	if m.PIC[0].irr&1 != 0 {
+		m.pitCoalesced++
+	}
+	m.irq(0)
+	if m.pitMode[0] == 2 || m.pitMode[0] == 3 {
+		period := m.pitReload(0) * pitClocksPerTick
+		// Coalesce missed edges in the PIC, retaining the original oscillator phase.
+		m.nextTimer += ((m.ticks-m.nextTimer)/period + 1) * period
+	} else {
+		m.pitTimerActive = false
+		m.nextTimer = ^uint64(0)
+	}
+}
+func (m *Machine) advanceIdleClock(target uint64) {
+	if target > m.ticks {
+		m.System.TSC += (target - m.ticks) * amd64.TSCTicksPerInstruction
+		m.ticks = target
+	}
+}
+
+-- pit_test.go --
+package amd64machine
+
+import (
+	"encoding/binary"
+	"renvo.dev/emulators/amd64"
+	"testing"
+)
+
+func pitDevice(t *testing.T) *Machine {
+	t.Helper()
+	m := &Machine{RAM: make([]byte, 65536), versions: make([]uint64, 16), nextTimer: ^uint64(0)}
+	m.System = amd64.NewSystem(&m.CPU, m, m)
+	// PIT and TSC derive from the same virtual oscillator, including idle
+	// fast-forward. Describe that implemented clock, without a kernel override.
+	m.System.TSCCrystalHz = 1193182
+	m.System.TSCNumerator = uint32(pitClocksPerTick * amd64.TSCTicksPerInstruction)
+	m.System.TSCDenominator = 1
+	m.System.InvariantTSC = true
+	return m
+}
+func pitProgram(m *Machine, channel int, mode byte, count uint16) {
+	m.Out(0x43, 1, uint32(channel<<6)|0x30|uint32(mode)<<1)
+	m.Out(uint16(0x40+channel), 1, uint32(byte(count)))
+	m.Out(uint16(0x40+channel), 1, uint32(byte(count>>8)))
+}
+
+func TestPITOneShotPeriodicShutdownAndFullLoad(t *testing.T) {
+	for _, mode := range []byte{0, 2, 3, 4, 6, 7} {
+		m := pitDevice(t)
+		m.ticks = 1234
+		m.Out(0x43, 1, 0x30|uint32(mode)<<1)
+		m.Out(0x40, 1, 7)
+		if m.pitTimerActive || m.nextTimer != ^uint64(0) || m.pitLoaded[0] {
+			t.Fatal("timer armed on partial reload", mode)
+		}
+		m.Out(0x40, 1, 0)
+		want := uint64(1234 + 700)
+		if mode == 4 {
+			want += 100
+		}
+		if !m.pitTimerActive || m.nextTimer != want {
+			t.Fatal("incorrect first rising edge", mode, m.nextTimer, want)
+		}
+		m.ticks = want - 1
+		m.servicePIT()
+		if m.PIC[0].irr&1 != 0 {
+			t.Fatal("early timer edge", mode)
+		}
+		m.ticks++
+		m.servicePIT()
+		if m.PIC[0].irr&1 == 0 {
+			t.Fatal("missing programmed edge", mode)
+		}
+		m.PIC[0].irr = 0
+		m.ticks = want + 5000
+		m.servicePIT()
+		if mode == 0 || mode == 4 {
+			if m.pitTimerActive || m.PIC[0].irr&1 != 0 || m.nextTimer != ^uint64(0) {
+				t.Fatal("one-shot repeated", mode)
+			}
+		} else {
+			if !m.pitTimerActive || m.PIC[0].irr&1 == 0 || m.nextTimer != want+5600 {
+				t.Fatal("periodic phase drift", mode, m.nextTimer)
+			}
+		}
+		m.PIC[0].irr = 0
+		m.Out(0x43, 1, 0x30) // Linux shutdown's final mode write.
+		m.ticks += 10000000
+		m.servicePIT()
+		if m.pitTimerActive || m.PIC[0].irr&1 != 0 {
+			t.Fatal("shutdown left periodic IRQ active", mode)
+		}
+	}
+	m := pitDevice(t)
+	pitProgram(m, 0, 2, 0) // Binary zero is 65536, not an immediate event.
+	if m.nextTimer != 6553600 {
+		t.Fatal("zero reload lost", m.nextTimer)
+	}
+}
+
+func TestPITCounterLatchAndChannel2Output(t *testing.T) {
+	m := pitDevice(t)
+	m.Out(0x61, 1, 1)
+	pitProgram(m, 2, 0, 7)
+	for _, item := range []struct {
+		elapsed uint64
+		count   uint16
+		high    bool
+	}{
+		{0, 7, false}, {6, 1, false}, {7, 0, true}, {8, 65535, true}, {65543, 0, true},
+	} {
+		m.ticks = item.elapsed * 100
+		if m.pitCount(2) != item.count || (m.In(0x61, 1)&32 != 0) != item.high {
+			t.Fatal("mode0 counter/OUT", item, m.pitCount(2), m.In(0x61, 1))
+		}
+	}
+	for _, mode := range []byte{2, 3, 4} {
+		m = pitDevice(t)
+		m.Out(0x61, 1, 1)
+		pitProgram(m, 2, mode, 5)
+		for elapsed := uint64(0); elapsed < 16; elapsed++ {
+			m.ticks = elapsed * 100
+			want := elapsed%5 != 4
+			if mode == 3 {
+				want = elapsed%5 < 3
+			}
+			if mode == 4 {
+				want = elapsed != 5
+			}
+			if (m.In(0x61, 1)&32 != 0) != want {
+				t.Fatal("channel2 waveform", mode, elapsed, m.In(0x61, 1))
+			}
+		}
+	}
+	m = pitDevice(t)
+	pitProgram(m, 0, 2, 0x1234)
+	m.ticks = 0x100 * 100
+	m.Out(0x43, 1, 0) // Latch1234-0100=1134.
+	low := m.In(0x40, 1)
+	m.ticks += 0x100 * 100
+	m.Out(0x43, 1, 0) // A second latch cannot replace an unread high byte.
+	high := m.In(0x40, 1)
+	if low|high<<8 != 0x1134 {
+		t.Fatal("latched count replaced between bytes", low, high)
+	}
+	// Partial reload preserves an active periodic count until the complete word.
+	oldCount, oldDeadline := m.PIT[0], m.nextTimer
+	m.Out(0x40, 1, 0x78)
+	if m.PIT[0] != oldCount || m.nextTimer != oldDeadline {
+		t.Fatal("LSB changed live periodic reload")
+	}
+	m.Out(0x40, 1, 0x56)
+	if m.PIT[0] != 0x5678 || m.nextTimer != m.ticks+0x5678*100 {
+		t.Fatal("MSB failed to commit reload")
+	}
+}
+
+func TestPITGatePauseAndHardwareTrigger(t *testing.T) {
+	m := pitDevice(t)
+	m.Out(0x61, 1, 1)
+	pitProgram(m, 2, 0, 10)
+	m.ticks = 350
+	m.Out(0x61, 1, 0)
+	m.ticks = 1350
+	if m.pitCount(2) != 7 {
+		t.Fatal("gate-low counter advanced")
+	}
+	m.Out(0x61, 1, 1)
+	m.ticks = 1400
+	if m.pitCount(2) != 6 {
+		t.Fatal("fractional input clock lost across pause", m.pitCount(2))
+	}
+	pitProgram(m, 2, 3, 5)
+	m.ticks += 300
+	m.Out(0x61, 1, 0)
+	if m.In(0x61, 1)&32 == 0 {
+		t.Fatal("periodic gate-low did not force OUT high")
+	}
+	m.Out(0x61, 1, 1)
+	if m.pitCount(2) != 5 || !m.pitOut(2) {
+		t.Fatal("gate rising did not restart period")
+	}
+	for _, mode := range []byte{1, 5} {
+		m.Out(0x61, 1, 0)
+		pitProgram(m, 2, mode, 5)
+		m.ticks += 1000
+		if m.pitRunning[2] || !m.pitOut(2) {
+			t.Fatal("hardware-trigger mode started without gate edge", mode)
+		}
+		m.Out(0x61, 1, 1)
+		if !m.pitRunning[2] || m.pitCount(2) != 5 {
+			t.Fatal("hardware trigger ignored", mode)
+		}
+	}
+}
+
+func TestPITIdleFastForwardKeepsTSCAndRetirementCoherent(t *testing.T) {
+	m := pitDevice(t)
+	m.CPU.Flags = 2 | amd64.FlagIF
+	m.CPU.PC, m.CPU.R[amd64.RSP] = 0x1000, 0x8000
+	m.System.EFER = 1 << 10
+	m.System.GDTR = amd64.Table{Base: 0x3000, Limit: 31}
+	m.System.IDTR = amd64.Table{Base: 0x2000, Limit: 4095}
+	m.System.Segments[1] = amd64.Segment{Selector: 8, Limit: 0xffffffff, Flags: 0xaf9a}
+	binary.LittleEndian.PutUint64(m.RAM[0x3008:], 0x00af9a000000ffff)
+	binary.LittleEndian.PutUint64(m.RAM[0x2000+32*16:], 0x00008e0000084000)
+	// RDTSC; MOV R8,RAX; MOV DX,CF9; MOV AL,6; OUT DX,AL (stop).
+	copy(m.RAM[0x4000:], []byte{0x0f, 0x31, 0x49, 0x89, 0xc0, 0x66, 0xba, 0xf9, 0x0c, 0xb0, 0x06, 0xee})
+	m.PIC[0].mask, m.PIC[0].vector = 0, 32
+	m.ticks, m.System.TSC, m.System.Halted = 1234, 50000, true
+	pitProgram(m, 0, 0, 5)
+	if err := m.Run(100); err != nil {
+		t.Fatal(err)
+	}
+	if !m.Stopped || m.CPU.Retired != 5 || m.CPU.R[8] != 100000 || m.System.TSC != 100500 || m.ticks != 1739 {
+		t.Fatal("idle time changed retirement or lost TSC offset", m.CPU.Retired, m.CPU.R, m.System.TSC, m.ticks)
+	}
+	before := m.System.TSC
+	m.advanceIdleClock(m.ticks - 1)
+	if m.System.TSC != before {
+		t.Fatal("idle clock moved backwards")
+	}
+}
+
+-- table_watch_lifetime_test.go --
+package amd64machine
+
+import "testing"
+
+func TestFullPagingFlushReleasesRetiredTablesButRewatchesActiveOnes(t *testing.T) {
+	m := jitMachine(t, "native")
+	if _, err := m.System.Read(0x8000, 1, true); err != nil {
+		t.Fatal(err)
+	}
+	m.System.CR[0] &^= 1 << 31
+	m.System.Flush()
+	before := m.NativeRAM.CodeContext()
+	if err := m.Write(0x1000, 8, 0x12345678); err != nil {
+		t.Fatal(err)
+	}
+	if m.NativeRAM.CodeContext() != before {
+		t.Fatal("old page-table frame still invalidates native code after full flush")
+	}
+	if err := m.Write(0x1000, 8, 0x2007); err != nil {
+		t.Fatal(err)
+	}
+	m.System.CR[0] |= 1 << 31
+	m.System.Flush()
+	if _, err := m.System.Read(0x8000, 1, true); err != nil {
+		t.Fatal(err)
+	}
+	before = m.NativeRAM.CodeContext()
+	if err := m.Write(0x4040, 8, 0x10005); err != nil {
+		t.Fatal(err)
+	}
+	if m.NativeRAM.CodeContext() == before {
+		t.Fatal("active table store failed to revoke native authority")
+	}
+}

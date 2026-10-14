@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"unsafe"
 )
 
 // JITDump is an opt-in perf jitdump v1 stream. Each load contains its real native
@@ -23,18 +24,41 @@ type JITDump struct {
 	marker       []byte
 	index, bytes uint64
 	failed       bool
+	timestamp    func() (uint64, error)
+	limit        uint64
 }
 
 const jitDumpLimit = 32 << 20
 
 func NewJITDump(path string) (*JITDump, error) {
+	return newJITDump(path, jitTimestamp, jitTimestampFlags, jitDumpLimit)
+}
+
+// NewJITDumpMonotonic matches perf record --clockid mono sampling captures.
+// The default constructor retains architecture timestamps for Intel PT.
+func NewJITDumpMonotonic(path string) (*JITDump, error) {
+	// Full-system sampling has an explicitly bounded 64MiB-per-file capture
+	// allowance; the default Intel PT stream retains its original 32MiB cap.
+	return newJITDump(path, jitMonotonicTimestamp, 0, 64<<20)
+}
+
+func jitMonotonicTimestamp() (uint64, error) {
+	var ts syscall.Timespec
+	_, _, err := syscall.Syscall(syscall.SYS_CLOCK_GETTIME, 1, uintptr(unsafe.Pointer(&ts)), 0)
+	if err != 0 {
+		return 0, err
+	}
+	return uint64(ts.Sec)*1000000000 + uint64(ts.Nsec), nil
+}
+
+func newJITDump(path string, clock func() (uint64, error), flags, limit uint64) (*JITDump, error) {
 	machine := uint32(62) // EM_X86_64
 	if runtime.GOARCH == "arm64" {
 		machine = 183
 	} else if runtime.GOARCH != "amd64" {
 		return nil, fmt.Errorf("unsupported jitdump host")
 	}
-	timestamp, err := jitTimestamp()
+	timestamp, err := clock()
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +74,7 @@ func NewJITDump(path string) (*JITDump, error) {
 	binary.LittleEndian.PutUint32(header[20:24], uint32(os.Getpid()))
 	binary.LittleEndian.PutUint64(header[24:32], timestamp)
 	// Intel PT uses raw TSC on amd64; other hosts use CLOCK_MONOTONIC.
-	binary.LittleEndian.PutUint64(header[32:40], jitTimestampFlags)
+	binary.LittleEndian.PutUint64(header[32:40], flags)
 	if _, err = file.Write(header[:]); err != nil {
 		file.Close()
 		return nil, err
@@ -60,17 +84,17 @@ func NewJITDump(path string) (*JITDump, error) {
 		file.Close()
 		return nil, err
 	}
-	return &JITDump{file: file, marker: marker, bytes: 40}, nil
+	return &JITDump{file: file, marker: marker, bytes: 40, timestamp: clock, limit: limit}, nil
 }
 
 func (j *JITDump) WriteCode(address uintptr, code []byte, name string) error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	size := uint64(56 + len(name) + 1 + len(code))
-	if j.file == nil || j.failed || address == 0 || len(code) == 0 || len(name) == 0 || len(name) > 160 || strings.ContainsAny(name, "\r\n\x00") || size > jitDumpLimit-j.bytes {
+	if j.file == nil || j.failed || address == 0 || len(code) == 0 || len(name) == 0 || len(name) > 160 || strings.ContainsAny(name, "\r\n\x00") || size > j.limit-j.bytes {
 		return fmt.Errorf("invalid or over-budget jitdump load")
 	}
-	timestamp, err := jitTimestamp()
+	timestamp, err := j.timestamp()
 	if err != nil {
 		return err
 	}
@@ -107,7 +131,7 @@ func (j *JITDump) Close() error {
 	}
 	var result error
 	if !j.failed {
-		stamp, err := jitTimestamp()
+		stamp, err := j.timestamp()
 		if err == nil {
 			var closeRecord [16]byte
 			binary.LittleEndian.PutUint32(closeRecord[0:4], 3) // JIT_CODE_CLOSE

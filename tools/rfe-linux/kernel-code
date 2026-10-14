@@ -1,0 +1,53 @@
+#!/usr/bin/env python3
+"""Read a bounded code window from the pinned cached x86 kernel, without execution."""
+import gzip
+import hashlib
+import json
+from pathlib import Path
+import struct
+import sys
+
+root = Path(__file__).resolve().parents[2]
+path = root / "sandbox/rfe-linux/x86_64/kernel"
+manifest = json.loads((path.parent / "manifest.json").read_text())
+raw = path.read_bytes()
+if hashlib.sha256(raw).hexdigest() != manifest["kernel_sha256"]:
+    sys.exit("kernel fixture checksum mismatch")
+address = int(sys.argv[1])
+if not 0xffffffff80000000 <= address <= 0xffffffffffffffff:
+    sys.exit("address must be a high-half kernel virtual address")
+offset = (raw[0x1f1] or 4) * 512 + 512
+offset += struct.unpack_from("<I", raw, 0x248)[0]
+size = struct.unpack_from("<I", raw, 0x24c)[0]
+import io
+with gzip.GzipFile(fileobj=io.BytesIO(raw[offset:offset+size])) as stream:
+    image = stream.read(64*1024*1024+1)
+if len(image) > 64*1024*1024 or image[:6] != b"\x7fELF\x02\x01":
+    sys.exit("unsupported or oversized kernel ELF")
+shoff = struct.unpack_from("<Q", image, 40)[0]
+entsize, count, names_index = struct.unpack_from("<HHH", image, 58)
+if entsize != 64 or count > 1000 or shoff+count*64 > len(image):
+    sys.exit("invalid section table")
+sections = [struct.unpack_from("<IIQQQQIIQQ", image, shoff+i*64) for i in range(count)]
+def data(section):
+    at, length = section[4:6]
+    if at+length > len(image):
+        raise ValueError("invalid section data")
+    return image[at:at+length]
+def name(strings, at):
+    return strings[at:at+256].split(b"\0",1)[0].decode("utf-8", "replace")
+names = data(sections[names_index])
+result = {"address": hex(address), "kernel_sha256": manifest["kernel_sha256"], "symbols": []}
+for section in sections:
+    if section[1] == 2:
+        strings = data(sections[section[6]])
+        for at in range(section[4], section[4]+section[5], 24):
+            symbol = struct.unpack_from("<IBBHQQ", image, at)
+            if symbol[4] <= address < symbol[4]+symbol[5]:
+                result["symbols"].append({"name": name(strings,symbol[0]), "offset": address-symbol[4], "size": symbol[5]})
+    if section[2]&4 and section[3] <= address < section[3]+section[5]:
+        code = data(section)
+        pos = address-section[3]
+        start, end = max(0,pos-64), min(len(code),pos+64)
+        result.update(section=name(names,section[0]),start_address=hex(section[3]+start),code_hex=code[start:end].hex())
+print(json.dumps(result,indent=2))

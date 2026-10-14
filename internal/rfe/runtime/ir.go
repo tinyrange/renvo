@@ -28,11 +28,13 @@ type Op struct {
 	Imm  uint64
 }
 type Builder struct {
-	Ops    []Op
-	state  map[int]Value
-	masks  []uint64
-	values map[Op]Value
-	dirty  map[int]bool // stores since the previous effect checkpoint
+	MemoryInstructionProgress bool                        // checkpoints group accesses into guest memory instructions
+	MemoryAddress             func(*Builder, Value) Value // optional architectural key/guard policy
+	Ops                       []Op
+	state                     map[int]Value
+	masks                     []uint64
+	values                    map[Op]Value
+	dirty                     map[int]bool // stores since the previous effect checkpoint
 }
 
 func (b *Builder) emit(op Op) Value {

@@ -1,0 +1,32 @@
+#!/bin/busybox sh
+set -eu
+mount -t devtmpfs devtmpfs /dev
+exec </dev/console >/dev/console 2>&1
+trap 'echo "RENVO-RFE-LINUX: FAIL"; poweroff -f; exit 1' EXIT
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t tmpfs tmpfs /tmp
+test "$$" = 1
+echo 'RENVO-RFE-LINUX: INIT'
+release=$(cat /etc/alpine-release)
+test "$release" = 3.24.2
+arch=$(uname -m)
+case "$arch" in aarch64|x86_64) ;; *) exit 1 ;; esac
+echo "Alpine $release, Linux $(uname -r), $arch"
+test "$(/bin/sh -c 'exec /bin/busybox expr 19 + 23')" = 42
+echo 'RENVO-RFE-LINUX: EXEC PASS'
+printf 'kernel file semantics\n' >/tmp/rfe-proof
+test "$(cat /tmp/rfe-proof)" = 'kernel file semantics'
+echo 'RENVO-RFE-LINUX: FILE PASS'
+test "$(cat /tmp/rfe-proof | /bin/busybox tr a-z A-Z)" = 'KERNEL FILE SEMANTICS'
+echo 'RENVO-RFE-LINUX: PIPE PASS'
+rm /tmp/rfe-proof
+test ! -e /tmp/rfe-proof
+echo 'RENVO-RFE-LINUX: PASS'
+trap - EXIT
+case " $(cat /proc/cmdline) " in
+  *' rfe.shell=1 '*) exec /bin/sh ;;
+esac
+sync
+poweroff -f
+while :; do sleep 1; done

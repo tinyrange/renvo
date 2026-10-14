@@ -1,0 +1,220 @@
+#!/usr/bin/env python3
+"""Measure one cached system CoreMark run; never build or alter guest inputs."""
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import selectors
+import signal
+import subprocess
+import sys
+import time
+
+ROOT = Path(__file__).resolve().parents[2]
+LIMIT = 1024 * 1024
+TIMEOUT = 900
+EXPECTED = {
+    "PERF": ["e9f5", "e714", "1fd7", "8e3a", "d340"],
+    "VALID": ["18f2", "e3c1", "0747", "8d84", "5c66"],
+}
+MARKERS = [f"RENVO-COREMARK: {edge} {seed}"
+           for seed in EXPECTED for edge in ("START", "STOP")]
+
+
+def digest(path):
+    with path.open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def check_stamp(stamp):
+    # Stamp is produced by the approved rfe.build workflow.
+    for field in ("sources", "binary"):
+        for line in stamp[field].splitlines():
+            checksum, name = line.split("  ", 1)
+            path = ROOT / name
+            if not path.resolve().is_relative_to(ROOT) or digest(path) != checksum:
+                raise ValueError(f"stale RFE build input: {name}")
+
+
+def reports(serial, events):
+    if [event["marker"] for event in events] != MARKERS:
+        raise ValueError("missing, duplicate, or out-of-order timing markers")
+    output = []
+    for index, seed in enumerate(EXPECTED):
+        stop = f"RENVO-COREMARK: STOP {seed}"
+        end = "RENVO-COREMARK: START VALID" if seed == "PERF" else "RENVO-RFE-COREMARK: END"
+        body = serial.split(stop, 1)[1].split(end, 1)[0]
+        crc = re.findall(r"(?:seedcrc|\[0\]crc(?:list|matrix|state|final))\s*:\s*0x([0-9a-fA-F]{4})", body)
+        iterations = re.findall(r"^Iterations\s*:\s*(\d+)\s*$", body, re.M)
+        ticks = re.findall(r"^Total ticks\s*:\s*(\d+)\s*$", body, re.M)
+        if ([value.lower() for value in crc] != EXPECTED[seed]
+                or iterations != ["100000"] or len(ticks) != 1
+                or body.count("Correct operation validated.") != 1
+                or re.search(r"ERROR|Errors detected", body)):
+            raise ValueError(f"invalid {seed} report/CRC: {crc}")
+        host = events[index * 2 + 1]["host_monotonic_seconds"] - events[index * 2]["host_monotonic_seconds"]
+        guest = int(ticks[0]) / 1000000
+        if host < 10 or guest < 10:
+            raise ValueError(f"{seed} duration below 10 seconds: host={host}, guest={guest}")
+        output.append({"seed": seed, "crcs": crc[:4], "crcfinal": crc[4:],
+                       "crc_valid": True, "iterations": 100000,
+                       "host_duration_seconds": host, "guest_duration_seconds": guest,
+                       "iterations_per_host_second": 100000 / host})
+    return output
+
+
+def irq_counts(serial, edge):
+    start = f"RENVO-COMPARISON: IRQ {edge}"
+    if serial.count(start + "\n") != 1 or serial.count(start + " END") != 1:
+        raise ValueError(f"missing IRQ {edge} snapshot")
+    body = serial.split(start + "\n", 1)[1].split(start + " END", 1)[0]
+    return {match[1]: int(match[2]) for match in re.finditer(r"^\s*(\w+):\s+(\d+)", body, re.M)}
+
+
+def check_parser(baseline):
+    directory = ROOT / baseline["rfe_run_directories"][0]
+    serial = (directory / "serial.log").read_text()
+    events = [event for event in json.loads((directory / "result.json").read_text())["serial_events"]
+              if event["marker"] in MARKERS]
+    parsed = reports(serial, events)
+    if parsed[0]["iterations_per_host_second"] != 100000 / (events[1]["host_monotonic_seconds"] - events[0]["host_monotonic_seconds"]):
+        raise AssertionError("host timing changed")
+    cases = [(serial.replace("0xd340", "0xffff"), events),
+             (serial.replace("Correct operation validated.", "BAD"), events),
+             (serial, events[:-1]), (serial, events + events[-1:]),
+             (re.sub(r"(Total ticks\s*:\s*)\d+", r"\g<1>1", serial, count=1), events)]
+    short = [dict(event) for event in events]
+    short[1]["host_monotonic_seconds"] = short[0]["host_monotonic_seconds"] + 1
+    cases.append((serial, short))
+    for data, timing in cases:
+        try:
+            reports(data, timing)
+        except ValueError:
+            continue
+        raise AssertionError("invalid report accepted")
+    before, after = irq_counts(serial, "BEFORE"), irq_counts(serial, "AFTER")
+    for key, expected in baseline["rfe_timer_irq_example"].items():
+        if after[key] - before[key] != expected["count"]:
+            raise AssertionError("IRQ delta changed")
+    print("PASS: archived timing/CRC/IRQ parsing; rejected corrupt, incomplete, duplicate and too-short reports")
+    return 0
+
+
+def main(arch, check=False):
+    machine, console = {"x86_64": ("linux-amd64-machine", "ttyS0"),
+                        "aarch64": ("linux-arm64-machine", "ttyAMA0")}[arch]
+    fixture = ROOT / f"sandbox/rfe-linux/coremark-system-compare-v1/{arch}/iterations-100000"
+    build = json.loads((fixture / "build.json").read_text())
+    baseline = next(row for row in json.loads((ROOT / "docs/qemu-system-comparison-results.json").read_text())["results"]
+                    if row["architecture"] == arch)
+    if check:
+        return check_parser(baseline)
+    if build != baseline["paired_input_hashes"] or build["iterations_per_seed"] != 100000:
+        raise ValueError("cached build does not match reviewed baseline")
+    inputs = {ROOT / f"sandbox/rfe-linux/{arch}/kernel": build["kernel_sha256"],
+              fixture / "coremark.elf": build["benchmark_sha256"],
+              fixture / "initramfs.cpio.gz": build["benchmark_initramfs_sha256"]}
+    inputs.update({fixture / "source" / name: sha for name, sha in build["source_hashes"].items()})
+    for path, sha in inputs.items():
+        if digest(path) != sha:
+            raise ValueError(f"cached fixture changed: {path}")
+    stamp = json.loads((ROOT / f"sandbox/rfe-tools/{machine}.json").read_text())
+    check_stamp(stamp)
+    if 0 not in os.sched_getaffinity(0):
+        raise ValueError("baseline logical CPU 0 unavailable")
+    # Fixed single-CPU affinity applies to this process and its child, not the host.
+    os.sched_setaffinity(0, {0})
+    argv = [str(ROOT / f"sandbox/rfe-tools/{machine}"),
+            "-kernel", str(ROOT / f"sandbox/rfe-linux/{arch}/kernel"),
+            "-initrd", str(fixture / "initramfs.cpio.gz"),
+            "-memory", "256", "-steps", "1000000000000",
+            "-append", f"console={console},115200 rdinit=/coremark-init panic=-1 nokaslr",
+            "-jit-cache", "balanced32"]
+    argv.extend(["-clock", "realtime"])
+    directory = fixture / "runs" / f"rfe-current-{time.time_ns()}"
+    directory.mkdir()
+    started = time.monotonic()
+    streams = {"serial": bytearray(), "stderr": bytearray()}
+    events, pending = [], bytearray()
+    failed = None
+    child = subprocess.Popen(argv, cwd=ROOT, stdin=subprocess.DEVNULL,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+    selector = selectors.DefaultSelector()
+    selector.register(child.stdout, selectors.EVENT_READ, "serial")
+    selector.register(child.stderr, selectors.EVENT_READ, "stderr")
+    try:
+        while selector.get_map():
+            if time.monotonic() - started > TIMEOUT:
+                raise TimeoutError("900-second measurement deadline")
+            for key, _ in selector.select(0.1):
+                data = os.read(key.fileobj.fileno(), 4096)
+                received = time.monotonic()
+                if not data:
+                    selector.unregister(key.fileobj)
+                    continue
+                if len(streams[key.data]) + len(data) > LIMIT:
+                    raise ValueError(f"{key.data} exceeds 1 MiB capture limit")
+                streams[key.data].extend(data)
+                if key.data == "serial":
+                    pending.extend(data)
+                    while b"\n" in pending:
+                        line, _, rest = pending.partition(b"\n")
+                        pending = bytearray(rest)
+                        marker = line.decode("utf-8", "replace").strip()
+                        if marker in MARKERS:
+                            events.append({"marker": marker, "host_monotonic_seconds": received})
+                            print(f"{marker} at {received - started:.3f}s", flush=True)
+        child.wait(timeout=max(0.1, TIMEOUT - (time.monotonic() - started)))
+        if child.returncode != 0:
+            raise ValueError(f"RFE exited {child.returncode}")
+    except Exception as error:
+        failed = str(error)
+    finally:
+        if child.poll() is None:
+            os.killpg(child.pid, signal.SIGKILL)
+            child.wait()
+        selector.close()
+        child.stdout.close()
+        child.stderr.close()
+    serial = streams["serial"].decode("utf-8", "replace").replace("\r\n", "\n")
+    stderr = streams["stderr"].decode("utf-8", "replace")
+    (directory / "serial.log").write_bytes(streams["serial"])
+    (directory / "stderr.log").write_bytes(streams["stderr"])
+    result = {"architecture": arch, "host_logical_cpu": 0, "argv": argv,
+              "runner_sha256": digest(ROOT / f"sandbox/rfe-tools/{machine}"),
+              "build": build, "runner_build": stamp, "serial_events": events,
+              "host_total_seconds": time.monotonic() - started, "exit_code": child.returncode,
+              "success": False, "host_score_eligible": False, "error": failed,
+              "run_directory": str(directory.relative_to(ROOT))}
+    try:
+        if failed:
+            raise ValueError(failed)
+        check_stamp(stamp)
+        if any(digest(path) != sha for path, sha in inputs.items()):
+            raise ValueError("inputs changed during measurement")
+        if serial.count("RENVO-RFE-COREMARK: BEGIN") != 1 or serial.count("RENVO-RFE-COREMARK: END") != 1:
+            raise ValueError("missing benchmark completion markers")
+        seeds = reports(serial, events)
+        before, after = irq_counts(serial, "BEFORE"), irq_counts(serial, "AFTER")
+        if before.keys() != after.keys() or any(after[k] < before[k] for k in before):
+            raise ValueError("invalid IRQ counter progression")
+        clock = serial.split("RENVO-COMPARISON: CLOCKSOURCE BEGIN\n", 1)[1].split("RENVO-COMPARISON: CLOCKSOURCE END", 1)[0].strip()
+        score = seeds[0]["iterations_per_host_second"]
+        result.update(success=True, host_score_eligible=True, crc_valid=True, inputs_unchanged=True,
+                      seed_reports=seeds, clocksource=clock, irq_deltas={k: after[k] - before[k] for k in before},
+                      baseline_median=baseline["rfe_balanced32_median"],
+                      speedup=score / baseline["rfe_balanced32_median"],
+                      clock_diagnostic=[line for line in stderr.splitlines() if line.startswith("clock ")])
+    except Exception as error:
+        result["error"] = str(error)
+    (directory / "result.json").write_text(json.dumps(result, indent=2) + "\n")
+    summary = {key: value for key, value in result.items() if key not in ("runner_build", "build", "argv")}
+    print(json.dumps(summary, indent=2), flush=True)
+    return 0 if result["success"] else 1
+
+
+if __name__ == "__main__":
+    if len(sys.argv) not in (2, 3) or sys.argv[1] not in ("x86_64", "aarch64") or (len(sys.argv) == 3 and sys.argv[2] != "--check"):
+        sys.exit("usage: measure ARCH (x86_64 or aarch64)")
+    sys.exit(main(sys.argv[1], check=len(sys.argv) == 3))

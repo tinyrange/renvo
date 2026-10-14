@@ -1,0 +1,36 @@
+STALE ARM TABLE WATCH (before fix):
+ok  	renvo.dev/rfe/workspace/packages/aarch64	0.002s [no tests to run]
+--- FAIL: TestRetiredPageTableFrameCanBeReusedWithoutCodeInvalidation (0.00s)
+    table_watch_lifetime_test.go:19: retired page-table frame remained a permanent write barrier
+FAIL
+FAIL	renvo.dev/rfe/workspace/packages/linux-arm64-machine	0.002s
+FAIL
+
+STALE X86 ROOT WATCH (before fix):
+--- FAIL: TestTableWatchesFollowBoundedRootProofLifetime (0.00s)
+    table_space_test.go:24: evicted root kept retired table barrier
+FAIL
+FAIL	renvo.dev/internal/rfe/systemmemory	0.002s
+FAIL
+
+HARDWARE AD INVALIDATION (before fix):
+ok  	renvo.dev/rfe/workspace/packages/amd64	0.002s [no tests to run]
+--- FAIL: TestHardwareAccessDirtyBitsDoNotInvalidateExecutableMappings (0.00s)
+    page_metadata_test.go:20: hardware accessed bit invalidated executable mappings
+FAIL
+FAIL	renvo.dev/rfe/workspace/packages/linux-amd64-machine	0.003s
+FAIL
+
+BLOCKED PIC SCHEDULING (before fix):
+ok  	renvo.dev/rfe/workspace/packages/amd64	0.002s [no tests to run]
+--- FAIL: TestBlockedPICPendingDoesNotSingleStepNativeCode (0.00s)
+    irq_slice_test.go:22: undeliverable PIC request single-stepped native code 0 1
+FAIL
+FAIL	renvo.dev/rfe/workspace/packages/linux-amd64-machine	0.004s
+FAIL
+
+FINAL CPU/MACHINE SUITES:
+ok  	renvo.dev/rfe/workspace/packages/aarch64	0.051s
+ok  	renvo.dev/rfe/workspace/packages/linux-arm64-machine	0.565s
+ok  	renvo.dev/rfe/workspace/packages/amd64	0.092s
+ok  	renvo.dev/rfe/workspace/packages/linux-amd64-machine	0.518s

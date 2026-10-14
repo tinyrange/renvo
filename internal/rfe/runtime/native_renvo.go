@@ -40,7 +40,7 @@ func (n *Native) CallLinked(state []uint64, memory *MemoryContext, budget uint64
 	return fmt.Errorf("native mapping unavailable")
 }
 
-func (n *Native) EnablePerfMap() error                   { return nil }
+func (n *Native) EnablePerfMap(monotonic ...bool) error  { return nil }
 func (n *Native) NameEntry(entry int, name string) error { return nil }
 
 func (n *Native) AdmitLink(entry, words, instructions int) error {
@@ -75,3 +75,12 @@ func (n *Native) CompileCodeVersionedLoop(ops []Op, words, instructions int, mem
 }
 
 func (n *Native) CanLinkMemory(memory *MemoryContext) bool { return false }
+
+func (n *Native) RunLinkedBackingSession(state []uint64, m *MemoryContext, budget uint64, backing []byte) error {
+	return fmt.Errorf("native mapping unavailable")
+}
+
+// Portable hosts preserve the same unavailable-native fallback as other loops.
+func (n *Native) CompileOwnedDirectLoop(ops []Op, words, instructions int, memory *MemoryContext) (int, error) {
+	return n.CompileLoop(ops, words, instructions)
+}

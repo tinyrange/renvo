@@ -36,6 +36,16 @@ func (n *Native) CompileCodeVersionedLoop(ops []Op, words, instructions int, mem
 	return n.compileLoopMode(ops, words, instructions, false, memory)
 }
 
+// CompileOwnedDirectLoop combines the same explicit code-stamp ownership
+// contract with a protection-enforced data window. Its checked fallback and
+// fault sites are unchanged; pin/root validation still runs on every session.
+func (n *Native) CompileOwnedDirectLoop(ops []Op, words, instructions int, memory *MemoryContext) (int, error) {
+	if memory == nil {
+		return 0, fmt.Errorf("missing direct memory owner")
+	}
+	return n.compileLoopMode(ops, words, instructions, true, memory)
+}
+
 func (n *Native) compileLoopMode(ops []Op, words, instructions int, direct bool, codeVersions *MemoryContext) (int, error) {
 	if !linkLayoutOK() || instructions < 1 || instructions > 256 {
 		return 0, fmt.Errorf("invalid native loop dimensions")
@@ -45,6 +55,16 @@ func (n *Native) compileLoopMode(ops []Op, words, instructions int, direct bool,
 	}
 	seen := make([]bool, words)
 	progress, accesses := 0, 0
+	memoryMode := Value(-1)
+	for _, op := range ops {
+		if op.Kind == Progress {
+			if memoryMode >= 0 && memoryMode != op.B {
+				return 0, fmt.Errorf("mixed loop memory progress modes")
+			}
+			memoryMode = op.B
+		}
+	}
+	pendingMemory := false
 	for i, op := range ops {
 		switch op.Kind {
 		case LoadState:
@@ -56,11 +76,21 @@ func (n *Native) compileLoopMode(ops []Op, words, instructions int, direct bool,
 			if op.Imm < uint64(progress) || op.Imm > uint64(instructions) {
 				return 0, fmt.Errorf("invalid loop checkpoint")
 			}
+			if op.Imm > uint64(progress) {
+				pendingMemory = false
+			}
 			progress = int(op.Imm)
 		case MemoryLoad, MemoryStore, MemoryPairStore:
-			accesses++
+			if memoryMode != 1 || !pendingMemory {
+				accesses++
+			}
+			pendingMemory = true
 			if accesses > instructions || progress >= instructions {
 				return 0, fmt.Errorf("invalid loop access progress")
+			}
+		case NativeElapsed:
+			if op.Imm > uint64(instructions) {
+				return 0, fmt.Errorf("elapsed prefix exceeds loop body")
 			}
 		case RegionGuard, Guard:
 			if progress >= instructions || op.Kind == RegionGuard && progress == 0 {
@@ -79,7 +109,7 @@ func (n *Native) compileLoopMode(ops []Op, words, instructions int, direct bool,
 	var code []byte
 	var faults []int
 	var ok bool
-	if codeVersions != nil {
+	if codeVersions != nil && !direct {
 		code, ok = backendcompiled.RenvoEmitCodeVersionedLoopBlock(records, words, instructions, runtime.GOARCH == "arm64")
 	} else if direct && runtime.GOOS == "linux" && runtime.GOARCH == "amd64" && NativeSessionsAvailable() {
 		code, faults, ok = backendcompiled.RenvoEmitDirectLoopBlock(records, words, instructions)
