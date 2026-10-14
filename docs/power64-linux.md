@@ -127,10 +127,12 @@ RENVO_POWER_COREMARK_ITERATIONS=2000 \
   go run ./cmd/renvoemu test -run TestLinuxCoreMark emulators/linux-power64-machine.rfe
 ```
 
-The automated references support 1,000 and 2,000 iterations. Build the current
-performance fixture with `-DITERATIONS=2000`, and supply the explicit iteration
-environment variable above; the historical 1,000-iteration fixture may be too
-short on a faster host. Never change the duration check or use deterministic
+The legacy references support 1,000 and 2,000 iterations with their original
+2B-attempt limit. They may finish too quickly on the optimized native tier:
+that is an **invalid score**, not permission to relax the duration gate. The
+separately selected 20,000-iteration performance proof below keeps enough real
+work for valid timing and requires at least 1,000 iterations/s for both seeds.
+Never change the duration check or use deterministic
 time to obtain a score. The gate checks all five CRCs
 for each seed, ordered START/STOP markers, guest and host durations of at least
 ten seconds, agreement within 5% or 100 ms, and orderly guest poweroff. It
@@ -204,7 +206,10 @@ Scalar integer/CR/XER, branches/CTR/LR, shifts/rotates, multiplication/division,
 loads/stores, update forms and byte reversals lower to shared IR. The machine
 uses `systemmemory.RAM` for checked descriptors and code versions. Full-width
 addresses are bank-guarded into reversible 48-bit keys; cross-bank data accesses
-exit before the access. Endian-separated code identities permit guarded endian
+exit before the access. With MSR.DR clear, memory keys first apply the same
+real-mode physical alias mask as the interpreter; full architectural EAs remain
+unchanged, and enabling DR cannot reuse that real-mode specialization.
+Endian-separated code identities permit guarded endian
 specialization. Native refills probe permissions **without** setting HPTE R/C;
 first accesses and cleared bits return to architectural execution. SLB/HPT
 mutations invalidate mappings; CPU, boot and RTAS writes use physical code
@@ -213,13 +218,20 @@ barriers, including aliases. External raw RAM edits must call
 `InvalidateMappings`. The trusted, single-threaded native-memory contract does
 not authorize arbitrary unnotified changes to public backing arrays.
 
-Native state stays resident across linked/region side exits only inside the
-unchanged **64-attempt** timer window. Slow instructions, exceptions and bank
+On Linux/amd64 with the supported foreign boundary, native state and validated
+pins stay resident for at most **65,536 instructions**, while real monotonic
+timer deadlines are still checked between native dispatches of at most **64
+instructions**. The deadline is the earlier of DEC expiry and a 1 ms host
+refresh boundary. This avoids millions of Go/cgo re-entries without making the
+clock retirement-based. Custom clocks, aliases and unsupported hosts retain
+the original short boundary. Slow instructions, exceptions and bank
 transitions synchronize immediately. Deterministic slices stop at decrementer
 expiry. Realtime counter accesses and cede remain synchronous, and the POWER
 oscillator includes host compilation time rather than pausing it out of scores.
-Regions are bounded to the same schedulable window; cold kernel native admission
-is conservative. The original instruction/arena/duration budgets are unchanged.
+Regions remain bounded to a 64-instruction inner scheduling slice; cold kernel
+native admission is conservative. The original default instruction, executable
+arena and duration budgets are unchanged. The separately selected performance
+input has its own explicit resource profile, not a larger legacy/default limit.
 
 Use the explicit fixtures above to require actual full-stack execution:
 
@@ -229,8 +241,7 @@ sandbox/power64-linux/machine -kernel /path/to/linux/vmlinux \
 RENVO_POWER_ENGINE=native \
 RENVO_POWER_LINUX_KERNEL=/path/to/linux/vmlinux \
 RENVO_POWER_LINUX_INIT=/absolute/path/to/init \
-RENVO_POWER_COREMARK_ELF=/absolute/path/to/coremark.elf \
-RENVO_POWER_COREMARK_ITERATIONS=2000 \
+RENVO_POWER_COREMARK_PERFORMANCE_ELF=/absolute/path/to/coremark20000.elf \
   go run ./cmd/renvoemu test emulators/linux-power64-machine.rfe
 ```
 
@@ -242,20 +253,63 @@ IR and native code; native BE/LE memory, unaligned/update/reverse forms, code
 identity and aliased code writes, R/C/permissions, precise cross-page exits,
 reservation slow paths and fixed timer/resource boundaries.
 
-The final real guest retired **1,291,919,236 native instructions**, including
-**272,920,788 native memory instructions**, with **1,291,883,631 linked
-instructions**, **7,980 regions**, **86,570,758 loop iterations** and **zero
-compilation failures**. Both standard seed sets validated at 2,000 iterations;
-all ten CRCs matched an independent identical-ELF QEMU POWER8 control. The
-fresh full-stack fixture gates and Renvo preflight passed.
+## Native performance: above 1,000 iterations/s
 
-This is functional stack integration, not a claim of ARM64/x86 throughput
-parity. In the same-fixture unprofiled comparison, inclusive-clock native runs
-took 24.096318/22.021507 seconds (83.00/90.82 iterations/s); interpreter controls
-took 24.113729/23.624208 seconds (82.94/84.66 iterations/s). The earlier
-interpreter results are historical measurements on another fixture build.
-Native dispatch/scheduling overhead remains significant; no large new speedup
-is claimed. See `power64-recompiler-results.json` for provenance and counters.
+The initial full-stack integration (`2dea23f0`) measured only 83.00/90.82
+iterations/s. Those historical measurements remain in
+`power64-recompiler-results.json`. Profiling identified short native sessions,
+pointer-graph setup and tail-budget returns as the dominant costs. Bounded
+foreign timer sessions and real-mode physical alias lowering remove those costs
+without changing CoreMark, skipping guest operations or inventing time.
+
+A fresh, unprofiled Linux partition on a one-CPU Linux/amd64 development sandbox
+ran **20,000 iterations per seed** with the unchanged 2000-byte single-context
+scalar GCC 13.4.0 input:
+
+| Seed | Guest realtime | Host marker interval | Iterations/s from ticks | Final CRC |
+| --- | ---: | ---: | ---: | --- |
+| Performance | 16.748164 s | 16.752516432 s | **1194.16** | `382f` |
+| Validation | 14.891526 s | 14.892898941 s | **1343.05** | `d304` |
+
+Both upstream validations passed and Linux powered off. Every seed/list/matrix/
+state/final CRC matched an independent identical-ELF/kernel QEMU POWER8 control.
+The short QEMU control is **CRC-only**, not a valid performance score. The native
+run retired 13,340,410,854 native instructions (2,800,795,661 native memory),
+13,340,403,350 linked instructions and 943,180,817 loop iterations, with zero
+compilation failures. The executable arena stayed within its original 8 MiB cap.
+
+The integer-only integration port rounds printed seconds and iterations/s.
+The table and gate use **iterations / (Total ticks / 1,000,000)** instead, and
+verify host marker timing independently. No printed, rounded score is accepted
+in place of the duration/CRC/time-agreement proof.
+
+Build the same port/algorithms using the README command, changing only
+`-DITERATIONS=20000`, then select the explicit performance profile:
+
+```sh
+RENVO_POWER_ENGINE=native \
+RENVO_POWER_LINUX_KERNEL=/path/to/linux/vmlinux \
+RENVO_POWER_COREMARK_PERFORMANCE_ELF=/absolute/path/to/coremark20000.elf \
+  go run ./cmd/renvoemu test -run '^TestLinuxCoreMarkPerformance$' \
+  emulators/linux-power64-machine.rfe
+# Equivalent bounded standalone run (default -steps remains 2B):
+sandbox/power64-linux/machine -kernel /path/to/linux/vmlinux \
+  -init-elf /absolute/path/to/coremark20000.elf -engine native -clock realtime \
+  -steps 16000000000 -stats
+```
+
+This separately selected gate caps attempts at 16B and requires **>=1000
+iterations/s for EACH seed**, all ten independent CRCs, host AND guest durations
+>=10 seconds, agreement within max(100 ms, 5%), real native memory/link/region/
+loop coverage, zero compilation failures and orderly shutdown. Existing legacy
+1000/2000 fixtures, default 2B attempt limit and compiler performance/resource
+gates are unchanged. The legacy 2000 interpreter gate and fresh native Linux init
+also passed, as did focused deadline/GC/alias/revocation and POWER differential
+regressions, formatting and Renvo preflight. Full validation remains with CI.
+
+`power64-recompiler-performance.json` records provenance and measured counters.
+These are hosted native-emulation measurements, not physical POWER hardware,
+EEMBC certification or an ARM64/x86 throughput-parity claim.
 
 ## Current boundaries
 

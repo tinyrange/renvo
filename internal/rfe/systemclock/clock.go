@@ -7,16 +7,28 @@ import "time"
 // Clock is owned by the machine execution thread. Counter values have the
 // device's advertised frequency, independent of instruction tier or throughput.
 type Clock struct {
-	frequency  uint64
-	now        func() time.Duration
-	sleep      func(time.Duration)
-	last       uint64
-	pauseDepth int
-	pauseStart time.Duration
-	withheld   time.Duration
+	nativeStart uint64
+	frequency   uint64
+	now         func() time.Duration
+	sleep       func(time.Duration)
+	last        uint64
+	pauseDepth  int
+	pauseStart  time.Duration
+	withheld    time.Duration
 }
 
 func New(frequency uint64) *Clock {
+	if start := nativeNow(); start != 0 {
+		c := WithSource(frequency, func() time.Duration {
+			now := nativeNow()
+			if now < start {
+				return 0
+			}
+			return time.Duration(now - start)
+		}, time.Sleep)
+		c.nativeStart = start
+		return c
+	}
 	start := time.Now()
 	return WithSource(frequency, func() time.Duration { return time.Since(start) }, time.Sleep)
 }

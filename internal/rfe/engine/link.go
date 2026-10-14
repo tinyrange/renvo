@@ -86,9 +86,17 @@ func (e *Engine) runLinked(c CPU, remaining uint64, first *compiledBlock, memory
 		budget = uint64(e.config.MaxNativeInstructions)
 	}
 	var err error
+	expired := false
 	if e.config.MaxNativeInstructions > 64 {
 		if owner, ok := memory.(NativeBackingMemory); ok && owner.NativeCodeVersions() {
-			err = e.native.RunLinkedBackingSession(c.Registers(), context, budget, owner.NativeBacking())
+			if timer, ok := c.(NativeDeadlineCPU); ok && timer.NativeDeadline() != 0 {
+				expired, err = e.native.RunLinkedBackingSessionUntil(c.Registers(), context, budget, owner.NativeBacking(), timer.NativeDeadline())
+				if expired {
+					timer.NativeDeadlineExpired()
+				}
+			} else {
+				err = e.native.RunLinkedBackingSession(c.Registers(), context, budget, owner.NativeBacking())
+			}
 		} else {
 			err = e.native.RunLinkedSession(c.Registers(), context, budget)
 		}
@@ -143,6 +151,9 @@ func (e *Engine) runLinked(c CPU, remaining uint64, first *compiledBlock, memory
 			memory.NativeRefill(context.Address)
 		}
 		return e.interpret(c)
+	}
+	if expired {
+		return nil
 	}
 	if context.Total == 0 {
 		if quanta != 1 {

@@ -38,23 +38,32 @@ func ForeignSessionsAvailable() bool { return rfenativebridge.Available }
 // Native effects that could change the context's pointer graph mid-call use
 // the conservative original <=64-instruction boundary instead.
 func (c *LinkedCall) CallSession(state []uint64, m *LinkedContextABI, budget uint64) error {
-	return c.callSession(state, m, budget, false, nil)
+	return c.callSession(state, m, budget, false, nil, 0, nil)
 }
 
 // CallOwnedSession permits pin reuse only for the host-owned address-space
 // contract. Every call still verifies non-aliasing, compares every live pointer,
 // issues a fresh admission epoch, and enforces the same scheduling slice.
 func (c *LinkedCall) CallOwnedSession(state []uint64, m *LinkedContextABI, budget uint64) error {
-	return c.callSession(state, m, budget, true, nil)
+	return c.callSession(state, m, budget, true, nil, 0, nil)
 }
 
 // CallOwnedBackingSession pins one contiguous Go byte allocation instead of
 // repeatedly pinning its interior pages. The entire live page graph is checked
 // against this allocation on every call; no permissions or aliases are waived.
 func (c *LinkedCall) CallOwnedBackingSession(state []uint64, m *LinkedContextABI, budget uint64, backing []byte) error {
-	return c.callSession(state, m, budget, true, backing)
+	return c.callSession(state, m, budget, true, backing, 0, nil)
 }
-func (c *LinkedCall) callSession(state []uint64, m *LinkedContextABI, budget uint64, owned bool, backing []byte) (err error) {
+
+// CallOwnedBackingSessionUntil keeps the same admitted graph resident across
+// <=64-instruction timer polls. Only the host-owned, non-aliasing foreign path
+// can batch. Compatibility calls retain the original scheduling boundary.
+func (c *LinkedCall) CallOwnedBackingSessionUntil(state []uint64, m *LinkedContextABI, budget uint64, backing []byte, deadline uint64) (bool, error) {
+	expired := false
+	err := c.callSession(state, m, budget, true, backing, deadline, &expired)
+	return expired, err
+}
+func (c *LinkedCall) callSession(state []uint64, m *LinkedContextABI, budget uint64, owned bool, backing []byte, deadline uint64, expired *bool) (err error) {
 	clearContextBorrow(m)
 	if c == nil || c.arena == nil || m == nil || len(state) != c.words || budget == 0 || budget > SessionInstructionLimit {
 		c.ReleaseOwnedSessionPins()
@@ -155,7 +164,15 @@ func (c *LinkedCall) callSession(state []uint64, m *LinkedContextABI, budget uin
 		if !owned && len(a.faults) != 0 {
 			pins.Pin(&a.faults[0])
 		}
-		rfenativebridge.CallFaults(c.entry, unsafe.Pointer(&nativeState[0]), unsafe.Pointer(image), c.top, a.faults)
+		if deadline != 0 && owned && len(backing) != 0 {
+			hit := rfenativebridge.CallUntil(c.entry, unsafe.Pointer(&nativeState[0]), unsafe.Pointer(image), c.top, a.faults,
+				&image[sessionRemainingWord], &image[sessionTotalWord], &image[sessionMemoryWord], deadline)
+			if expired != nil {
+				*expired = hit
+			}
+		} else {
+			rfenativebridge.CallFaults(c.entry, unsafe.Pointer(&nativeState[0]), unsafe.Pointer(image), c.top, a.faults)
+		}
 		copy(state, nativeState)
 		m.Retired, m.Status, m.Address = image[0], image[1], image[2]
 		m.Remaining, m.Total, m.MemoryTotal = image[sessionRemainingWord], image[sessionTotalWord], image[sessionMemoryWord]

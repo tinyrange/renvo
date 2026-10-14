@@ -1,0 +1,109 @@
+{
+  "architecture": "ppc64le",
+  "baseline_revision": "2dea23f00831fa65aed47f5a197ce11beabc89bc",
+  "benchmark_elf_sha256": "87571069bcb3986e02382b604dfcbd279d734f7f68e1e61eb4af0d3ae9dcb675",
+  "clock": "inclusive CLOCK_MONOTONIC realtime, 1000000 Hz; no translation pause or retirement-derived time",
+  "compiler": "GCC 13.4.0",
+  "contexts": 1,
+  "coremark_revision": "d5fad6bd094899101a4e5fd53af7298160ced6ab",
+  "gates": {
+    "all_ten_independent_crcs": "passed",
+    "format": "passed",
+    "fresh_native_linux_init": "passed",
+    "host_guest_agreement": "max(100 ms, 5%)",
+    "legacy_2000_interpreter_original_2B_budget": "passed",
+    "minimum_host_guest_seconds_each_seed": 10,
+    "minimum_iterations_per_second_each_seed": 1000,
+    "native_deadline_progress_alias_gc_revocation_tests": "passed",
+    "native_memory_links_regions_loops": "passed",
+    "preflight": "passed",
+    "source_package_differential_regressions": "passed",
+    "upstream_validation_and_poweroff": "passed"
+  },
+  "guest": "Linux 6.6.1",
+  "host": "one-CPU Linux/amd64 development sandbox, 4096 MiB host allocation",
+  "host_toolchain": "go1.26.0 linux/amd64",
+  "independent_control": {
+    "all_ten_crcs_match": true,
+    "emulator": "QEMU 10.2.1 POWER8 pseries",
+    "guest_microseconds": [
+      3134953,
+      3134666
+    ],
+    "identical_kernel_and_elf": true,
+    "performance_score": false,
+    "reason": "CRC-only control correctly fails the unchanged ten-second reporting minimum"
+  },
+  "initramfs_sha256": "f5ec366f7ed67b482e190b49920cc41d80995e816340f704aa8a18d0d213b2c1",
+  "instruction_budget": 16000000000,
+  "iterations_per_seed": 20000,
+  "kernel_sha256": "b05966d3add34f2e0544696e59b8ae9189990f8d3df2b5ff838ebbd2d37c32cf",
+  "legacy_default_instruction_budget": 2000000000,
+  "linux_source_sha256": "da1ed7d47c97ed72c9354091628740aa3c40a3c9cd7382871f3cedbd60588234",
+  "native_counters": {
+    "arena_resets": 0,
+    "attempted": 13367096152,
+    "compile_failures": 0,
+    "interpreted": 17676489,
+    "ir": 8502195,
+    "linked": 13340403350,
+    "loop_iterations": 943180817,
+    "native": 13340410854,
+    "native_bytes": 6170716,
+    "native_memory": 2800795661,
+    "native_sessions": 3696773,
+    "region_exits": 280236838,
+    "regions": 1113
+  },
+  "native_host_refresh_deadline_microseconds": 1000,
+  "native_session_instruction_limit": 65536,
+  "native_timer_poll_instruction_limit": 64,
+  "ram_mib": 256,
+  "runs": [
+    {
+      "crcs": [
+        "e9f5",
+        "e714",
+        "1fd7",
+        "8e3a",
+        "382f"
+      ],
+      "guest_microseconds": 16748164,
+      "guest_seconds": 16.748164,
+      "host_seconds": 16.752516432,
+      "iterations_per_second": 1194.160745022559,
+      "seed": "performance"
+    },
+    {
+      "crcs": [
+        "18f2",
+        "e3c1",
+        "0747",
+        "8d84",
+        "d304"
+      ],
+      "guest_microseconds": 14891526,
+      "guest_seconds": 14.891526,
+      "host_seconds": 14.892898941,
+      "iterations_per_second": 1343.0457026365195,
+      "seed": "validation"
+    }
+  ],
+  "same_2000_iteration_diagnostic": {
+    "baseline_profiled_guest_microseconds": [
+      24232986,
+      22712117
+    ],
+    "crcs_match": true,
+    "elf_sha256": "a2a8968ba5db483f8dabc1a30c20cb5198bc7a8f9ef9fc2c1e298ee79abb2144",
+    "optimized_unprofiled_guest_microseconds": [
+      1892212,
+      1641419
+    ],
+    "optimized_valid_score": false,
+    "reason": "optimized short runs correctly fail the duration gate; profiling baseline is diagnostic, not a controlled performance comparison"
+  },
+  "scope": "Hosted native scalar POWER recompiler. No upstream algorithms, duration checks, clock rate, compiler resource gates or legacy attempt/arena limits changed. No physical POWER, EEMBC certification or other-architecture parity claim.",
+  "tested_revision": "bounded foreign timer sessions and real-mode alias lowering in this change",
+  "total_dataset_bytes": 2000
+}

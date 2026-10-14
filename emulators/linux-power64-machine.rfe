@@ -584,8 +584,11 @@ func coremarkReports(serial string, markers []string, times []time.Time, iterati
 	case 2000:
 		// Identical scalar ELF independently checked under QEMU POWER8.
 		known[0][4], known[1][4] = "4983", "0cac"
+	case 20000:
+		// Independent QEMU POWER8 control, identical scalar ELF.
+		known[0][4], known[1][4] = "382f", "d304"
 	default:
-		return result, fmt.Errorf("no independent CRC reference for %d iterations (use 1000 or 2000)", iterations)
+		return result, fmt.Errorf("no independent CRC reference for %d iterations (use 1000, 2000 or 20000)", iterations)
 	}
 	for i := 0; i < 2; i++ {
 		body := strings.SplitN(sections[i+1], "RENVO-POWER-COREMARK: START", 2)[0]
@@ -634,6 +637,24 @@ func TestLinuxCoreMark(t *testing.T) {
 			t.Fatal("invalid explicit iteration count")
 		}
 	}
+	testLinuxCoreMark(t, kernel, benchmark, iterations, 2000000000, 0)
+}
+
+// The longer performance proof is explicitly selected, not an increased legacy
+// resource limit. Unchanged 1000/2000-iteration fixtures keep their 2B ceiling.
+func TestLinuxCoreMarkPerformance(t *testing.T) {
+	benchmark := os.Getenv("RENVO_POWER_COREMARK_PERFORMANCE_ELF")
+	if benchmark == "" {
+		t.Skip("set explicit 20000-iteration performance ELF")
+	}
+	kernel := os.Getenv("RENVO_POWER_LINUX_KERNEL")
+	if kernel == "" || os.Getenv("RENVO_POWER_ENGINE") != "native" {
+		t.Fatal("performance proof requires explicit kernel and native engine")
+	}
+	testLinuxCoreMark(t, kernel, benchmark, 20000, 16000000000, 1000)
+}
+func testLinuxCoreMark(t *testing.T, kernel, benchmark string, iterations, budget uint64, minimumScore float64) {
+	t.Helper()
 	k, e := os.ReadFile(kernel)
 	if e != nil {
 		t.Fatal(e)
@@ -663,8 +684,8 @@ func TestLinuxCoreMark(t *testing.T) {
 		}
 	}
 	defer m.Close()
-	for m.Instructions < 2000000000 && !m.Done {
-		count, err := m.RunQuantum(2000000000 - m.Instructions)
+	for m.Instructions < budget && !m.Done {
+		count, err := m.RunQuantum(budget - m.Instructions)
 		if err != nil || count == 0 {
 			t.Fatalf("instruction %d: count=%d error=%v\n%s", m.Instructions, count, err, out.String())
 		}
@@ -682,6 +703,11 @@ func TestLinuxCoreMark(t *testing.T) {
 	reports, e := coremarkReports(out.String(), out.markers, out.times, iterations)
 	if e != nil {
 		t.Fatalf("%v\n%s", e, out.String())
+	}
+	for i, report := range reports {
+		if report.IterationsPerSecond < minimumScore {
+			t.Fatalf("seed %d score %.3f below required %.3f", i, report.IterationsPerSecond, minimumScore)
+		}
 	}
 	t.Logf("CoreMark iterations=%d PERF=%+v VALID=%+v instructions=%d", iterations, reports[0], reports[1], m.Instructions)
 }
@@ -1065,7 +1091,16 @@ func (m *Machine) configureJIT(config engine.EngineConfig) error {
 		oldAddress := b.MemoryAddress
 		defer func() { b.MemoryAddress = oldAddress }()
 		b.MemoryAddress = func(b *emu.Builder, address emu.Value) emu.Value {
-			b.Guard(b.Binary(emu.Equal, b.Shift(emu.Shr, address, 48), b.Constant(m.nativeBank)))
+			bank := m.nativeBank
+			if m.CPU.MSR&power64.MSRDR == 0 {
+				// Real-mode translation ignores the top physical-address nibble.
+				// Normalize only the memory key; update-form architectural EAs
+				// and fault checkpoints retain the original full-width values.
+				// DR and the full code bank are already guarded by nativeSpace.
+				address = b.Binary(emu.And, address, b.Constant(0x0fffffffffffffff))
+				bank &= 0x0fff
+			}
+			b.Guard(b.Binary(emu.Equal, b.Shift(emu.Shr, address, 48), b.Constant(bank)))
 			key := b.Binary(emu.And, address, b.Constant(0x0000ffffffffffff))
 			return systemmemory.PageCacheAddress(b, key)
 		}
@@ -1093,8 +1128,12 @@ type nativeCPU struct {
 	m                   *Machine
 	accounted, consumed uint64
 	slow                uint64
+	deadline            uint64
+	expired             bool
 }
 
+func (c *nativeCPU) NativeDeadline() uint64 { return c.deadline }
+func (c *nativeCPU) NativeDeadlineExpired() { c.expired = true }
 func (c *nativeCPU) sync() {
 	c.TierCPU.Sync()
 	count := c.CPU.Tick - c.accounted
@@ -1103,6 +1142,8 @@ func (c *nativeCPU) sync() {
 	if c.m.clock == nil {
 		c.m.TB += count
 		c.m.advanceDEC(count)
+	} else if c.deadline != 0 {
+		c.m.sampleClock()
 	} else {
 		if count > uint64(c.m.clockSteps) {
 			panic("native execution exceeded clock boundary")
@@ -1131,9 +1172,9 @@ func (c *nativeCPU) ExecuteInstruction(ins engine.Instruction) error {
 	return err
 }
 
-// RunQuantum preserves the original 64-attempt realtime polling bound, and
-// caps deterministic slices at the precise decrementer sign transition. Native
-// prefixes and non-retired fault/interrupt attempts share the same fixed budget.
+// RunQuantum polls realtime timers at <=64 native instructions, inside the
+// foreign boundary when the oscillator supports it. Deterministic/custom
+// sources retain the original exact retirement-based scheduling slice.
 func (m *Machine) RunQuantum(remaining uint64) (uint64, error) {
 	if remaining == 0 {
 		return 0, fmt.Errorf("instruction budget exhausted")
@@ -1153,8 +1194,18 @@ func (m *Machine) RunQuantum(remaining uint64) (uint64, error) {
 		return 1, m.Step()
 	}
 	budget := uint64(64)
+	deadline := uint64(0)
 	if m.clock != nil {
 		budget = uint64(m.clockSteps)
+		// Bound cancellation and counter refresh independently of guest DEC.
+		target := m.clockLast + 1000
+		if !m.DecPending && m.DEC >= 0 && uint64(m.DEC)+1 < 1000 {
+			target = m.clockLast + uint64(m.DEC) + 1
+		}
+		deadline = m.clock.NativeDeadline(target)
+		if deadline != 0 {
+			budget = emu.NativeSessionLimit
+		}
 	}
 	if m.clock == nil && m.CPU.MSR&power64.MSREE != 0 && !m.DecPending && m.DEC >= 0 && uint64(m.DEC)+1 < budget {
 		budget = uint64(m.DEC) + 1
@@ -1166,20 +1217,31 @@ func (m *Machine) RunQuantum(remaining uint64) (uint64, error) {
 	cpu := &m.adapter
 	cpu.Import()
 	cpu.accounted, cpu.consumed, cpu.slow = m.CPU.Tick, 0, 0
+	cpu.deadline, cpu.expired = deadline, false
 	var err error
 	// Region side exits and hot link misses may stop before the window ends.
-	// Keep the stable state ABI resident across those dispatches; synchronize
-	// only at the same <=64-attempt boundary, or before any architectural slow
-	// operation. Never cross a control-state/bank/exception scheduling boundary.
+	// Keep the stable state ABI resident across those dispatches. Foreign
+	// timer sessions poll internally; Go/IR returns refresh the oscillator,
+	// and every architectural slow operation synchronizes immediately. Never
+	// cross a control-state/bank/exception scheduling boundary.
 	for used := uint64(0); used < budget; {
 		err = m.JIT.RunQuanta(cpu, budget-used)
 		next := cpu.consumed + m.CPU.Tick - cpu.accounted
-		if err != nil || cpu.slow != 0 || next == used || cpu.State[power64.StatePC]>>48 != m.nativeBank {
+		if err != nil || cpu.slow != 0 || cpu.expired || next == used || cpu.State[power64.StatePC]>>48 != m.nativeBank {
 			break
 		}
 		used = next
+		if deadline != 0 {
+			cpu.sync() // IR/leaf fallbacks also retain <=64 timer polling.
+			if m.clock.NativeDeadline(m.clockLast) >= deadline || m.DecPending && m.CPU.MSR&power64.MSREE != 0 {
+				break
+			}
+		}
 	}
 	cpu.sync()
+	if err == nil && cpu.consumed == 0 && cpu.expired {
+		return 1, m.Step()
+	}
 	return cpu.consumed, err
 }
 
@@ -1455,6 +1517,47 @@ func TestNativeMappingBitsAliasedCodeAndPermissionChanges(t *testing.T) {
 	_, e = m.RunQuantum(1)
 	if e != nil || c.PC != 0x300 || c.SPR[26] != bank+4 {
 		t.Fatal("stale protection", c.PC, e)
+	}
+}
+func TestNativeRealModePhysicalAliasesAndTranslationTransition(t *testing.T) {
+	for _, codeBank := range []uint64{0, 0xc000000000000000} {
+		m, ref := tierMachine(t, "native", []uint32{0x80640000, 0x38630001, 0x90640000, 0x4bfffff4}), tierMachine(t, "interpreter", []uint32{0x80640000, 0x38630001, 0x90640000, 0x4bfffff4})
+		for _, q := range []*Machine{m, ref} {
+			q.CPU.PC = codeBank
+			q.CPU.GPR[4] = 0xc000000000008000
+		}
+		for n := uint64(0); n < 512; {
+			count, e := m.RunQuantum(512 - n)
+			if e != nil || count == 0 {
+				t.Fatal(count, e)
+			}
+			for j := uint64(0); j < count; j++ {
+				if e := ref.Step(); e != nil {
+					t.Fatal(e)
+				}
+			}
+			n += count
+			compareMachines(t, m, ref)
+		}
+		if m.JIT.Stats.NativeMemory == 0 || !bytes.Equal(m.RAM[0x8000:0x8004], ref.RAM[0x8000:0x8004]) {
+			t.Fatal("real-mode aliases stayed slow or diverged", m.JIT.Stats)
+		}
+		// The same full EA is NOT a physical alias after DR is enabled.
+		for _, q := range []*Machine{m, ref} {
+			q.CPU.MSR |= power64.MSRDR
+			q.CPU.PC = codeBank
+		}
+		count, e := m.RunQuantum(1)
+		if e != nil || count != 1 {
+			t.Fatal(count, e)
+		}
+		if e := ref.Step(); e != nil {
+			t.Fatal(e)
+		}
+		compareMachines(t, m, ref)
+		if m.CPU.SPR[19] != 0xc000000000008000 || m.CPU.SPR[26] != codeBank {
+			t.Fatal("translation transition reused real-mode alias", m.CPU.SPR[19], m.CPU.SPR[26])
+		}
 	}
 }
 func TestNativeTimerBoundaryAndReservationSlowPath(t *testing.T) {
