@@ -34,7 +34,8 @@ type Builder struct {
 	state                     map[int]Value
 	masks                     []uint64
 	values                    map[Op]Value
-	dirty                     map[int]bool // stores since the previous effect checkpoint
+	dirty                     map[int]bool   // stores since the previous effect checkpoint
+	guards                    map[Value]bool // dominating successful checks of immutable SSA values
 }
 
 func (b *Builder) emit(op Op) Value {
@@ -239,6 +240,37 @@ func (b *Builder) Binary(k int, a, c Value) Value {
 				return a
 			}
 			prior := b.Ops[a]
+			// A masked immediate rotate that selects only one side of the
+			// wrap is an ordinary shift of selected source bits. Preserve
+			// full rotate semantics when both sides remain observable.
+			if prior.Kind == RotateRight && b.Ops[prior.B].Kind == Const && (prior.Imm == 32 || prior.Imm == 64) {
+				width := prior.Imm
+				selected := mask & (^uint64(0) >> (64 - width))
+				count := b.Ops[prior.B].Imm & (width - 1)
+				if count == 0 {
+					return b.Binary(And, prior.A, b.Constant(selected))
+				}
+				low := ^uint64(0) >> count
+				if width == 32 {
+					low = uint64(1)<<(width-count) - 1
+				}
+				if selected & ^low == 0 {
+					return b.Shift(Shr, b.Binary(And, prior.A, b.Constant(selected<<count)), count)
+				}
+				if selected&low == 0 {
+					return b.Shift(Shl, b.Binary(And, prior.A, b.Constant(selected>>(width-count))), width-count)
+				}
+			}
+			// Sign extension changes only bits above the original word. A
+			// masked field inside that word does not need the extension,
+			// including non-contiguous fields selected after a rotation.
+			if prior.Kind == Sub && b.Ops[prior.B].Kind == Const {
+				sign := b.Ops[prior.B].Imm
+				x := b.Ops[prior.A]
+				if sign != 0 && sign&(sign-1) == 0 && mask & ^(sign|(sign-1)) == 0 && x.Kind == Xor && x.B == prior.B {
+					return b.Binary(And, x.A, c)
+				}
+			}
 			if prior.Kind == ArithmeticStatus {
 				field := mask & 0x8d5
 				if field != 0 && field&(field-1) == 0 {
@@ -290,6 +322,11 @@ func (b *Builder) Binary(k int, a, c Value) Value {
 					return b.Binary(And, b.Binary(prior.Kind, x, y), c)
 				}
 			}
+			// (x << n) & m == (x & (m >> n)) << n, including
+			// truncation of source bits shifted out of the uint64 result.
+			if prior.Kind == Shl && prior.Imm < 64 {
+				return b.Shift(Shl, b.Binary(And, prior.A, b.Constant(mask>>prior.Imm)), prior.Imm)
+			}
 			if prior.Kind == And && b.Ops[prior.B].Kind == Const {
 				return b.Binary(And, prior.A, b.Constant(mask&b.Ops[prior.B].Imm))
 			}
@@ -322,8 +359,8 @@ func (b *Builder) Shift(k int, a Value, count uint64) Value {
 		return b.Constant(0)
 	}
 	source := b.Ops[a]
-	if k == Shr && source.Kind == Shl && source.Imm == count && b.masks[source.A]>>(64-count) == 0 {
-		return source.A
+	if k == Shr && source.Kind == Shl && count >= source.Imm && b.masks[source.A]>>(64-source.Imm) == 0 {
+		return b.Shift(Shr, source.A, count-source.Imm)
 	}
 	if b.Ops[a].Kind == Const {
 		return b.Constant(operation(k, b.Ops[a].Imm, count))

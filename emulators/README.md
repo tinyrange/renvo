@@ -12,6 +12,8 @@ files and do not require separately maintained emulator Go packages.
 | `linux-arm64-user.rfe` | Static-ELF Linux AArch64 personality; requires `aarch64` |
 | `amd64.rfe` | Scalar x86-64 integer CPU with interpreter, IR and native tiers |
 | `linux-amd64-user.rfe` | Static-ELF Linux x86-64 personality; requires `amd64` |
+| `power64.rfe` | POWER64 integer/privileged interpreter with explicit endian state |
+| `linux-power64-machine.rfe` | Single-vCPU PAPR-style Linux partition; requires `power64` |
 | `pdp11-machine.rfe` | PDP-11 machine, console, clock and RK05 disks; requires `pdp11` |
 
 From the Renvo checkout, with the Go toolchain installed:
@@ -113,3 +115,11 @@ QEMU performance win.
 See [usage, supported scope and performance notes](../docs/x86-64-user.md).
 Checked memory is the default; fault-assisted direct memory is experimental
 and off by default. This is an incomplete scalar implementation, not a sandbox.
+
+## POWER64 Linux partition
+
+See [fixture, usage, tests and supported scope](../docs/power64-linux.md).
+The POWER implementation is interpreter-only.
+It boots Linux 6.6.1 and validates both standard CoreMark seed sets in the real
+guest using the explicit realtime clock. The PPC64le port and fixture steps are
+in `coremark-power64-port/`.

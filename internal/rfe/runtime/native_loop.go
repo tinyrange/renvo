@@ -105,6 +105,25 @@ func (n *Native) compileLoopMode(ops []Op, words, instructions int, direct bool,
 	if ops[len(ops)-1].Kind != LoopContinue {
 		return 0, fmt.Errorf("missing loop terminator")
 	}
+	variable := -1
+	for i, op := range ops {
+		if op.Kind == LoopCount {
+			if variable >= 0 || i != len(ops)-2 || !boundedLoopCount(ops, op.A, instructions) {
+				return 0, fmt.Errorf("invalid pure-loop count")
+			}
+			variable = i
+		}
+	}
+	if variable >= 0 {
+		if runtime.GOARCH != "amd64" || direct {
+			return 0, fmt.Errorf("variable pure loop unsupported on this host")
+		}
+		for _, op := range ops {
+			if !pureOperation(op.Kind) && op.Kind != LoadState && op.Kind != StoreState && op.Kind != Progress && op.Kind != RegionGuard && op.Kind != Guard && op.Kind != LoopCount && op.Kind != LoopContinue {
+				return 0, fmt.Errorf("effect in variable pure loop")
+			}
+		}
+	}
 	records := nativeRecords(ops)
 	var code []byte
 	var faults []int
@@ -112,7 +131,11 @@ func (n *Native) compileLoopMode(ops []Op, words, instructions int, direct bool,
 	if codeVersions != nil && !direct {
 		code, ok = backendcompiled.RenvoEmitCodeVersionedLoopBlock(records, words, instructions, runtime.GOARCH == "arm64")
 	} else if direct && runtime.GOOS == "linux" && runtime.GOARCH == "amd64" && NativeSessionsAvailable() {
-		code, faults, ok = backendcompiled.RenvoEmitDirectLoopBlock(records, words, instructions)
+		if codeVersions != nil {
+			code, faults, ok = backendcompiled.RenvoEmitOwnedDirectLoopBlock(records, words, instructions)
+		} else {
+			code, faults, ok = backendcompiled.RenvoEmitDirectLoopBlock(records, words, instructions)
+		}
 	} else {
 		code, ok = backendcompiled.RenvoEmitSharedLoopBlock(records, words, instructions, runtime.GOARCH == "arm64")
 	}
@@ -122,8 +145,12 @@ func (n *Native) compileLoopMode(ops []Op, words, instructions int, direct bool,
 	var entry int
 	var err error
 	if len(faults) != 0 {
-		entry, err = n.arena.InstallFaultLoopBlock(code, words, instructions, faults)
-	} else if runtime.GOARCH == "amd64" && !direct {
+		if codeVersions != nil && direct {
+			entry, err = n.arena.InstallFaultRegisterLoopBlock(code, words, instructions, faults)
+		} else {
+			entry, err = n.arena.InstallFaultLoopBlock(code, words, instructions, faults)
+		}
+	} else if runtime.GOARCH == "amd64" && (!direct || codeVersions != nil) {
 		entry, err = n.arena.InstallRegisterLoopBlock(code, words, instructions)
 	} else {
 		entry, err = n.arena.InstallLoopBlock(code, words, instructions)
@@ -136,6 +163,16 @@ func (n *Native) compileLoopMode(ops []Op, words, instructions int, direct bool,
 			n.codeVersionedContexts[codeVersions] = true
 		}
 		n.Bytes += len(code)
+		n.profileMu.Lock()
+		if n.profileLoopIR != nil {
+			if e := n.profileLoopIR(entry, words, instructions, records); e != nil {
+				n.SymbolErrors++
+			}
+		}
+		n.profileMu.Unlock()
 	}
 	return entry, err
 }
+
+// NativeVariablePureLoopsAvailable reports only the implemented host lowering.
+func NativeVariablePureLoopsAvailable() bool { return runtime.GOARCH == "amd64" }

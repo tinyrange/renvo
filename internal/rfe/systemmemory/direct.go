@@ -32,6 +32,21 @@ func NewDirect(size int, active func() bool, resolve Resolve) (*RAM, error) {
 	return m, nil
 }
 
+// DirectAvailable reports host backing capability, not permission to access a
+// guest address. Every view remains Resolve-checked and protection-enforced.
+func (m *RAM) DirectAvailable() bool { return m != nil && m.direct != nil }
+
+// ProfileDirectWindow is a read-only diagnostic of the selected cached view,
+// not an architectural mapping probe or an access grant. It returns no host
+// pointer and never changes cache selection or translation state.
+func (m *RAM) ProfileDirectWindow() [2]uint64 {
+	if m == nil || m.direct == nil {
+		return [2]uint64{}
+	}
+	guest, _, size := m.direct.window()
+	return [2]uint64{guest, size}
+}
+
 // Close revokes every native view before releasing physical RAM. It is an
 // explicit end-of-memory lifetime boundary, not an interpreter/JIT toggle.
 func (m *RAM) Close() error {

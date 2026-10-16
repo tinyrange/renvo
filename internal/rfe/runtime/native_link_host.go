@@ -32,7 +32,11 @@ func linkLayoutOK() bool {
 		unsafe.Offsetof(m.AdmissionEpoch) == backendcompiled.RenvoRFEAdmissionEpoch &&
 		unsafe.Offsetof(m.DirectGuest) == backendcompiled.RenvoRFEDirectGuest &&
 		unsafe.Offsetof(m.DirectHost) == backendcompiled.RenvoRFEDirectHost &&
-		unsafe.Offsetof(m.DirectSize) == backendcompiled.RenvoRFEDirectSize
+		unsafe.Offsetof(m.DirectSize) == backendcompiled.RenvoRFEDirectSize &&
+		unsafe.Offsetof(m.TimerFunction) == backendcompiled.RenvoRFETimerFunction &&
+		unsafe.Offsetof(m.TimerDeadline) == backendcompiled.RenvoRFETimerDeadline &&
+		unsafe.Offsetof(m.TimerExpired) == backendcompiled.RenvoRFETimerExpired &&
+		unsafe.Offsetof(m.HashPages) == backendcompiled.RenvoRFEHashPages
 }
 
 // PrepareLinks compiles the bounded dispatcher outside the arena call lock.
@@ -47,6 +51,9 @@ func (n *Native) PrepareLinks(words, pc int) error {
 		return fmt.Errorf("unsupported native link ABI")
 	}
 	code, ok := backendcompiled.RenvoEmitLinkedDispatcher(pc, words, runtime.GOARCH == "arm64")
+	if n.profileDispatch {
+		code, ok = backendcompiled.RenvoEmitProfileLinkedDispatcher(pc, words, runtime.GOARCH == "arm64")
+	}
 	if !ok {
 		return fmt.Errorf("could not emit native dispatcher")
 	}
@@ -65,6 +72,9 @@ func (n *Native) PrepareLinks(words, pc int) error {
 	return nil
 }
 func (n *Native) CallLinked(state []uint64, m *MemoryContext, budget uint64) error {
+	if m != nil {
+		m.TimerFunction, m.TimerDeadline, m.TimerExpired = 0, 0, 0
+	}
 	if m == nil || !n.CanLinkMemory(m) || m.linkOwner != n || n.linkWords == 0 || len(state) != n.linkWords || budget == 0 || budget > 64 {
 		return fmt.Errorf("invalid native linked call")
 	}
@@ -90,11 +100,26 @@ func (n *Native) AdmitLink(entry, words, instructions int) error {
 	return n.arena.AdmitLinkedBlock(entry, words, instructions)
 }
 
+// PrepareTargetLinkWithTail binds an original leaf to its immutable full-region
+// admission; neither executable pointer nor count is accepted from guest RAM.
+func (n *Native) PrepareTargetLinkWithTail(pc uint64, entry, words, instructions, tailEntry, tailInstructions int) error {
+	if err := n.AdmitLink(entry, words, instructions); err != nil {
+		return err
+	}
+	if err := n.AdmitLink(tailEntry, words, tailInstructions); err != nil {
+		return err
+	}
+	return n.linkCall.PrepareTargetWithTail(pc, entry, instructions, tailEntry, tailInstructions)
+}
+
 // RunLinkedQuanta schedules at most sixteen separate <=64-instruction native
 // calls. Host accounting is aggregated; no guest state is assigned here. Only
 // generation-ready published targets can start another call. A miss, fault,
 // zero progress or a cold publication returns to the engine outside the lock.
 func (n *Native) RunLinkedQuanta(state []uint64, m *MemoryContext, limit int, remaining, generation uint64) (int, error) {
+	if m != nil {
+		m.TimerFunction, m.TimerDeadline, m.TimerExpired = 0, 0, 0
+	}
 	if m == nil || !n.CanLinkMemory(m) || m.linkOwner != n || n.linkWords == 0 || len(state) != n.linkWords || limit < 1 || limit > 16 || remaining == 0 {
 		return 0, fmt.Errorf("invalid native linked quanta")
 	}
@@ -107,3 +132,6 @@ func (n *Native) PrepareTargetLink(pc uint64, entry, words, instructions int) er
 	}
 	return n.linkCall.PrepareTarget(pc, entry, instructions)
 }
+
+// DispatchCounters returns optional private successor-cache diagnostics.
+func (n *Native) DispatchCounters() [5]uint64 { return n.arena.DispatchCounters() }

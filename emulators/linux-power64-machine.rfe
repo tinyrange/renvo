@@ -1,0 +1,2631 @@
+RFE 1
+
+-- rfe.json --
+{
+  "format": 1,
+  "name": "linux-power64-machine",
+  "import": "renvo.dev/emulators/powermachine",
+  "entry": "Main",
+  "requires": [
+    {
+      "name": "power64"
+    }
+  ]
+}
+
+-- boot.go --
+package powermachine
+
+import (
+	"bytes"
+	"debug/elf"
+	"encoding/binary"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"renvo.dev/emulators/power64"
+	"runtime/pprof"
+)
+
+type deviceTree struct {
+	body, strings []byte
+	names         map[string]uint32
+}
+
+func (d *deviceTree) word(v uint32) { d.body = binary.BigEndian.AppendUint32(d.body, v) }
+func (d *deviceTree) align() {
+	for len(d.body)%4 != 0 {
+		d.body = append(d.body, 0)
+	}
+}
+func (d *deviceTree) node(n string) {
+	d.word(1)
+	d.body = append(d.body, []byte(n)...)
+	d.body = append(d.body, 0)
+	d.align()
+}
+func (d *deviceTree) end() { d.word(2) }
+func (d *deviceTree) prop(n string, v []byte) {
+	i, ok := d.names[n]
+	if !ok {
+		i = uint32(len(d.strings))
+		d.names[n] = i
+		d.strings = append(d.strings, []byte(n)...)
+		d.strings = append(d.strings, 0)
+	}
+	d.word(3)
+	d.word(uint32(len(v)))
+	d.word(i)
+	d.body = append(d.body, v...)
+	d.align()
+}
+func (d *deviceTree) text(n, v string) { d.prop(n, append([]byte(v), 0)) }
+func (d *deviceTree) cells(n string, v ...uint32) {
+	var b []byte
+	for _, x := range v {
+		b = binary.BigEndian.AppendUint32(b, x)
+	}
+	d.prop(n, b)
+}
+func (m *Machine) dtb(args string, start, end, dtAddress uint64) []byte {
+	d := &deviceTree{names: map[string]uint32{}}
+	d.node("")
+	d.cells("#address-cells", 2)
+	d.cells("#size-cells", 2)
+	d.text("device_type", "chrp")
+	d.text("compatible", "IBM,pSeries")
+	d.text("model", "IBM pSeries (Renvo)")
+	d.text("ibm,partition-name", "Renvo POWER64")
+	d.cells("ibm,partition-no", 0)
+	d.node("chosen")
+	d.text("bootargs", args)
+	d.text("stdout-path", "/vdevice/vty@30000000")
+	d.cells("linux,stdout-package", 0x10)
+	if start != 0 {
+		d.cells("linux,initrd-start", uint32(start>>32), uint32(start))
+		d.cells("linux,initrd-end", uint32(end>>32), uint32(end))
+	}
+	d.end()
+	d.node("memory@0")
+	d.text("device_type", "memory")
+	d.cells("reg", 0, 0, uint32(uint64(len(m.RAM))>>32), uint32(len(m.RAM)))
+	d.end()
+	d.node("cpus")
+	d.cells("#address-cells", 1)
+	d.cells("#size-cells", 0)
+	d.node("PowerPC,POWER8@0")
+	d.text("device_type", "cpu")
+	d.cells("reg", 0)
+	d.cells("cpu-version", 0x004d0200)
+	d.cells("clock-frequency", 1000000000)
+	d.cells("timebase-frequency", 1000000)
+	d.cells("ibm,pft-size", 0, 22)
+	d.cells("ibm,slb-size", 64)
+	d.cells("ibm,segment-page-sizes", 12, 0, 1, 12, 0)
+	d.cells("ibm,processor-segment-sizes", 28)
+	d.cells("ibm,ppc-interrupt-server#s", 0)
+	d.cells("ibm,ppc-interrupt-gserver#s", 0, 0)
+	d.cells("d-cache-line-size", 128)
+	d.cells("i-cache-line-size", 128)
+	d.cells("d-cache-size", 32768)
+	d.cells("i-cache-size", 32768)
+	d.text("status", "okay")
+	d.end()
+	d.end()
+	d.node("interrupt-controller@0")
+	d.text("device_type", "PowerPC-External-Interrupt-Presentation")
+	d.text("compatible", "IBM,ppc-xicp")
+	d.cells("ibm,interrupt-server-ranges", 0, 1)
+	d.prop("interrupt-controller", nil)
+	d.cells("#interrupt-cells", 2)
+	d.cells("linux,phandle", 1)
+	d.cells("phandle", 1)
+	d.end()
+	d.node("vdevice")
+	d.text("device_type", "vdevice")
+	d.text("compatible", "IBM,vdevice")
+	d.cells("#address-cells", 1)
+	d.cells("#size-cells", 0)
+	d.prop("interrupt-controller", nil)
+	d.cells("#interrupt-cells", 2)
+	d.node("vty@30000000")
+	d.cells("reg", 0x30000000)
+	d.text("device_type", "serial")
+	d.text("compatible", "hvterm1")
+	d.cells("linux,phandle", 0x10)
+	d.cells("phandle", 0x10)
+	d.end()
+	d.end()
+	d.node("rtas")
+	d.cells("linux,rtas-base", uint32(dtAddress+0x10000))
+	d.cells("linux,rtas-entry", uint32(dtAddress+0x10000))
+	d.cells("rtas-size", 4096)
+	d.text("ibm,hypertas-functions", "hcall-pft\x00hcall-term\x00hcall-interrupt\x00hcall-set-mode")
+	d.cells("power-off", 0x10)
+	d.cells("system-reboot", 0x11)
+	d.cells("display-character", 0x12)
+	d.cells("get-time-of-day", 0x13)
+	d.cells("ibm,set-xive", 0x20)
+	d.cells("ibm,get-xive", 0x21)
+	d.cells("ibm,int-on", 0x22)
+	d.cells("ibm,int-off", 0x23)
+	d.end()
+	d.end()
+	d.word(9)
+	// Header, one reservation for the DTB itself, then terminating reservation.
+	h := make([]byte, 72)
+	values := []uint32{0xd00dfeed, uint32(72 + len(d.body) + len(d.strings)), 72, uint32(72 + len(d.body)), 40, 17, 16, 0, uint32(len(d.strings)), uint32(len(d.body))}
+	for i, v := range values {
+		binary.BigEndian.PutUint32(h[i*4:], v)
+	}
+	binary.BigEndian.PutUint64(h[40:], dtAddress)
+	binary.BigEndian.PutUint64(h[48:], 0x20000)
+	return append(append(h, d.body...), d.strings...)
+}
+func (m *Machine) Boot(kernel, initrd []byte, args string) error {
+	f, e := elf.NewFile(bytes.NewReader(kernel))
+	if e != nil {
+		return fmt.Errorf("kernel must be a POWER64 vmlinux ELF: %w", e)
+	}
+	defer f.Close()
+	if f.Class != elf.ELFCLASS64 || f.Machine != elf.EM_PPC64 {
+		return fmt.Errorf("kernel must be ELF64 PowerPC")
+	}
+	if f.Data == elf.ELFDATA2LSB {
+		m.CPU.MSR |= power64.MSRLE
+		m.CPU.InterruptLE = true
+	} else if f.Data == elf.ELFDATA2MSB {
+		m.CPU.MSR &^= power64.MSRLE
+		m.CPU.InterruptLE = false
+	} else {
+		return fmt.Errorf("unsupported ELF byte order")
+	}
+	high := uint64(0)
+	for _, p := range f.Progs {
+		if p.Type != elf.PT_LOAD {
+			continue
+		}
+		a := p.Paddr & 0x0fffffffffffffff
+		if p.Filesz > p.Memsz || a > uint64(len(m.RAM)) || p.Memsz > uint64(len(m.RAM))-a {
+			return fmt.Errorf("kernel segment outside RAM")
+		}
+		data, e := io.ReadAll(io.LimitReader(p.Open(), int64(p.Filesz)+1))
+		if e != nil || uint64(len(data)) != p.Filesz {
+			return fmt.Errorf("truncated kernel segment")
+		}
+		if m.NativeRAM != nil {
+			m.NativeRAM.BeforeWrite(a, int(p.Memsz))
+		}
+		clear(m.RAM[a : a+p.Memsz])
+		copy(m.RAM[a:], data)
+		if a+p.Memsz > high {
+			high = a + p.Memsz
+		}
+	}
+	dtAddress := (high + 0xffff) &^ uint64(0xffff)
+	if dtAddress < 0x1000000 {
+		dtAddress = 0x1000000
+	}
+	if dtAddress > uint64(len(m.RAM)) || 0x20000 > uint64(len(m.RAM))-dtAddress {
+		return fmt.Errorf("kernel leaves no space for firmware/device tree")
+	}
+	start, end := uint64(0), uint64(0)
+	if len(initrd) > 0 {
+		if uint64(len(initrd))+0x20000 > uint64(len(m.RAM)) {
+			return fmt.Errorf("initramfs outside RAM")
+		}
+		start = (uint64(len(m.RAM)) - uint64(len(initrd)) - 0x10000) &^ uint64(4095)
+		end = start + uint64(len(initrd))
+		if start < dtAddress+0x20000 {
+			return fmt.Errorf("initramfs overlaps kernel/device tree")
+		}
+		if m.NativeRAM != nil {
+			m.NativeRAM.BeforeWrite(start, len(initrd))
+		}
+		copy(m.RAM[start:], initrd)
+	}
+	firmware := []uint32{0x7c641b78, 0x38600000, 0x6063f000, 0x44000022, 0x4e800020}
+	if m.NativeRAM != nil {
+		m.NativeRAM.BeforeWrite(dtAddress+0x10000, len(firmware)*4)
+	}
+	for i, op := range firmware {
+		binary.BigEndian.PutUint32(m.RAM[dtAddress+0x10000+uint64(i*4):], op)
+	}
+	dt := m.dtb(args, start, end, dtAddress)
+	if dtAddress+uint64(len(dt)) > uint64(len(m.RAM)) {
+		return fmt.Errorf("device tree outside RAM")
+	}
+	if m.NativeRAM != nil {
+		m.NativeRAM.BeforeWrite(dtAddress, len(dt))
+	}
+	copy(m.RAM[dtAddress:], dt)
+	m.CPU.PC = f.Entry & 0x0fffffffffffffff
+	m.CPU.GPR[3] = dtAddress
+	m.CPU.GPR[4] = 0
+	m.CPU.GPR[5] = 0
+	m.CPU.GPR[6] = 0
+	m.CPU.GPR[7] = 0
+	return nil
+}
+func Main(args []string) int {
+	if e := run(args); e != nil {
+		fmt.Fprintln(os.Stderr, "power64-machine:", e)
+		return 1
+	}
+	return 0
+}
+func run(args []string) error {
+	f := flag.NewFlagSet("linux-power64-machine", flag.ContinueOnError)
+	kernel := f.String("kernel", "", "POWER64 vmlinux ELF")
+	initrd := f.String("initrd", "", "cpio initramfs")
+	initELF := f.String("init-elf", "", "freestanding PID 1 ELF (builds newc root in memory)")
+	initOut := f.String("initramfs-out", "", "write a complete standalone initramfs from -init-elf, then exit")
+	memory := f.Int("memory", 256, "RAM MiB")
+	steps := f.Uint64("steps", 2000000000, "instruction budget")
+	cpuProfile := f.String("cpuprofile", "", "write a Go CPU profile of guest execution")
+	engineMode := f.String("engine", "native", "execution tier: interpreter, ir or native")
+	stats := f.Bool("stats", false, "print recompiler retirement, memory, link and region counters")
+	jitProfile := f.Bool("jit-profile", false, "emit native JIT profiling symbols (diagnostic only)")
+	clockMode := f.String("clock", "deterministic", "timebase/decrementer clock: deterministic or realtime")
+	cmdline := f.String("append", "console=hvc0 earlycon=hvc_pseries rdinit=/init nokaslr maxcpus=1", "kernel command line")
+	progress := f.Uint64("progress", 0, "diagnostic interval")
+	traceAfter := f.Uint64("trace-after", ^uint64(0), "first instruction to trace")
+	traceCount := f.Uint64("trace-count", 64, "maximum trace records")
+	if e := f.Parse(args); e != nil {
+		return e
+	}
+	if *initOut != "" {
+		if *initELF == "" {
+			return fmt.Errorf("-initramfs-out requires -init-elf")
+		}
+		data, e := os.ReadFile(*initELF)
+		if e != nil {
+			return e
+		}
+		return os.WriteFile(*initOut, Initramfs(data), 0644)
+	}
+	if *kernel == "" {
+		return fmt.Errorf("-kernel is required")
+	}
+	k, e := os.ReadFile(*kernel)
+	if e != nil {
+		return e
+	}
+	var init []byte
+	if *initrd != "" && *initELF != "" {
+		return fmt.Errorf("choose -initrd or -init-elf")
+	}
+	if *initELF != "" {
+		data, e := os.ReadFile(*initELF)
+		if e != nil {
+			return e
+		}
+		init = Initramfs(data)
+	}
+	if *initrd != "" {
+		init, e = os.ReadFile(*initrd)
+		if e != nil {
+			return e
+		}
+	}
+	makeMachine := New
+
+	m, e := makeMachine(*memory, os.Stdout)
+	if e != nil {
+		return e
+	}
+	if e = m.Boot(k, init, *cmdline); e != nil {
+		return e
+	}
+	if *clockMode == "realtime" {
+		if e = m.UseRealtimeClock(); e != nil {
+			return e
+		}
+	} else if *clockMode != "deterministic" {
+		return fmt.Errorf("clock must be deterministic or realtime")
+	}
+	if *engineMode != "interpreter" {
+		m.ProfileJIT = *jitProfile
+		if e = m.EnableJIT(*engineMode); e != nil {
+			return e
+		}
+	}
+	defer m.Close()
+	if *stats {
+		defer func() {
+			fmt.Fprintf(os.Stderr, "power64 instructions=%d retired=%d tb=%d\n", m.Instructions, m.CPU.Tick, m.TB)
+			if m.JIT != nil {
+				fmt.Fprintf(os.Stderr, "jit available=%t stats=%+v\n", m.JIT.NativeAvailable(), m.JIT.Stats)
+			}
+		}()
+	}
+	if *cpuProfile != "" {
+		profile, err := os.Create(*cpuProfile)
+		if err != nil {
+			return err
+		}
+		if err = pprof.StartCPUProfile(profile); err != nil {
+			profile.Close()
+			return err
+		}
+		defer func() {
+			pprof.StopCPUProfile()
+			profile.Close()
+		}()
+	}
+	for m.Instructions < *steps && !m.Done {
+		i := m.Instructions
+		budget := *steps - i
+		if *progress != 0 {
+			if n := *progress - i%*progress; n < budget {
+				budget = n
+			}
+		}
+		if *traceAfter > i && *traceAfter-i < budget {
+			budget = *traceAfter - i
+		}
+		if *progress != 0 && i%*progress == 0 {
+			fmt.Fprintf(os.Stderr, "instruction=%d pc=%#x msr=%#x tb=%d dec=%d\n", i, m.CPU.PC, m.CPU.MSR, m.TB, m.DEC)
+		}
+		m.Trace = nil
+		if i >= *traceAfter && i-*traceAfter < *traceCount {
+			m.Trace = os.Stderr
+			budget = 1
+		}
+		count, err := m.RunQuantum(budget)
+		if err != nil {
+			return fmt.Errorf("instruction=%d: %w", m.Instructions, err)
+		}
+		if count == 0 {
+			return fmt.Errorf("recompiler made no progress at %#x", m.CPU.PC)
+		}
+	}
+	if !m.Done {
+		return fmt.Errorf("instruction budget exhausted at %#x", m.CPU.PC)
+	}
+	return nil
+}
+
+-- boot_test.go --
+package powermachine
+
+import (
+	"encoding/binary"
+	"strings"
+	"testing"
+)
+
+func tinyELF(address, memsz uint64) []byte {
+	b := make([]byte, 128)
+	copy(b, []byte{0x7f, 'E', 'L', 'F', 2, 1, 1})
+	binary.LittleEndian.PutUint16(b[16:], 2)
+	binary.LittleEndian.PutUint16(b[18:], 21)
+	binary.LittleEndian.PutUint32(b[20:], 1)
+	binary.LittleEndian.PutUint64(b[24:], address)
+	binary.LittleEndian.PutUint64(b[32:], 64)
+	binary.LittleEndian.PutUint16(b[52:], 64)
+	binary.LittleEndian.PutUint16(b[54:], 56)
+	binary.LittleEndian.PutUint16(b[56:], 1)
+	binary.LittleEndian.PutUint32(b[64:], 1)
+	binary.LittleEndian.PutUint64(b[72:], 120)
+	binary.LittleEndian.PutUint64(b[80:], address)
+	binary.LittleEndian.PutUint64(b[88:], address)
+	binary.LittleEndian.PutUint64(b[96:], 4)
+	binary.LittleEndian.PutUint64(b[104:], memsz)
+	binary.LittleEndian.PutUint32(b[120:], 0x60000000)
+	return b
+}
+func TestBootBoundsAndHandoff(t *testing.T) {
+	m, _ := New(32, nil)
+	if e := m.Boot(tinyELF(0, 4096), Initramfs([]byte{1, 2, 3}), "console=hvc0"); e != nil {
+		t.Fatal(e)
+	}
+	if m.CPU.PC != 0 || m.CPU.GPR[3] != 0x1000000 || binary.BigEndian.Uint32(m.RAM[m.CPU.GPR[3]:]) != 0xd00dfeed {
+		t.Fatal("FDT handoff")
+	}
+	if m.RAM[0] != 0 || m.RAM[1] != 0 || m.RAM[2] != 0 || m.RAM[3] != 0x60 {
+		t.Fatal("kernel bytes changed")
+	}
+	for _, k := range [][]byte{[]byte("not ELF"), tinyELF(0, 32<<20), tinyELF(^uint64(0), 4096), tinyELF(0, 1)} {
+		m, _ = New(32, nil)
+		if e := m.Boot(k, nil, ""); e == nil {
+			t.Fatal("accepted invalid boot layout")
+		}
+	}
+}
+func TestInitramfsNewc(t *testing.T) {
+	b := Initramfs([]byte{1, 2, 3, 4})
+	if len(b)%512 != 0 || string(b[:6]) != "070701" {
+		t.Fatal("newc framing")
+	}
+	for _, name := range []string{"dev\x00", "dev/console\x00", "init\x00", "TRAILER!!!\x00"} {
+		if !strings.Contains(string(b), name) {
+			t.Fatalf("missing %q", name)
+		}
+	}
+}
+
+-- clock_test.go --
+package powermachine
+
+import (
+	"encoding/binary"
+	"renvo.dev/emulators/power64"
+	"renvo.dev/internal/rfe/systemclock"
+	"testing"
+	"time"
+)
+
+func TestRealtimeClockIsNotRetirement(t *testing.T) {
+	m, _ := New(32, nil)
+	elapsed := time.Duration(0)
+	m.clock = systemclock.WithSource(1000000, func() time.Duration { return elapsed }, func(d time.Duration) { elapsed += d })
+	binary.LittleEndian.PutUint32(m.RAM, 0x60000000)
+	m.DEC = 1000
+	if e := m.Step(); e != nil {
+		t.Fatal(e)
+	}
+	if m.Instructions != 1 || m.TB != 0 || m.DEC != 1000 {
+		t.Fatal("retirement advanced realtime oscillator")
+	}
+	elapsed = 2 * time.Millisecond
+	tb, _ := m.readSPR(268)
+	dec, _ := m.readSPR(22)
+	if tb != 2000 || int32(dec) != -1000 || !m.DecPending || m.Instructions != 1 {
+		t.Fatal("oscillator failed to advance without retirement", tb, dec, m.DecPending)
+	}
+	binary.LittleEndian.PutUint32(m.RAM[0x900:], 0x60000000)
+	m.CPU.MSR |= power64.MSREE
+	if e := m.Step(); e != nil {
+		t.Fatal(e)
+	}
+	if m.CPU.PC != 0x904 || m.DecPending || m.CPU.SPR[26] != 4 {
+		t.Fatal("decrementer interrupt entry")
+	}
+}
+func TestRealtimeCedeWaitsForOscillator(t *testing.T) {
+	m, _ := New(32, nil)
+	elapsed := time.Duration(0)
+	waits := 0
+	m.clock = systemclock.WithSource(1000000, func() time.Duration { return elapsed }, func(d time.Duration) { waits++; elapsed += d })
+	m.DEC = 4999
+	m.CPU.GPR[3] = 0xe0
+	if e := m.hypercall(&m.CPU); e != nil {
+		t.Fatal(e)
+	}
+	if waits == 0 || elapsed != 5*time.Millisecond || m.TB != 5000 || m.Instructions != 0 || !m.DecPending {
+		t.Fatal("cede fabricated ticks or retired instructions", elapsed, m.TB, m.Instructions)
+	}
+}
+func TestDecrementerWrapAndClockSelection(t *testing.T) {
+	m, _ := New(32, nil)
+	m.DEC = 1
+	m.advanceDEC((1 << 32) + 3)
+	if !m.DecPending || m.DEC != -2 {
+		t.Fatal("long stop lost decrementer crossing")
+	}
+	m.Instructions = 1
+	if e := m.UseRealtimeClock(); e == nil {
+		t.Fatal("clock changed after execution")
+	}
+}
+
+-- coremark_test.go --
+package powermachine
+
+import (
+	"bytes"
+	"fmt"
+	"math"
+	"os"
+	"regexp"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+)
+
+type coremarkOutput struct {
+	bytes.Buffer
+	pending string
+	markers []string
+	times   []time.Time
+}
+
+func (w *coremarkOutput) Write(b []byte) (int, error) {
+	if w.Len()+len(b) > 1<<20 {
+		return 0, fmt.Errorf("CoreMark serial output exceeded 1 MiB")
+	}
+	w.Buffer.Write(b)
+	w.pending += string(b)
+	for {
+		i := strings.IndexByte(w.pending, '\n')
+		if i < 0 {
+			break
+		}
+		line := strings.TrimSuffix(w.pending[:i], "\r")
+		w.pending = w.pending[i+1:]
+		if line == "RENVO-POWER-COREMARK: START" || line == "RENVO-POWER-COREMARK: STOP" {
+			w.markers = append(w.markers, line)
+			w.times = append(w.times, time.Now())
+		}
+	}
+	return len(b), nil
+}
+
+type coremarkResult struct {
+	Ticks                                          uint64
+	HostSeconds, GuestSeconds, IterationsPerSecond float64
+	FinalCRC                                       string
+}
+
+func coremarkReports(serial string, markers []string, times []time.Time, iterations uint64) ([2]coremarkResult, error) {
+	return coremarkReportsForRelease(serial, markers, times, iterations, "6.6.1")
+}
+
+func validateLinuxRelease(release string) error {
+	if release == "" || len(release) > 64 {
+		return fmt.Errorf("RENVO_POWER_LINUX_RELEASE must be a nonempty kernel release of at most 64 bytes")
+	}
+	for _, c := range release {
+		if c <= ' ' || c > '~' {
+			return fmt.Errorf("RENVO_POWER_LINUX_RELEASE must be one printable ASCII token")
+		}
+	}
+	return nil
+}
+
+func linuxFixtureRelease() (string, error) {
+	release, explicit := os.LookupEnv("RENVO_POWER_LINUX_RELEASE")
+	if !explicit {
+		release = "6.6.1"
+	}
+	return release, validateLinuxRelease(release)
+}
+
+func coremarkReportsForRelease(serial string, markers []string, times []time.Time, iterations uint64, release string) ([2]coremarkResult, error) {
+	var result [2]coremarkResult
+	if err := validateLinuxRelease(release); err != nil {
+		return result, err
+	}
+	serial = strings.ReplaceAll(serial, "\r\n", "\n")
+	guestReports := 0
+	for _, line := range strings.Split(serial, "\n") {
+		if strings.Contains(line, "Guest:") {
+			guestReports++
+			if line != "Guest: Linux "+release+" ppc64le" {
+				return result, fmt.Errorf("guest uname does not match explicit kernel release %q", release)
+			}
+		}
+	}
+	if strings.Count(serial, "RENVO-POWER-COREMARK: INIT\n") != 1 || strings.Count(serial, "RENVO-POWER-COREMARK: PASS\n") != 1 || guestReports != 1 || strings.Contains(serial, "ERROR") || strings.Contains(serial, "Errors detected") || strings.Contains(serial, "RENVO-POWER-COREMARK: FAIL") {
+		return result, fmt.Errorf("incomplete or failed guest validation")
+	}
+	expectedMarkers := []string{"RENVO-POWER-COREMARK: START", "RENVO-POWER-COREMARK: STOP", "RENVO-POWER-COREMARK: START", "RENVO-POWER-COREMARK: STOP"}
+	if len(markers) != 4 || len(times) != 4 {
+		return result, fmt.Errorf("missing/duplicate timing markers")
+	}
+	for i, s := range markers {
+		if s != expectedMarkers[i] {
+			return result, fmt.Errorf("out-of-order timing markers")
+		}
+	}
+	sections := strings.Split(serial, "RENVO-POWER-COREMARK: STOP\n")
+	if len(sections) != 3 {
+		return result, fmt.Errorf("invalid report framing")
+	}
+	crcPattern := regexp.MustCompile(`(?m)^(?:seedcrc|\[0\]crc(?:list|matrix|state|final))\s*:\s*0x([0-9a-fA-F]{4})\s*$`)
+	ticksPattern := regexp.MustCompile(`(?m)^Total ticks\s*:\s*(\d+)\s*$`)
+	iterationsPattern := regexp.MustCompile(`(?m)^Iterations\s*:\s*(\d+)\s*$`)
+	known := [2][5]string{{"e9f5", "e714", "1fd7", "8e3a", "d340"}, {"18f2", "e3c1", "0747", "8d84", "26c2"}}
+	switch iterations {
+	case 1000:
+	case 2000:
+		// Identical scalar ELF independently checked under QEMU POWER8.
+		known[0][4], known[1][4] = "4983", "0cac"
+	case 20000:
+		// Independent QEMU POWER8 control, identical scalar ELF.
+		known[0][4], known[1][4] = "382f", "d304"
+	case 80000:
+		// Independent POWER8 QEMU run of the identical scalar 80000 ELF.
+		known[0][4], known[1][4] = "cc42", "35f3"
+	default:
+		return result, fmt.Errorf("no independent CRC reference for %d iterations (use 1000, 2000, 20000 or 80000)", iterations)
+	}
+	for i := 0; i < 2; i++ {
+		body := strings.SplitN(sections[i+1], "RENVO-POWER-COREMARK: START", 2)[0]
+		crcs := crcPattern.FindAllStringSubmatch(body, -1)
+		ticks := ticksPattern.FindAllStringSubmatch(body, -1)
+		counts := iterationsPattern.FindAllStringSubmatch(body, -1)
+		if len(crcs) != 5 || len(ticks) != 1 || len(counts) != 1 || strings.Count(body, "Correct operation validated. See README.md for run and reporting rules.") != 1 {
+			return result, fmt.Errorf("invalid seed %d report", i)
+		}
+		for j := 0; j < 5; j++ {
+			if strings.ToLower(crcs[j][1]) != known[i][j] {
+				return result, fmt.Errorf("seed %d CRC%d mismatch", i, j)
+			}
+		}
+		count, e := strconv.ParseUint(counts[0][1], 10, 64)
+		if e != nil || count != iterations {
+			return result, fmt.Errorf("iteration count mismatch")
+		}
+		tick, e := strconv.ParseUint(ticks[0][1], 10, 64)
+		if e != nil {
+			return result, e
+		}
+		host := times[i*2+1].Sub(times[i*2]).Seconds()
+		guest := float64(tick) / 1000000
+		if guest < 10 || host < 10 || math.Abs(host-guest) > math.Max(0.1, host*0.05) {
+			return result, fmt.Errorf("invalid seed %d timing host=%f guest=%f", i, host, guest)
+		}
+		result[i] = coremarkResult{tick, host, guest, float64(iterations) / guest, strings.ToLower(crcs[4][1])}
+	}
+	return result, nil
+}
+func TestLinuxCoreMark(t *testing.T) {
+	kernel := os.Getenv("RENVO_POWER_LINUX_KERNEL")
+	benchmark := os.Getenv("RENVO_POWER_COREMARK_ELF")
+	if benchmark == "" {
+		t.Skip("set RENVO_POWER_COREMARK_ELF and RENVO_POWER_LINUX_KERNEL")
+	}
+	if kernel == "" {
+		t.Fatal("an explicit Linux kernel fixture is required")
+	}
+	iterations := uint64(1000)
+	if value := os.Getenv("RENVO_POWER_COREMARK_ITERATIONS"); value != "" {
+		var e error
+		iterations, e = strconv.ParseUint(value, 10, 32)
+		if e != nil || iterations == 0 {
+			t.Fatal("invalid explicit iteration count")
+		}
+	}
+	testLinuxCoreMark(t, kernel, benchmark, iterations, 2000000000, 0)
+}
+
+// The longer performance proof is explicitly selected, not an increased legacy
+// resource limit. Unchanged 1000/2000-iteration fixtures keep their 2B ceiling.
+func TestLinuxCoreMarkPerformance(t *testing.T) {
+	benchmark := os.Getenv("RENVO_POWER_COREMARK_PERFORMANCE_ELF")
+	if benchmark == "" {
+		t.Skip("set explicit 20000-iteration performance ELF")
+	}
+	kernel := os.Getenv("RENVO_POWER_LINUX_KERNEL")
+	if kernel == "" || os.Getenv("RENVO_POWER_ENGINE") != "native" {
+		t.Fatal("performance proof requires explicit kernel and native engine")
+	}
+	testLinuxCoreMark(t, kernel, benchmark, 20000, 16000000000, 1000)
+}
+
+// Select a longer workload explicitly when faster execution makes the original
+// 20000-iteration duration invalid. Neither existing fixture ceiling changes;
+// this separate proof keeps the same attempts per iteration and requires 4000/s.
+func TestLinuxCoreMarkExtendedPerformance(t *testing.T) {
+	benchmark := os.Getenv("RENVO_POWER_COREMARK_EXTENDED_ELF")
+	if benchmark == "" {
+		t.Skip("set explicit 80000-iteration performance ELF")
+	}
+	kernel := os.Getenv("RENVO_POWER_LINUX_KERNEL")
+	if kernel == "" || os.Getenv("RENVO_POWER_ENGINE") != "native" {
+		t.Fatal("extended proof requires explicit kernel and native engine")
+	}
+	testLinuxCoreMark(t, kernel, benchmark, 80000, 64000000000, 4000)
+}
+
+func testLinuxCoreMark(t *testing.T, kernel, benchmark string, iterations, budget uint64, minimumScore float64) {
+	t.Helper()
+	release, e := linuxFixtureRelease()
+	if e != nil {
+		t.Fatal(e)
+	}
+	k, e := os.ReadFile(kernel)
+	if e != nil {
+		t.Fatal(e)
+	}
+	elf, e := os.ReadFile(benchmark)
+	if e != nil {
+		t.Fatal(e)
+	}
+	var out coremarkOutput
+	makeMachine := New
+
+	m, e := makeMachine(256, &out)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = m.Boot(k, Initramfs(elf), "console=hvc0 earlycon=hvc_pseries rdinit=/init nokaslr maxcpus=1"); e != nil {
+		t.Fatal(e)
+	}
+	if e = m.UseRealtimeClock(); e != nil {
+		t.Fatal(e)
+	}
+	mode := os.Getenv("RENVO_POWER_ENGINE")
+	if mode != "" && mode != "interpreter" {
+		if e = m.EnableJIT(mode); e != nil {
+			t.Fatal(e)
+		}
+		if mode == "native" && !m.JIT.NativeAvailable() {
+			t.Fatal("native fixture proof requires an available native host")
+		}
+	}
+	defer m.Close()
+	for m.Instructions < budget && !m.Done {
+		count, err := m.RunQuantum(budget - m.Instructions)
+		if err != nil || count == 0 {
+			t.Fatalf("instruction %d: count=%d error=%v\n%s", m.Instructions, count, err, out.String())
+		}
+	}
+	if mode == "native" {
+		s := m.JIT.Stats
+		if s.Native == 0 || s.NativeMemory == 0 || s.Linked == 0 || s.Regions == 0 || s.LoopIterations == 0 || s.CompileFailures != 0 {
+			t.Fatalf("incomplete native fixture proof: %+v", s)
+		}
+		if s.ArenaResets != 0 {
+			t.Logf("WARNING: native JIT arena reset %d time(s); elapsed timings include cache recycling", s.ArenaResets)
+		}
+		t.Logf("native fixture stats=%+v", s)
+	}
+	if !m.Done {
+		t.Fatalf("benchmark did not power off: %s", out.String())
+	}
+	reports, e := coremarkReportsForRelease(out.String(), out.markers, out.times, iterations, release)
+	if e != nil {
+		t.Fatalf("%v\n%s", e, out.String())
+	}
+	t.Logf("CoreMark iterations=%d PERF=%+v VALID=%+v instructions=%d", iterations, reports[0], reports[1], m.Instructions)
+	for i, report := range reports {
+		if report.IterationsPerSecond < minimumScore {
+			t.Fatalf("seed %d score %.3f below required %.3f", i, report.IterationsPerSecond, minimumScore)
+		}
+	}
+}
+func syntheticCoremark() (string, []string, []time.Time) {
+	serial := "RENVO-POWER-COREMARK: INIT\nGuest: Linux 6.6.1 ppc64le\n"
+	markers := []string{}
+	times := []time.Time{}
+	now := time.Unix(0, 0)
+	for _, crc := range [][5]string{{"e9f5", "e714", "1fd7", "8e3a", "d340"}, {"18f2", "e3c1", "0747", "8d84", "26c2"}} {
+		serial += "RENVO-POWER-COREMARK: START\nRENVO-POWER-COREMARK: STOP\n"
+		serial += fmt.Sprintf("Total ticks      : 12000000\nIterations       : 1000\nseedcrc          : 0x%s\n[0]crclist       : 0x%s\n[0]crcmatrix     : 0x%s\n[0]crcstate      : 0x%s\n[0]crcfinal      : 0x%s\nCorrect operation validated. See README.md for run and reporting rules.\n", crc[0], crc[1], crc[2], crc[3], crc[4])
+		markers = append(markers, "RENVO-POWER-COREMARK: START", "RENVO-POWER-COREMARK: STOP")
+		times = append(times, now, now.Add(12*time.Second))
+		now = now.Add(13 * time.Second)
+	}
+	return serial + "RENVO-POWER-COREMARK: PASS\n", markers, times
+}
+func TestCoreMarkReference2000(t *testing.T) {
+	serial, markers, times := syntheticCoremark()
+	serial = strings.ReplaceAll(serial, "Iterations       : 1000", "Iterations       : 2000")
+	serial = strings.ReplaceAll(serial, "0xd340", "0x4983")
+	serial = strings.ReplaceAll(serial, "0x26c2", "0x0cac")
+	if _, e := coremarkReports(serial, markers, times, 2000); e != nil {
+		t.Fatal(e)
+	}
+	for _, bad := range []string{strings.Replace(serial, "0x4983", "0xd340", 1), strings.Replace(serial, "0x0cac", "0x26c2", 1), strings.Replace(serial, "12000000", "9999999", 1)} {
+		if _, e := coremarkReports(bad, markers, times, 2000); e == nil {
+			t.Fatal("invalid 2000-iteration reference accepted")
+		}
+	}
+	if _, e := coremarkReports(serial, markers, times, 2001); e == nil {
+		t.Fatal("unverified iteration profile accepted")
+	}
+}
+
+func TestCoreMarkExplicitLinuxRelease(t *testing.T) {
+	const release = "6.6.142-0-virt"
+	serial, markers, times := syntheticCoremark()
+	uname := "Guest: Linux " + release + " ppc64le\n"
+	serial = strings.Replace(serial, "Guest: Linux 6.6.1 ppc64le\n", uname, 1)
+	for _, valid := range []string{serial, strings.ReplaceAll(serial, "\n", "\r\n")} {
+		if _, err := coremarkReportsForRelease(valid, markers, times, 1000, release); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := coremarkReports(serial, markers, times, 1000); err == nil {
+		t.Fatal("default kernel identity silently changed")
+	}
+	for _, wrong := range []string{"", " ", "6.6.1", release + " ", " " + release, release + "\t", release + "\n", release + "\r", release + "\x00", release + "\u00a0", strings.Repeat("x", 65)} {
+		if _, err := coremarkReportsForRelease(serial, markers, times, 1000, wrong); err == nil {
+			t.Fatalf("invalid expected release accepted: %q", wrong)
+		}
+	}
+	for _, bad := range []string{
+		strings.Replace(serial, uname, "", 1),
+		strings.Replace(serial, uname, "forged "+uname, 1),
+		strings.Replace(serial, uname, strings.TrimSuffix(uname, "\n")+" forged\n", 1),
+		strings.Replace(serial, uname, "Guest: Linux 6.6.1 ppc64le\n", 1),
+		strings.Replace(serial, uname, "Guest: Linux "+release+" ppc64\n", 1),
+		serial + uname,
+		serial + "Guest: Linux 6.6.1 ppc64le\n",
+	} {
+		if _, err := coremarkReportsForRelease(bad, markers, times, 1000, release); err == nil {
+			t.Fatal("missing, forged, wrong or duplicate guest uname accepted")
+		}
+	}
+}
+
+func TestLinuxFixtureReleaseSelection(t *testing.T) {
+	t.Setenv("RENVO_POWER_LINUX_RELEASE", "6.6.142-0-virt")
+	if release, err := linuxFixtureRelease(); err != nil || release != "6.6.142-0-virt" {
+		t.Fatal("explicit fixture identity", release, err)
+	}
+	for _, invalid := range []string{"", " ", "6.6.142-0-virt\n"} {
+		t.Setenv("RENVO_POWER_LINUX_RELEASE", invalid)
+		if _, err := linuxFixtureRelease(); err == nil {
+			t.Fatalf("invalid explicit environment accepted: %q", invalid)
+		}
+	}
+	if err := os.Unsetenv("RENVO_POWER_LINUX_RELEASE"); err != nil {
+		t.Fatal(err)
+	}
+	if release, err := linuxFixtureRelease(); err != nil || release != "6.6.1" {
+		t.Fatal("default fixture identity", release, err)
+	}
+}
+
+func TestCoreMarkReference80000(t *testing.T) {
+	serial, markers, times := syntheticCoremark()
+	serial = strings.ReplaceAll(serial, "Iterations       : 1000", "Iterations       : 80000")
+	serial = strings.ReplaceAll(serial, "0xd340", "0xcc42")
+	serial = strings.ReplaceAll(serial, "0x26c2", "0x35f3")
+	if _, err := coremarkReports(serial, markers, times, 80000); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{strings.Replace(serial, "0xcc42", "0x382f", 1), strings.Replace(serial, "0x35f3", "0xd304", 1), strings.Replace(serial, "12000000", "9999999", 1), strings.Replace(serial, "80000", "20000", 1)} {
+		if _, err := coremarkReports(bad, markers, times, 80000); err == nil {
+			t.Fatal("invalid extended reference accepted")
+		}
+	}
+	short := append([]time.Time(nil), times...)
+	short[1] = short[0].Add(9 * time.Second)
+	if _, err := coremarkReports(serial, markers, short, 80000); err == nil {
+		t.Fatal("short extended host duration accepted")
+	}
+}
+
+func TestCoreMarkRejectsInvalidReports(t *testing.T) {
+	good, markers, times := syntheticCoremark()
+	if _, e := coremarkReports(good, markers, times, 1000); e != nil {
+		t.Fatal(e)
+	}
+	for _, bad := range []string{strings.Replace(good, "0xe714", "0xffff", 1), strings.Replace(good, "0xd340", "0xffff", 1), strings.Replace(good, "12000000", "1", 1), strings.Replace(good, "1000", "999", 1), strings.Replace(good, "RENVO-POWER-COREMARK: PASS", "RENVO-POWER-COREMARK: FAIL", 1), strings.Replace(good, "Correct operation validated.", "Errors detected", 1), good + "RENVO-POWER-COREMARK: PASS\n"} {
+		if _, e := coremarkReports(bad, markers, times, 1000); e == nil {
+			t.Fatal("invalid report accepted")
+		}
+	}
+	if _, e := coremarkReports(good, markers[:3], times[:3], 1000); e == nil {
+		t.Fatal("incomplete timings accepted")
+	}
+	short := append([]time.Time(nil), times...)
+	short[1] = short[0].Add(time.Second)
+	if _, e := coremarkReports(good, markers, short, 1000); e == nil {
+		t.Fatal("short host duration accepted")
+	}
+}
+
+-- fastpath_test.go --
+package powermachine
+
+import (
+	"encoding/binary"
+	"renvo.dev/emulators/power64"
+	rt "renvo.dev/internal/rfe/runtime"
+	"renvo.dev/internal/rfe/systemclock"
+	"testing"
+	"time"
+)
+
+func TestRealtimePollingBoundAndEnable(t *testing.T) {
+	m, _ := New(32, nil)
+	elapsed := time.Duration(0)
+	reads := 0
+	m.clock = systemclock.WithSource(1000000, func() time.Duration { reads++; return elapsed }, func(d time.Duration) { elapsed += d })
+	for a := 0; a < 4096; a += 4 {
+		binary.LittleEndian.PutUint32(m.RAM[a:], 0x60000000)
+	}
+	m.CPU.MSR |= power64.MSREE
+	m.DEC = 9
+	if e := m.Step(); e != nil {
+		t.Fatal(e)
+	}
+	elapsed = time.Millisecond
+	// No clock read per instruction, but never more than 64 instructions
+	// between polls even when the guest does not read any timer registers.
+	for i := 0; i < 63; i++ {
+		if e := m.Step(); e != nil {
+			t.Fatal(e)
+		}
+	}
+	if reads != 1 || m.CPU.PC != 256 {
+		t.Fatal("unexpected poll or premature interrupt", reads, m.CPU.PC)
+	}
+	if e := m.Step(); e != nil {
+		t.Fatal(e)
+	}
+	if reads != 2 || m.CPU.PC != 0x904 || m.CPU.SPR[26] != 256 || m.TB != 1000 {
+		t.Fatal("poll bound/interrupt", reads, m.CPU.PC, m.TB)
+	}
+	// Interrupts were disabled by entry. Re-enable between polls, after time
+	// passes: the first interruptible instruction must not use stale DEC.
+	m.writeSPR(22, 9)
+	elapsed += time.Millisecond
+	m.CPU.MSR |= power64.MSREE
+	if e := m.Step(); e != nil {
+		t.Fatal(e)
+	}
+	if m.CPU.SPR[26] != 0x904 || m.CPU.PC != 0x904 || m.TB != 2000 {
+		t.Fatal("EE enable did not refresh oscillator", m.CPU.PC, m.TB)
+	}
+	elapsed += time.Millisecond
+	tb, _ := m.readSPR(268)
+	if tb != 3000 {
+		t.Fatal("counter read returned batched time", tb)
+	}
+	m.writeSPR(22, 77)
+	elapsed += 10 * time.Microsecond
+	dec, _ := m.readSPR(22)
+	if dec != 67 {
+		t.Fatal("DEC write/read was not synchronous", dec)
+	}
+}
+
+func TestRealtimeGuestEnablesInterruptsBetweenPolls(t *testing.T) {
+	m, _ := New(32, nil)
+	elapsed := time.Duration(0)
+	m.clock = systemclock.WithSource(1000000, func() time.Duration { return elapsed }, func(d time.Duration) { elapsed += d })
+	binary.LittleEndian.PutUint32(m.RAM, 0x60000000)
+	binary.LittleEndian.PutUint32(m.RAM[4:], 31<<26|3<<21|1<<16|178<<1) // mtmsrd r3,1
+	binary.LittleEndian.PutUint32(m.RAM[8:], 0x38600063)                // must not execute before interrupt
+	binary.LittleEndian.PutUint32(m.RAM[0x900:], 0x60000000)
+	m.CPU.GPR[3] = power64.MSREE
+	m.DEC = 99
+	if e := m.Step(); e != nil {
+		t.Fatal(e)
+	}
+	elapsed = time.Millisecond
+	if e := m.Step(); e != nil {
+		t.Fatal(e)
+	}
+	if m.CPU.MSR&power64.MSREE == 0 || m.CPU.PC != 8 {
+		t.Fatal("mtmsrd did not enable EE")
+	}
+	if e := m.Step(); e != nil {
+		t.Fatal(e)
+	}
+	if m.CPU.PC != 0x904 || m.CPU.SPR[26] != 8 || m.CPU.GPR[3] != power64.MSREE || m.TB != 1000 {
+		t.Fatal("stale clock across guest EE enable", m.CPU.PC, m.TB)
+	}
+}
+
+func TestCachedTranslationsObserveLiveState(t *testing.T) {
+	m, _ := New(32, nil)
+	c := &m.CPU
+	c.MSR |= power64.MSRIR | power64.MSRDR
+	c.SLB[7] = power64.SLB{ESID: 0xc000000008000007, VSID: 0x12345400}
+	a := uint64(0xc000000000008123)
+	index := (((uint64(0x12345000) >> 12) ^ 8) & uint64(len(m.HPT)/8-1)) * 8
+	m.HPT[index+3] = HPTE{0x12345001, 0x5000}
+	check := func(access rt.Access, want uint64, allowed bool) {
+		t.Helper()
+		got, e := m.translate(c, a, access)
+		if allowed && (e != nil || got != want) || !allowed && e == nil {
+			t.Fatalf("access=%d got=%x error=%v allowed=%t want=%x", access, got, e, allowed, want)
+		}
+	}
+	check(rt.Execute, 0x5123, true) // populate through a later SLB/PTE slot
+	m.HPT[index+3].R &^= 0x180
+	check(rt.Write, 0x5123, true)
+	if m.HPT[index+3].R&0x180 != 0x180 {
+		t.Fatal("cache skipped R/C update")
+	}
+	c.MSR |= power64.MSRPR
+	check(rt.Read, 0, false) // key-protected PP=0
+	m.HPT[index+3].R = 0x6002
+	check(rt.Read, 0x6123, true) // live RPN
+	m.HPT[index+3].R = 0x6003
+	check(rt.Write, 0, false)
+	m.HPT[index+3].R = 0x6006
+	check(rt.Execute, 0, false) // NX after a data hit
+	c.MSR &^= power64.MSRIR
+	check(rt.Execute, a&0x0fffffffffffffff, true)
+	c.MSR |= power64.MSRIR
+	m.HPT[index+3].V = 0
+	check(rt.Read, 0, false)
+	m.HPT[index+3] = HPTE{0x12345001, 0x7002}
+	check(rt.Execute, 0x7123, true)
+	c.SLB[7].VSID |= 0x200
+	check(rt.Execute, 0, false) // SLB NX
+	c.SLB[7] = power64.SLB{}
+	check(rt.Read, 0, false)
+}
+
+func TestTranslationEpochAndCodeReplacement(t *testing.T) {
+	m, _ := New(32, nil)
+	c := &m.CPU
+	c.MSR |= power64.MSRIR | power64.MSRDR
+	c.SLB[0] = power64.SLB{ESID: 0x08000000, VSID: 0x12345000}
+	index := ((uint64(0x12345000) >> 12) & uint64(len(m.HPT)/8-1)) * 8
+	secondary := ((^(uint64(0x12345000) >> 12)) & uint64(len(m.HPT)/8-1)) * 8
+	m.HPT[secondary] = HPTE{0x12345003, 0x5002}
+	binary.LittleEndian.PutUint32(m.RAM[0x5000:], 0x38600001) // li r3,1
+	if e := m.Step(); e != nil || c.GPR[3] != 1 {
+		t.Fatal("initial execution", e)
+	}
+	c.PC = 0
+	binary.LittleEndian.PutUint32(m.RAM[0x5000:], 0x38600002)
+	if e := m.Step(); e != nil || c.GPR[3] != 2 {
+		t.Fatal("stale instruction bytes", e)
+	}
+	// Install a primary mapping through H_ENTER while the secondary is cached.
+	c.GPR[3], c.GPR[4], c.GPR[5], c.GPR[6], c.GPR[7] = 8, 1<<39, index, 0x12345001, 0x6002
+	if e := m.hypercall(c); e != nil || c.GPR[3] != 0 {
+		t.Fatal("enter", e)
+	}
+	p, e := m.translate(c, 0, rt.Read)
+	if e != nil || p != 0x6000 {
+		t.Fatal("stale secondary precedence", p, e)
+	}
+	// SLBMTE creates a matching earlier SLB entry; its generation must discard
+	// cached lookup precedence even when the previously selected entry is intact.
+	c.SLB[0] = power64.SLB{}
+	c.SLB[7] = power64.SLB{ESID: 0x08000007, VSID: 0x12345000}
+	p, e = m.translate(c, 0, rt.Read)
+	if e != nil || p != 0x6000 {
+		t.Fatal(p, e)
+	}
+	c.GPR[3], c.GPR[4] = 0x34567000, 0x08000000
+	c.MSR &^= power64.MSRIR
+	binary.LittleEndian.PutUint32(m.RAM[0x1000:], 31<<26|3<<21|4<<11|402<<1)
+	c.PC = 0x1000
+	if e := c.Step(); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := m.translate(c, 0, rt.Read); e == nil {
+		t.Fatal("SLBMTE retained old lookup")
+	}
+}
+
+-- initramfs.go --
+package powermachine
+
+import "fmt"
+
+// Initramfs builds a small complete Linux newc root for a freestanding PID 1.
+// The ELF bytes are not modified. No archive utility or host directory is used.
+func Initramfs(init []byte) []byte {
+	var out []byte
+	appendFile := func(name string, mode uint32, data []byte, major, minor uint32, inode uint32) {
+		size := len(data)
+		if name == "TRAILER!!!" {
+			size = 0
+		}
+		out = fmt.Appendf(out, "070701%08x%08x%08x%08x%08x%08x%08x%08x%08x%08x%08x%08x%08x", inode, mode, 0, 0, 1, 0, size, 0, 0, major, minor, len(name)+1, 0)
+		out = append(out, []byte(name)...)
+		out = append(out, 0)
+		for len(out)%4 != 0 {
+			out = append(out, 0)
+		}
+		out = append(out, data...)
+		for len(out)%4 != 0 {
+			out = append(out, 0)
+		}
+	}
+	appendFile("dev", 0040755, nil, 0, 0, 1)
+	appendFile("dev/console", 0020600, nil, 5, 1, 2)
+	appendFile("init", 0100755, init, 0, 0, 3)
+	appendFile("TRAILER!!!", 0, nil, 0, 0, 0)
+	for len(out)%512 != 0 {
+		out = append(out, 0)
+	}
+	return out
+}
+
+-- jit.go --
+package powermachine
+
+import (
+	"fmt"
+	"renvo.dev/emulators/power64"
+	"renvo.dev/internal/rfe/engine"
+	emu "renvo.dev/internal/rfe/runtime"
+	"renvo.dev/internal/rfe/systemmemory"
+)
+
+// Native execution never overlaps a reservation, tracing or mapping mutation.
+// Unsupported privileged instructions and atomics are scheduling boundaries.
+func (m *Machine) nativeActive() bool { return !m.CPU.Reserved && m.Trace == nil }
+func (m *Machine) nativeDomain() int {
+	if m.CPU.MSR&power64.MSRLE != 0 {
+		return 0
+	}
+	return 1
+}
+func (m *Machine) nativeSpace() uint64 {
+	return m.nativeBank<<32 | (m.CPU.MSR & (power64.MSRSF | power64.MSRIR | power64.MSRDR | power64.MSRPR))
+}
+func (m *Machine) nativeAddress(key uint64) uint64 {
+	return key | m.nativeBank<<48
+}
+func (m *Machine) nativeMapping(a uint64, execute bool) (uint64, bool, error) {
+	access := emu.Read
+	if execute {
+		access = emu.Execute
+	}
+	p, err := m.lookup(&m.CPU, a, access, false)
+	if err != nil {
+		return 0, false, err
+	}
+	if p >= uint64(len(m.RAM)) {
+		return 0, false, fmt.Errorf("native mapping is not RAM")
+	}
+	if execute {
+		return p, false, nil
+	}
+	w, we := m.lookup(&m.CPU, a, emu.Write, false)
+	writable := we == nil && w == p
+	if m.CPU.MSR&power64.MSRDR != 0 {
+		page := a >> 12
+		entry := &m.translations[(page^(page>>16))&255]
+		bits := m.HPT[entry.pteIndex].R
+		// First accesses must exit and let the CPU set R/C precisely. No descriptor
+		// can bypass a cleared bit; H_CLEAR_REF/MOD revoke all prior descriptors.
+		if bits&0x100 == 0 {
+			return 0, false, fmt.Errorf("reference bit needs architectural access")
+		}
+		writable = writable && bits&0x80 != 0
+	}
+	return p, writable, nil
+}
+
+// InvalidateMappings is the required barrier for externally edited HPT/SLB
+// mappings. Architectural SLB instructions/hypercalls invoke it automatically.
+// External RAM edits must similarly call NativeRAM.BeforeWrite before mutation.
+func (m *Machine) InvalidateMappings() {
+	if m.NativeRAM != nil {
+		m.NativeRAM.InvalidateMappings()
+	}
+}
+func (m *Machine) checkNativeMappings() {
+	if m.NativeRAM != nil && (m.nativeSLBVersion != m.CPU.SLBVersion || m.nativeHPTVersion != m.hptVersion) {
+		m.InvalidateMappings()
+		m.nativeSLBVersion, m.nativeHPTVersion = m.CPU.SLBVersion, m.hptVersion
+	}
+}
+func (m *Machine) EnableJIT(mode string) error {
+	// Keep cold kernel initialization from filling the bounded native arena.
+	// Its original IR tier still runs every instruction; genuinely hot kernel
+	// loops promote after demonstrating sustained reuse.
+	m.kernelThreshold = 65536
+	config := engine.DefaultEngineConfig()
+	config.Mode = mode
+	config.NativeBytes = 128 << 20
+	config.ProfileNative = m.ProfileJIT
+	config.ProfileNativeMonotonic = m.ProfileJIT
+	config.EvictCold, config.RecycleNative = true, true
+	config.DiscoveryThreshold = 32
+	// Regions larger than the unchanged 64-attempt scheduling window cannot
+	// execute here; compiling them only churns the bounded executable arena.
+	config.MaxRegionInstructions = 64
+	return m.configureJIT(config)
+}
+func (m *Machine) configureJIT(config engine.EngineConfig) error {
+	if m.JIT != nil {
+		return fmt.Errorf("recompiler already configured")
+	}
+	if m.NativeRAM == nil {
+		m.NativeRAM = systemmemory.New(m.RAM, m.nativeActive, m.nativeMapping)
+	}
+	// nativeSpace includes bank, privilege and translation mode. HPT/SLB
+	// mutations use the global mapping barrier above, including inactive roots.
+	m.NativeRAM.RetainRootData = true
+	m.NativeRAM.FoldPageSlots = true
+	m.NativeRAM.ReadGuest, m.NativeRAM.WriteGuest = m.CPU.Read, m.CPU.Write
+	m.NativeRAM.Domain, m.NativeRAM.AddressSpace, m.NativeRAM.NativeAddress = m.nativeDomain, m.nativeSpace, m.nativeAddress
+	arch := power64.Architecture()
+	fetch := arch.Fetch
+	arch.Fetch = func(memory engine.Memory, pc uint64) (engine.Instruction, error) {
+		ins, err := fetch(memory, pc)
+		ins.Decoded = power64.EndianPolicy{Little: m.CPU.MSR&power64.MSRLE != 0}
+		if m.CPU.MSR&power64.MSRPR == 0 {
+			ins.NativeThreshold = m.kernelThreshold
+		}
+		if pc>>48 != m.nativeBank {
+			ins.InterpretOnly, ins.ScheduleBoundary = true, true
+		}
+		return ins, err
+	}
+	arch.Lower = func(b *emu.Builder, ins engine.Instruction, completed int) bool {
+		// The descriptor ABI uses 48-bit keys. Admit only the current full-width
+		// bank and reconstruct it for each refill; cross-bank data accesses leave
+		// before the access, retaining the original EA and precise fault PC.
+		oldAddress := b.MemoryAddress
+		defer func() { b.MemoryAddress = oldAddress }()
+		b.MemoryAddress = func(b *emu.Builder, address emu.Value) emu.Value {
+			bank := m.nativeBank
+			if m.CPU.MSR&power64.MSRDR == 0 {
+				// Real-mode translation ignores the top physical-address nibble.
+				// Normalize only the memory key; update-form architectural EAs
+				// and fault checkpoints retain the original full-width values.
+				// DR and the full code bank are already guarded by nativeSpace.
+				address = b.Binary(emu.And, address, b.Constant(0x0fffffffffffffff))
+				bank &= 0x0fff
+			}
+			// Bank zero needs no redundant guard: raw memory admission checks all
+			// upper bits before any access. Nonzero banks still need the exact
+			// bank proof before masking and reconstructing the native key.
+			if bank != 0 {
+				b.Guard(b.Binary(emu.Equal, b.Shift(emu.Shr, address, 48), b.Constant(bank)))
+			}
+			key := address
+			// A successful zero-bank guard already proves the full 48-bit key.
+			// Other banks still need their guarded high bits removed.
+			if bank != 0 {
+				key = b.Binary(emu.And, address, b.Constant(0x0000ffffffffffff))
+			}
+			return key
+		}
+		return power64.LowerInstruction(b, ins, completed)
+	}
+	jit, err := engine.New(config, arch)
+	if err != nil {
+		return err
+	}
+	m.JIT = jit
+	m.adapter.m = m
+	m.adapter.TierCPU = *power64.NewTierCPU(&m.CPU, m.NativeRAM)
+	m.nativeSLBVersion, m.nativeHPTVersion = m.CPU.SLBVersion, m.hptVersion
+	return nil
+}
+func (m *Machine) Close() error {
+	var err error
+	if m.JIT != nil {
+		err = m.JIT.Close()
+	}
+	if m.NativeRAM != nil {
+		if e := m.NativeRAM.Close(); err == nil {
+			err = e
+		}
+	}
+	return err
+}
+
+type nativeCPU struct {
+	power64.TierCPU
+	m                   *Machine
+	accounted, consumed uint64
+	slow                uint64
+	deadline            uint64
+	expired             bool
+}
+
+func (c *nativeCPU) NativeDeadline() uint64 { return c.deadline }
+func (c *nativeCPU) NativeDeadlineExpired() { c.expired = true }
+func (c *nativeCPU) sync() {
+	c.TierCPU.Sync()
+	count := c.CPU.Tick - c.accounted
+	c.m.Instructions += count
+	c.consumed += count
+	if c.m.clock == nil {
+		c.m.TB += count
+		c.m.advanceDEC(count)
+	} else if c.deadline != 0 {
+		c.m.sampleClock()
+	} else {
+		if count > uint64(c.m.clockSteps) {
+			panic("native execution exceeded clock boundary")
+		}
+		c.m.clockSteps -= uint8(count)
+	}
+	c.accounted = c.CPU.Tick
+}
+func (c *nativeCPU) Step() error {
+	c.slow++
+	c.sync()
+	err := c.m.Step()
+	c.Import()
+	c.accounted = c.CPU.Tick
+	c.consumed++
+	return err
+}
+func (c *nativeCPU) ExecuteInstruction(ins engine.Instruction) error {
+	c.slow++
+	c.sync()
+	op := uint32(ins.Bits)
+	err := c.m.step(&op)
+	c.Import()
+	c.accounted = c.CPU.Tick
+	c.consumed++
+	return err
+}
+
+// RunQuantum polls realtime timers at <=64 native instructions, inside the
+// foreign boundary when the oscillator supports it. Deterministic/custom
+// sources retain the original exact retirement-based scheduling slice.
+func (m *Machine) RunQuantum(remaining uint64) (uint64, error) {
+	if remaining == 0 {
+		return 0, fmt.Errorf("instruction budget exhausted")
+	}
+	m.checkNativeMappings()
+	if m.JIT == nil || !m.nativeActive() {
+		return 1, m.Step()
+	}
+	if m.clock != nil {
+		ee := m.CPU.MSR&power64.MSREE != 0
+		if m.clockSteps == 0 || ee && !m.clockEE {
+			m.sampleClock()
+		}
+		m.clockEE = ee
+	}
+	if m.DecPending && m.CPU.MSR&power64.MSREE != 0 {
+		return 1, m.Step()
+	}
+	budget := uint64(64)
+	deadline := uint64(0)
+	if m.clock != nil {
+		budget = uint64(m.clockSteps)
+		// Bound cancellation and counter refresh independently of guest DEC.
+		target := m.clockLast + 1000
+		if !m.DecPending && m.DEC >= 0 && uint64(m.DEC)+1 < 1000 {
+			target = m.clockLast + uint64(m.DEC) + 1
+		}
+		deadline = m.clock.NativeDeadline(target)
+		if deadline != 0 {
+			budget = emu.NativeSessionLimit
+		}
+	}
+	if m.clock == nil && m.CPU.MSR&power64.MSREE != 0 && !m.DecPending && m.DEC >= 0 && uint64(m.DEC)+1 < budget {
+		budget = uint64(m.DEC) + 1
+	}
+	if remaining < budget {
+		budget = remaining
+	}
+	m.nativeBank = m.CPU.PC >> 48
+	cpu := &m.adapter
+	cpu.Import()
+	cpu.accounted, cpu.consumed, cpu.slow = m.CPU.Tick, 0, 0
+	cpu.deadline, cpu.expired = deadline, false
+	var err error
+	// Region side exits and hot link misses may stop before the window ends.
+	// Keep the stable state ABI resident across those dispatches. Foreign
+	// timer sessions poll internally; Go/IR returns refresh the oscillator,
+	// and every architectural slow operation synchronizes immediately. Never
+	// cross a control-state/bank/exception scheduling boundary.
+	for used := uint64(0); used < budget; {
+		err = m.JIT.RunQuanta(cpu, budget-used)
+		next := cpu.consumed + m.CPU.Tick - cpu.accounted
+		if err != nil || cpu.slow != 0 || cpu.expired || next == used || cpu.State[power64.StatePC]>>48 != m.nativeBank {
+			break
+		}
+		used = next
+		if deadline != 0 {
+			cpu.sync() // IR/leaf fallbacks also retain <=64 timer polling.
+			if m.clock.NativeDeadline(m.clockLast) >= deadline || m.DecPending && m.CPU.MSR&power64.MSREE != 0 {
+				break
+			}
+		}
+	}
+	cpu.sync()
+	if err == nil && cpu.consumed == 0 && cpu.expired {
+		return 1, m.Step()
+	}
+	return cpu.consumed, err
+}
+
+-- jit_context_test.go --
+package powermachine
+
+import (
+	"encoding/binary"
+	"renvo.dev/emulators/power64"
+	"testing"
+)
+
+func TestNativeCodeIdentitySeparatesEndianModes(t *testing.T) {
+	m, ref := tierMachine(t, "native", []uint32{0x38636060}), tierMachine(t, "interpreter", []uint32{0x38636060})
+	for _, le := range []bool{true, false, true} {
+		for _, q := range []*Machine{m, ref} {
+			if le {
+				q.CPU.MSR |= power64.MSRLE
+			} else {
+				q.CPU.MSR &^= power64.MSRLE
+			}
+		}
+		for i := 0; i < 64; i++ {
+			m.CPU.PC, ref.CPU.PC = 0, 0
+			count, e := m.RunQuantum(1)
+			if e != nil || count != 1 {
+				t.Fatal(count, e)
+			}
+			if e := ref.Step(); e != nil {
+				t.Fatal(e)
+			}
+			compareMachines(t, m, ref)
+		}
+	}
+	if m.JIT.Stats.Native == 0 || m.JIT.Stats.Invalidations == 0 {
+		t.Fatal("endian context was not exercised", m.JIT.Stats)
+	}
+}
+func TestNativeInstructionWritesCannotBypassCodeBarrier(t *testing.T) {
+	for _, mode := range []string{"native", "direct"} {
+		t.Run(mode, func(t *testing.T) { testNativeInstructionWritesCannotBypassCodeBarrier(t, mode) })
+	}
+}
+func testNativeInstructionWritesCannotBypassCodeBarrier(t *testing.T, mode string) {
+	// A guest store replaces the opcode it will execute on the following branch.
+	// Warm the writing block as ordinary data first, then redirect it to code.
+	words := []uint32{0x90a40000, 0x38630001, 0x4bfffff8}
+	m, ref := tierMachine(t, mode, words), tierMachine(t, "interpreter", words)
+	for _, q := range []*Machine{m, ref} {
+		q.CPU.GPR[4] = 0x8000
+		q.CPU.GPR[5] = 0x38630002
+	}
+	for n := uint64(0); n < 512; {
+		count, e := m.RunQuantum(512 - n)
+		if e != nil || count == 0 {
+			t.Fatal(count, e)
+		}
+		for i := uint64(0); i < count; i++ {
+			ref.Step()
+		}
+		n += count
+	}
+	for _, q := range []*Machine{m, ref} {
+		q.CPU.PC = 0
+		q.CPU.GPR[4] = 4
+	}
+	for n := uint64(0); n < 128; {
+		count, e := m.RunQuantum(128 - n)
+		if e != nil || count == 0 {
+			t.Fatal(count, e)
+		}
+		for i := uint64(0); i < count; i++ {
+			if e := ref.Step(); e != nil {
+				t.Fatal(e)
+			}
+		}
+		n += count
+		compareMachines(t, m, ref)
+	}
+	if binary.LittleEndian.Uint32(m.RAM[4:]) != 0x38630002 || m.JIT.Stats.Invalidations == 0 || m.JIT.Stats.MemoryExits == 0 {
+		t.Fatal("missing guest code write barrier", m.JIT.Stats)
+	}
+}
+
+-- jit_test.go --
+package powermachine
+
+import (
+	"bytes"
+	"encoding/binary"
+	"renvo.dev/emulators/power64"
+	"renvo.dev/internal/rfe/engine"
+	emu "renvo.dev/internal/rfe/runtime"
+	"renvo.dev/internal/rfe/systemclock"
+	"renvo.dev/internal/rfe/systemmemory"
+	"testing"
+	"time"
+)
+
+func tierMachine(t *testing.T, mode string, words []uint32) *Machine {
+	t.Helper()
+	makeMachine := New
+	if mode == "direct" {
+		makeMachine = NewNative
+		mode = "native"
+	}
+	m, e := makeMachine(32, nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	for i, w := range words {
+		binary.LittleEndian.PutUint32(m.RAM[i*4:], w)
+	}
+	if mode != "interpreter" {
+		config := engine.DefaultEngineConfig()
+		config.Mode = mode
+		config.IRThreshold = 1
+		config.NativeThreshold = 1
+		if e := m.configureJIT(config); e != nil {
+			t.Fatal(e)
+		}
+		t.Cleanup(func() { m.Close() })
+		if mode == "native" && !m.JIT.NativeAvailable() {
+			t.Skip("native host unavailable")
+		}
+	}
+	return m
+}
+func compareMachines(t *testing.T, a, b *Machine) {
+	t.Helper()
+	if a.CPU.GPR != b.CPU.GPR || a.CPU.PC != b.CPU.PC || a.CPU.LR != b.CPU.LR || a.CPU.CTR != b.CPU.CTR || a.CPU.CR != b.CPU.CR || a.CPU.XER != b.CPU.XER || a.CPU.MSR != b.CPU.MSR || a.CPU.Tick != b.CPU.Tick || a.Instructions != b.Instructions || a.TB != b.TB || a.DEC != b.DEC || a.DecPending != b.DecPending || a.CPU.SPR != b.CPU.SPR {
+		t.Fatalf("state mismatch after %d/%d attempts: pc=%x/%x tick=%d/%d r3=%x/%x tb=%d/%d dec=%d/%d", a.Instructions, b.Instructions, a.CPU.PC, b.CPU.PC, a.CPU.Tick, b.CPU.Tick, a.CPU.GPR[3], b.CPU.GPR[3], a.TB, b.TB, a.DEC, b.DEC)
+	}
+}
+func TestMachineAllTiersMemoryLinksRegionsAndBudgets(t *testing.T) {
+	words := []uint32{0x38630001, 0x90640000, 0x80a40000, 0x7ca62a78, 0x4bfffff0} // addi/store/load/xor/back branch
+	for _, mode := range []string{"ir", "native", "direct"} {
+		t.Run(mode, func(t *testing.T) {
+			m, ref := tierMachine(t, mode, words), tierMachine(t, "interpreter", words)
+			m.CPU.GPR[4], ref.CPU.GPR[4] = 0x8000, 0x8000
+			for _, limit := range []uint64{1, 2, 3, 4, 5, 7, 16, 31, 63, 64, 65, 129, 2048} {
+				for n := uint64(0); n < limit; {
+					count, e := m.RunQuantum(limit - n)
+					if e != nil || count == 0 || count > limit-n {
+						t.Fatalf("progress=%d error=%v", count, e)
+					}
+					for i := uint64(0); i < count; i++ {
+						if e := ref.Step(); e != nil {
+							t.Fatal(e)
+						}
+					}
+					n += count
+					compareMachines(t, m, ref)
+					if !bytes.Equal(m.RAM[0x8000:0x8008], ref.RAM[0x8000:0x8008]) {
+						t.Fatal("memory mismatch")
+					}
+				}
+			}
+			s := m.JIT.Stats
+			if mode == "native" && (s.Native == 0 || s.NativeMemory == 0 || s.Linked == 0 || s.Regions == 0 || s.LoopIterations == 0) {
+				t.Fatalf("missing full stack: %+v", s)
+			}
+			if mode == "ir" && s.IR == 0 {
+				t.Fatalf("IR tier not exercised: %+v", s)
+			}
+			if s.CompileFailures != 0 {
+				t.Fatalf("lowering failures: %+v", s)
+			}
+		})
+	}
+}
+func TestNativePreciseCrossPageFaultAndNoPrefixReplay(t *testing.T) {
+	for _, mode := range []string{"native", "direct"} {
+		t.Run(mode, func(t *testing.T) { testNativePreciseCrossPageFaultAndNoPrefixReplay(t, mode) })
+	}
+}
+func testNativePreciseCrossPageFaultAndNoPrefixReplay(t *testing.T, mode string) {
+	words := []uint32{0x38630001, 0x90640000, 0x80a60000, 0x4bfffff4}
+	m, ref := tierMachine(t, mode, words), tierMachine(t, "interpreter", words)
+	for _, q := range []*Machine{m, ref} {
+		q.CPU.GPR[4] = 0x8000
+		q.CPU.GPR[6] = 0x9000
+	}
+	for i := 0; i < 512; {
+		count, e := m.RunQuantum(512 - uint64(i))
+		if e != nil || count == 0 {
+			t.Fatal(count, e)
+		}
+		for j := uint64(0); j < count; j++ {
+			if e := ref.Step(); e != nil {
+				t.Fatal(e)
+			}
+		}
+		i += int(count)
+	}
+	if m.JIT.Stats.NativeMemory == 0 {
+		t.Fatal("did not warm memory code")
+	}
+	for _, q := range []*Machine{m, ref} {
+		q.CPU.PC = 0
+		q.CPU.GPR[6] = 0x9fff
+		q.CPU.Translate = func(c *power64.CPU, a uint64, x emu.Access) (uint64, error) {
+			if a >= 0xa000 && a < 0xb000 {
+				return 0, power64.TranslationMiss(a, x, false, false)
+			}
+			return a, nil
+		}
+	}
+	// Replace the native resolver as well; all mapping changes revoke proofs.
+	m.NativeRAM.Resolve = func(a uint64, x bool) (uint64, bool, error) {
+		p, e := m.CPU.Translate(&m.CPU, a, emu.Read)
+		return p, e == nil, e
+	}
+	m.InvalidateMappings()
+	for m.CPU.PC != 0x300 {
+		count, e := m.RunQuantum(3)
+		if e != nil || count == 0 {
+			t.Fatal(count, e)
+		}
+		for j := uint64(0); j < count; j++ {
+			if e := ref.Step(); e != nil {
+				t.Fatal(e)
+			}
+		}
+		compareMachines(t, m, ref)
+		if m.Instructions > 520 {
+			t.Fatal("fault not delivered")
+		}
+	}
+	if binary.LittleEndian.Uint32(m.RAM[0x8000:]) != uint32(m.CPU.GPR[3]) || !bytes.Equal(m.RAM[0x8000:0x8004], ref.RAM[0x8000:0x8004]) || m.CPU.SPR[26] != 8 || m.CPU.SPR[19] != 0xa000 {
+		t.Fatal("imprecise fault or replayed prefix")
+	}
+}
+func TestNativeMappingBitsAliasedCodeAndPermissionChanges(t *testing.T) {
+	for _, mode := range []string{"native", "direct"} {
+		t.Run(mode, func(t *testing.T) { testNativeMappingBitsAliasedCodeAndPermissionChanges(t, mode) })
+	}
+}
+func testNativeMappingBitsAliasedCodeAndPermissionChanges(t *testing.T, mode string) {
+	m := tierMachine(t, mode, []uint32{0x38630001, 0x90640000, 0x80a40000, 0x4bfffff4})
+	c := &m.CPU
+	c.MSR |= power64.MSRIR | power64.MSRDR
+	bank := uint64(0xc000000000000000)
+	c.PC = bank
+	c.GPR[4] = bank + 0x8000
+	c.SLB[0] = power64.SLB{ESID: bank | 0x08000000, VSID: 0x12345000}
+	codeIndex := ((uint64(0x12345000) >> 12) & uint64(len(m.HPT)/8-1)) * 8
+	dataIndex := (((uint64(0x12345000) >> 12) ^ 8) & uint64(len(m.HPT)/8-1)) * 8
+	m.HPT[codeIndex] = HPTE{0x12345001, 2}
+	m.HPT[dataIndex] = HPTE{0x12345001, 0x8002}
+	m.nativeBank = bank >> 48
+	p, w, e := m.nativeMapping(bank+0x8000, false)
+	if e == nil || w || p != 0 || m.HPT[dataIndex].R != 0x8002 {
+		t.Fatal("refill manufactured R/C")
+	}
+	for n := uint64(0); n < 1024; {
+		count, e := m.RunQuantum(1024 - n)
+		if e != nil || count == 0 {
+			t.Fatal(count, e)
+		}
+		n += count
+	}
+	if m.JIT.Stats.NativeMemory == 0 || m.JIT.Stats.Linked == 0 || m.HPT[dataIndex].R&0x180 != 0x180 {
+		t.Fatal("mapped memory not native", m.JIT.Stats)
+	}
+	// A store through a physical alias must invalidate code, not just its data VA.
+	m.CPU.PC = bank
+	if f := m.Store(0, 4, 0x38630002, 0); f != nil {
+		t.Fatal(f)
+	}
+	before := m.CPU.GPR[3]
+	count, e := m.RunQuantum(1)
+	if e != nil || count != 1 || m.CPU.GPR[3] != before+2 {
+		t.Fatal("stale aliased code", count, e)
+	}
+	// H_CLEAR_MOD must make later native writes exit before C is set.
+	c.GPR[3], c.GPR[4], c.GPR[5] = 0x10, 0, dataIndex
+	if e := m.hypercall(c); e != nil {
+		t.Fatal(e)
+	}
+	m.NativeRAM.NativeRefill(systemmemory.UnfoldPageCacheAddress(0x8000))
+	desc := m.NativeRAM.NativeContext().Pages[8]
+	if desc.Permissions&2 != 0 || m.HPT[dataIndex].R&0x80 != 0 {
+		t.Fatal("cleared change bit still admitted native writes")
+	}
+	// Revoke write permission on a warmed mapping and require precise DSI.
+	c.GPR[3], c.GPR[4], c.GPR[5], c.GPR[6] = 0x18, 3, dataIndex, 0
+	if e := m.hypercall(c); e != nil {
+		t.Fatal(e)
+	}
+	c.PC = bank + 4
+	c.GPR[4] = bank + 0x8000
+	_, e = m.RunQuantum(1)
+	if e != nil || c.PC != 0x300 || c.SPR[26] != bank+4 {
+		t.Fatal("stale protection", c.PC, e)
+	}
+}
+func TestNativeRealModePhysicalAliasesAndTranslationTransition(t *testing.T) {
+	for _, codeBank := range []uint64{0, 0xc000000000000000} {
+		m, ref := tierMachine(t, "native", []uint32{0x80640000, 0x38630001, 0x90640000, 0x4bfffff4}), tierMachine(t, "interpreter", []uint32{0x80640000, 0x38630001, 0x90640000, 0x4bfffff4})
+		for _, q := range []*Machine{m, ref} {
+			q.CPU.PC = codeBank
+			q.CPU.GPR[4] = 0xc000000000008000
+		}
+		for n := uint64(0); n < 512; {
+			count, e := m.RunQuantum(512 - n)
+			if e != nil || count == 0 {
+				t.Fatal(count, e)
+			}
+			for j := uint64(0); j < count; j++ {
+				if e := ref.Step(); e != nil {
+					t.Fatal(e)
+				}
+			}
+			n += count
+			compareMachines(t, m, ref)
+		}
+		if m.JIT.Stats.NativeMemory == 0 || !bytes.Equal(m.RAM[0x8000:0x8004], ref.RAM[0x8000:0x8004]) {
+			t.Fatal("real-mode aliases stayed slow or diverged", m.JIT.Stats)
+		}
+		// The same full EA is NOT a physical alias after DR is enabled.
+		for _, q := range []*Machine{m, ref} {
+			q.CPU.MSR |= power64.MSRDR
+			q.CPU.PC = codeBank
+		}
+		count, e := m.RunQuantum(1)
+		if e != nil || count != 1 {
+			t.Fatal(count, e)
+		}
+		if e := ref.Step(); e != nil {
+			t.Fatal(e)
+		}
+		compareMachines(t, m, ref)
+		if m.CPU.SPR[19] != 0xc000000000008000 || m.CPU.SPR[26] != codeBank {
+			t.Fatal("translation transition reused real-mode alias", m.CPU.SPR[19], m.CPU.SPR[26])
+		}
+	}
+}
+func TestNativeTimerBoundaryAndReservationSlowPath(t *testing.T) {
+	m, ref := tierMachine(t, "native", []uint32{0x38630001, 0x4bfffffc}), tierMachine(t, "interpreter", []uint32{0x38630001, 0x4bfffffc})
+	for _, q := range []*Machine{m, ref} {
+		binary.LittleEndian.PutUint32(q.RAM[0x900:], 0x60000000)
+	}
+	for n := uint64(0); n < 512; {
+		count, e := m.RunQuantum(512 - n)
+		if e != nil || count == 0 {
+			t.Fatal(count, e)
+		}
+		for j := uint64(0); j < count; j++ {
+			ref.Step()
+		}
+		n += count
+	}
+	m.CPU.MSR |= power64.MSREE
+	ref.CPU.MSR |= power64.MSREE
+	m.DEC = 7
+	ref.DEC = 7
+	for n := uint64(0); n < 9; {
+		count, e := m.RunQuantum(9 - n)
+		if e != nil || count == 0 {
+			t.Fatal(count, e)
+		}
+		for j := uint64(0); j < count; j++ {
+			ref.Step()
+		}
+		n += count
+		compareMachines(t, m, ref)
+	}
+	// Native stores cannot bypass an outstanding reservation.
+	m.CPU.Reserved = true
+	m.CPU.PC = 0
+	count, e := m.RunQuantum(64)
+	if e != nil || count != 1 {
+		t.Fatal("reservation entered native execution", count, e)
+	}
+	elapsed := time.Duration(0)
+	m.clock = systemclock.WithSource(1000000, func() time.Duration { return elapsed }, func(d time.Duration) { elapsed += d })
+	m.CPU.Reserved = false
+	m.CPU.PC = 0
+	m.CPU.MSR &^= power64.MSREE
+	m.clockSteps = 0
+	m.TB = 0
+	count, e = m.RunQuantum(64)
+	if e != nil || count == 0 || count > 64 || m.TB != 0 {
+		t.Fatal("native retirement fabricated time", count, e, m.TB)
+	}
+	elapsed = time.Millisecond
+	tb, _ := m.readSPR(268)
+	if tb != 1000 {
+		t.Fatal("native counter not oscillator", tb)
+	}
+}
+
+-- linux_test.go --
+package powermachine
+
+import (
+	"bytes"
+	"fmt"
+	"os"
+	"strings"
+	"testing"
+)
+
+// Explicit fixture paths only: normal tests neither download nor build Linux.
+func TestLinuxBoot(t *testing.T) {
+	kernel := os.Getenv("RENVO_POWER_LINUX_KERNEL")
+	init := os.Getenv("RENVO_POWER_LINUX_INIT")
+	if kernel == "" && init == "" {
+		t.Skip("set RENVO_POWER_LINUX_KERNEL and RENVO_POWER_LINUX_INIT")
+	}
+	if kernel == "" || init == "" {
+		t.Fatal("both explicit Linux fixture paths are required")
+	}
+	release, e := linuxFixtureRelease()
+	if e != nil {
+		t.Fatal(e)
+	}
+	k, e := os.ReadFile(kernel)
+	if e != nil {
+		t.Fatal(e)
+	}
+	pid1, e := os.ReadFile(init)
+	if e != nil {
+		t.Fatal(e)
+	}
+	var out bytes.Buffer
+	makeMachine := New
+
+	m, e := makeMachine(256, &out)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = m.Boot(k, Initramfs(pid1), "console=hvc0 earlycon=hvc_pseries rdinit=/init nokaslr maxcpus=1"); e != nil {
+		t.Fatal(e)
+	}
+	mode := os.Getenv("RENVO_POWER_ENGINE")
+	if mode != "" && mode != "interpreter" {
+		if e = m.EnableJIT(mode); e != nil {
+			t.Fatal(e)
+		}
+		if mode == "native" && !m.JIT.NativeAvailable() {
+			t.Fatal("native fixture proof requires an available native host")
+		}
+	}
+	defer m.Close()
+	for m.Instructions < 2000000000 && !m.Done {
+		count, err := m.RunQuantum(2000000000 - m.Instructions)
+		if err != nil || count == 0 {
+			t.Fatalf("instruction %d: count=%d error=%v\n%s", m.Instructions, count, err, out.String())
+		}
+	}
+	if mode == "native" {
+		s := m.JIT.Stats
+		if s.Native == 0 || s.NativeMemory == 0 || s.Linked == 0 || s.Regions == 0 || s.LoopIterations == 0 || s.CompileFailures != 0 {
+			t.Fatalf("incomplete native fixture proof: %+v", s)
+		}
+		if s.ArenaResets != 0 {
+			t.Logf("WARNING: native JIT arena reset %d time(s); elapsed timings include cache recycling", s.ArenaResets)
+		}
+		t.Logf("native fixture stats=%+v", s)
+	}
+	text := out.String()
+	if !m.Done || linuxBootReport(text, release) != nil {
+		t.Fatalf("Linux guest did not complete smoke (instructions=%d PC=%#x done=%t):\n%s", m.Instructions, m.CPU.PC, m.Done, text)
+	}
+	t.Logf("Linux guest completed after %d instructions", m.Instructions)
+}
+
+func linuxBootReport(serial, release string) error {
+	if err := validateLinuxRelease(release); err != nil {
+		return err
+	}
+	serial = strings.ReplaceAll(serial, "\r\n", "\n")
+	const init = "RENVO-POWER-LINUX: INIT\n"
+	const pass = "RENVO-POWER-LINUX: PASS\n"
+	if strings.Count(serial, init) != 1 || strings.Count(serial, pass) != 1 || strings.Contains(serial, "RENVO-POWER-LINUX: UNAME FAIL") {
+		return fmt.Errorf("incomplete or duplicate Linux smoke report")
+	}
+	uname := "Linux " + release + " ppc64le"
+	unameReports := 0
+	for _, line := range strings.Split(serial, "\n") {
+		if line == uname {
+			unameReports++
+		}
+	}
+	afterInit := strings.SplitN(serial, init, 2)[1]
+	parts := strings.SplitN(afterInit, pass, 2)
+	if len(parts) != 2 || parts[0] != uname+"\n" || unameReports != 1 {
+		return fmt.Errorf("Linux smoke uname does not match explicit kernel release %q", release)
+	}
+	return nil
+}
+
+func TestLinuxBootReportIdentity(t *testing.T) {
+	for _, release := range []string{"6.6.1", "6.6.142-0-virt"} {
+		uname := "Linux " + release + " ppc64le\n"
+		serial := "Linux version fixture\nRENVO-POWER-LINUX: INIT\n" + uname + "RENVO-POWER-LINUX: PASS\nreboot: Power down\n"
+		for _, valid := range []string{serial, strings.ReplaceAll(serial, "\n", "\r\n")} {
+			if err := linuxBootReport(valid, release); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, bad := range []string{strings.Replace(serial, uname, "Linux wrong ppc64le\n", 1), strings.Replace(serial, uname, "forged "+uname, 1), strings.Replace(serial, uname, uname+uname, 1), strings.Replace(serial, uname, "", 1), serial + uname, serial + "RENVO-POWER-LINUX: PASS\n"} {
+			if err := linuxBootReport(bad, release); err == nil {
+				t.Fatal("wrong, forged, duplicate or missing Linux smoke identity accepted")
+			}
+		}
+	}
+}
+
+-- machine.go --
+// Single-vCPU PAPR-style partition. Devices and RAM are owned by the machine.
+package powermachine
+
+import (
+	"encoding/binary"
+	"fmt"
+	"io"
+	"renvo.dev/emulators/power64"
+	"renvo.dev/internal/rfe/engine"
+	rt "renvo.dev/internal/rfe/runtime"
+	"renvo.dev/internal/rfe/systemclock"
+	"renvo.dev/internal/rfe/systemmemory"
+)
+
+type HPTE struct{ V, R uint64 }
+
+// The cache skips only the SLB/PTEG search. Permissions, physical addresses,
+// and reference/change bits always come from the live HPTE on every access.
+// Epochs invalidate architectural mutations; live guards also detect direct
+// replacement of the selected SLB/HPTE by machine users.
+type translation struct {
+	cpu                          *power64.CPU
+	page, slbVersion, hptVersion uint64
+	slb                          power64.SLB
+	slbIndex, pteIndex, hptLen   int
+	v                            uint64
+}
+type Machine struct {
+	CPU                                power64.CPU
+	RAM                                []byte
+	HPT                                []HPTE
+	Output                             io.Writer
+	Input                              []byte
+	Done                               bool
+	Instructions                       uint64
+	TB                                 uint64
+	DEC                                int64
+	DecPending                         bool
+	Trace                              io.Writer
+	clock                              *systemclock.Clock
+	clockLast                          uint64
+	JIT                                *engine.Engine
+	ProfileJIT                         bool // opt-in diagnostic perf symbols/JIT dump; disabled for scoring
+	NativeRAM                          *systemmemory.RAM
+	adapter                            nativeCPU
+	kernelThreshold                    uint64
+	nativeBank                         uint64
+	nativeDirect                       bool
+	nativeSLBVersion, nativeHPTVersion uint64
+	clockSteps                         uint8
+	clockEE                            bool
+	translations                       [256]translation
+	hptVersion                         uint64
+}
+
+func New(memory int, output io.Writer) (*Machine, error) {
+	return newMachine(memory, output, false)
+}
+
+// NewNative explicitly owns fault-protected RAM when supported. Close must
+// follow all executions; physical RAM slices must not be used after Close.
+// Unsupported hosts retain checked Go RAM with exactly the same guest policy.
+func NewNative(memory int, output io.Writer) (*Machine, error) {
+	return newMachine(memory, output, true)
+}
+func newMachine(memory int, output io.Writer, direct bool) (*Machine, error) {
+	if memory < 32 || memory > 4096 {
+		return nil, fmt.Errorf("RAM must be 32..4096 MiB")
+	}
+	if output == nil {
+		output = io.Discard
+	}
+	m := &Machine{HPT: make([]HPTE, 1<<18), Output: output, DEC: 0x7fffffff}
+	if direct {
+		ram, err := systemmemory.NewDirect(memory<<20, m.nativeActive, m.nativeMapping)
+		if err != nil {
+			return nil, err
+		}
+		m.NativeRAM, m.RAM, m.nativeDirect = ram, ram.Data, ram.DirectAvailable()
+	} else {
+		m.RAM = make([]byte, memory<<20)
+	}
+	m.CPU.Bus = m
+	m.CPU.Translate = m.translate
+	m.CPU.Hypercall = m.hypercall
+	m.CPU.SPRRead = m.readSPR
+	m.CPU.SPRWrite = m.writeSPR
+	m.CPU.MSR = power64.MSRSF | power64.MSRLE
+	m.CPU.InterruptLE = true
+	m.CPU.SPR[287] = 0x004d0200
+	return m, nil
+}
+func (m *Machine) Load(a uint64, w int, access rt.Access, tick uint64) (uint64, *rt.Fault) {
+	if w < 1 || w > 8 || a > uint64(len(m.RAM)) || uint64(w) > uint64(len(m.RAM))-a {
+		return 0, &rt.Fault{Kind: rt.Boundary, Access: access, Address: a, Width: w}
+	}
+	b := m.RAM[a : a+uint64(w)]
+	switch w {
+	case 1:
+		return uint64(b[0]), nil
+	case 2:
+		return uint64(binary.LittleEndian.Uint16(b)), nil
+	case 4:
+		return uint64(binary.LittleEndian.Uint32(b)), nil
+	case 8:
+		return binary.LittleEndian.Uint64(b), nil
+	}
+	var v uint64
+	for i, x := range b {
+		v |= uint64(x) << uint(8*i)
+	}
+	return v, nil
+}
+func (m *Machine) Store(a uint64, w int, v uint64, tick uint64) *rt.Fault {
+	if w < 1 || w > 8 || a > uint64(len(m.RAM)) || uint64(w) > uint64(len(m.RAM))-a {
+		return &rt.Fault{Kind: rt.Boundary, Access: rt.Write, Address: a, Width: w}
+	}
+	if m.NativeRAM != nil {
+		m.NativeRAM.BeforeWrite(a, w)
+	}
+	b := m.RAM[a : a+uint64(w)]
+	switch w {
+	case 1:
+		b[0] = byte(v)
+	case 2:
+		binary.LittleEndian.PutUint16(b, uint16(v))
+	case 4:
+		binary.LittleEndian.PutUint32(b, uint32(v))
+	case 8:
+		binary.LittleEndian.PutUint64(b, v)
+	default:
+		for i := range b {
+			b[i] = byte(v >> uint(8*i))
+		}
+	}
+	return nil
+}
+func (m *Machine) Peek(a uint64, w int) (uint64, bool) {
+	v, f := m.Load(a, w, rt.Execute, m.TB)
+	return v, f == nil
+}
+func (m *Machine) readSPR(s uint32) (uint64, bool) {
+	m.sampleClock()
+	switch s {
+	case 268:
+		return m.TB, true
+	case 269:
+		return m.TB >> 32, true
+	case 22:
+		return uint64(uint32(m.DEC)), true
+	case 1023:
+		return 0, true
+	}
+	return 0, false
+}
+func (m *Machine) writeSPR(s uint32, v uint64) bool {
+	m.sampleClock()
+	switch s {
+	case 22:
+		m.DEC = int64(int32(v))
+		m.DecPending = m.DEC < 0
+		return true
+	case 284:
+		m.TB = (m.TB & 0xffffffff00000000) | uint64(uint32(v))
+		return true
+	case 285:
+		m.TB = (m.TB & 0xffffffff) | (uint64(uint32(v)) << 32)
+		return true
+	}
+	return false
+}
+
+// Realtime interrupt polling is bounded by 64 attempted instructions. Counter
+// accesses, timer writes and cede still sample the oscillator synchronously.
+// A transition to EE=1 polls before the first interruptible instruction.
+func (m *Machine) Step() error { return m.step(nil) }
+func (m *Machine) step(op *uint32) error {
+	if m.clock != nil {
+		ee := m.CPU.MSR&power64.MSREE != 0
+		if m.clockSteps == 0 || ee && !m.clockEE {
+			m.sampleClock()
+		}
+		m.clockSteps--
+		m.clockEE = ee
+	}
+	if m.DecPending && m.CPU.MSR&power64.MSREE != 0 {
+		m.DecPending = false
+		m.CPU.Exception(0x900, m.CPU.PC, 0)
+		m.clockEE = false
+		op = nil // interrupt entry must fetch the vector, not a cached old opcode
+	}
+	if m.Trace != nil {
+		fmt.Fprintf(m.Trace, "%d pc=%016x msr=%016x lr=%016x ctr=%016x r1=%016x r3=%016x\n", m.Instructions, m.CPU.PC, m.CPU.MSR, m.CPU.LR, m.CPU.CTR, m.CPU.GPR[1], m.CPU.GPR[3])
+	}
+	var err error
+	if op == nil {
+		err = m.CPU.Step()
+	} else {
+		err = m.CPU.Execute(*op)
+	}
+	m.checkNativeMappings()
+	if err != nil {
+		return err
+	}
+	if m.CPU.MSR&power64.MSREE == 0 {
+		m.clockEE = false
+	}
+	m.Instructions++
+	if m.clock == nil {
+		m.TB++
+		m.advanceDEC(1)
+	}
+	return nil
+}
+
+// UseRealtimeClock selects a host-monotonic oscillator before guest execution.
+// The deterministic clock remains the compatibility default, never a score clock.
+func (m *Machine) UseRealtimeClock() error {
+	if m.Instructions != 0 || m.clock != nil {
+		return fmt.Errorf("select realtime clock before guest execution")
+	}
+	m.clock = systemclock.New(1000000)
+	m.clockLast = m.clock.Read()
+	return nil
+}
+func (m *Machine) advanceDEC(delta uint64) {
+	old := uint32(m.DEC)
+	m.DEC = int64(int32(old - uint32(delta)))
+	// Crossing zero asserts the interrupt even when a long stop wraps DEC again.
+	if delta > uint64(old) {
+		m.DecPending = true
+	}
+}
+func (m *Machine) sampleClock() {
+	if m.clock == nil {
+		return
+	}
+	m.clockSteps = 64
+	now := m.clock.Read()
+	delta := now - m.clockLast
+	m.clockLast = now
+	m.TB += delta
+	m.advanceDEC(delta)
+}
+func (m *Machine) translate(c *power64.CPU, a uint64, access rt.Access) (uint64, error) {
+	return m.lookup(c, a, access, true)
+}
+
+// lookup can inspect a mapping without performing a guest access. Native
+// refills must not manufacture reference/change bits while probing permissions.
+func (m *Machine) lookup(c *power64.CPU, a uint64, access rt.Access, update bool) (uint64, error) {
+	enabled := c.MSR&power64.MSRDR != 0
+	if access == rt.Execute {
+		enabled = c.MSR&power64.MSRIR != 0
+	}
+	if !enabled {
+		return a & 0x0fffffffffffffff, nil
+	}
+	page := a >> 12
+	cached := &m.translations[(page^(page>>16))&255]
+	var slb *power64.SLB
+	var p *HPTE
+	slbIndex, pteIndex := 0, 0
+	hit := cached.cpu == c && cached.page == page && cached.slbVersion == c.SLBVersion && cached.hptVersion == m.hptVersion && cached.hptLen == len(m.HPT)
+	if hit {
+		slb = &c.SLB[cached.slbIndex]
+		p = &m.HPT[cached.pteIndex]
+		hit = *slb == cached.slb && p.V == cached.v
+	}
+	if !hit {
+		slb, p = nil, nil
+		for i := range c.SLB {
+			s := &c.SLB[i]
+			if s.ESID&0x08000000 != 0 && s.ESID&0xfffffffff0000000 == a&0xfffffffff0000000 {
+				slb, slbIndex = s, i
+				break
+			}
+		}
+		if slb == nil {
+			return 0, power64.TranslationMiss(a, access, true, false)
+		}
+		if slb.VSID&0xc000000000000000 != 0 || slb.VSID&0x130 != 0 {
+			return 0, fmt.Errorf("unsupported SLB segment/page size: %#x", slb.VSID)
+		}
+		epn := a & 0xffff000
+		vsid := slb.VSID & 0x3ffffffffffff000
+		hash := (vsid >> 12) ^ (epn >> 12)
+		ptem := vsid | ((epn >> 16) & 0x3fffffffffffff80) | 1
+		for secondary := 0; secondary < 2 && p == nil; secondary++ {
+			group := (hash & uint64(len(m.HPT)/8-1)) * 8
+			for i := uint64(0); i < 8; i++ {
+				candidate := &m.HPT[group+i]
+				if (candidate.V^ptem)&0xffffffffffffff83 == 0 && candidate.V&4 == 0 {
+					p, pteIndex = candidate, int(group+i)
+					break
+				}
+			}
+			hash = ^hash
+			ptem |= 2
+		}
+		if p == nil {
+			return 0, power64.TranslationMiss(a, access, false, false)
+		}
+	}
+	key := slb.VSID&0x800 != 0
+	if c.MSR&power64.MSRPR != 0 {
+		key = slb.VSID&0x400 != 0
+	}
+	pp := (p.R & 3) | ((p.R >> 61) & 4)
+	readOK := pp == 1 || pp == 2 || pp == 3 || !key && (pp == 0 || pp == 6)
+	writeOK := pp == 2 || !key && (pp == 0 || pp == 1)
+	denied := !readOK || access == rt.Write && !writeOK || access == rt.Execute && (p.R&12 != 0 || slb.VSID&0x200 != 0)
+	if denied {
+		return 0, power64.TranslationMiss(a, access, false, true)
+	}
+	if update {
+		p.R |= 0x100
+		if access == rt.Write {
+			p.R |= 0x80
+		}
+	}
+	if !hit {
+		*cached = translation{cpu: c, page: page, slbVersion: c.SLBVersion, hptVersion: m.hptVersion, slb: *slb, slbIndex: slbIndex, pteIndex: pteIndex, hptLen: len(m.HPT), v: p.V}
+	}
+	return (p.R & 0x0ffffffffffff000) | (a & 4095), nil
+}
+func hresult(c *power64.CPU, code int64) { c.GPR[3] = uint64(code) }
+func (m *Machine) hypercall(c *power64.CPU) error {
+	op := c.GPR[3]
+	a, b, d, e := c.GPR[4], c.GPR[5], c.GPR[6], c.GPR[7]
+	hresult(c, 0)
+	// Invalidate lookup precedence as well as selected-entry changes.
+	switch op {
+	case 0x8, 0x4, 0x18, 0x14, 0x10, 0x124:
+		m.hptVersion++
+		m.InvalidateMappings()
+	}
+	switch op {
+	case 0x8: // H_ENTER
+		index := b
+		count := uint64(1)
+		if a&(1<<39) == 0 {
+			index &^= 7
+			count = 8
+		}
+		if index >= uint64(len(m.HPT)) || count > uint64(len(m.HPT))-index {
+			hresult(c, -4)
+			break
+		}
+		found := false
+		for i := uint64(0); i < count; i++ {
+			if m.HPT[index+i].V&1 == 0 {
+				m.HPT[index+i] = HPTE{d, e}
+				c.GPR[4] = index + i
+				found = true
+				break
+			}
+		}
+		if !found {
+			hresult(c, -6)
+		}
+	case 0x4: // H_REMOVE
+		if b >= uint64(len(m.HPT)) {
+			hresult(c, -4)
+			break
+		}
+		p := &m.HPT[b]
+		if p.V&1 == 0 || a&(1<<31) != 0 && p.V&^127 != d || a&(1<<30) != 0 && p.V&d != 0 {
+			hresult(c, -7)
+			break
+		}
+		c.GPR[4], c.GPR[5] = p.V, p.R
+		p.V = 0
+	case 0xc: // H_READ
+		count := uint64(1)
+		if a&(1<<37) != 0 {
+			count = 4
+			b &^= 3
+		}
+		if b >= uint64(len(m.HPT)) || count > uint64(len(m.HPT))-b {
+			hresult(c, -4)
+			break
+		}
+		for i := uint64(0); i < count; i++ {
+			c.GPR[4+i*2], c.GPR[5+i*2] = m.HPT[b+i].V, m.HPT[b+i].R
+		}
+	case 0x18: // H_PROTECT
+		if b >= uint64(len(m.HPT)) {
+			hresult(c, -4)
+			break
+		}
+		p := &m.HPT[b]
+		if p.V&1 == 0 || a&(1<<31) != 0 && p.V&^127 != d {
+			hresult(c, -7)
+			break
+		}
+		p.R = (p.R &^ uint64(0x8000000000000e07)) | (a & 7) | ((a & 0x100) << 55) | (a & 0xe00)
+	case 0x10, 0x14: // H_CLEAR_MOD / H_CLEAR_REF
+		if b >= uint64(len(m.HPT)) {
+			hresult(c, -4)
+			break
+		}
+		p := &m.HPT[b]
+		c.GPR[4] = p.R
+		if op == 0x10 {
+			p.R &^= 0x80
+		} else {
+			p.R &^= 0x100
+		}
+	case 0x54: // H_GET_TERM_CHAR
+		n := len(m.Input)
+		if n > 16 {
+			n = 16
+		}
+		var data [16]byte
+		copy(data[:], m.Input[:n])
+		m.Input = m.Input[n:]
+		c.GPR[4] = uint64(n)
+		c.GPR[5] = binary.BigEndian.Uint64(data[:8])
+		c.GPR[6] = binary.BigEndian.Uint64(data[8:])
+	case 0x58: // H_PUT_TERM_CHAR: byte packing is always big endian
+		if b > 16 {
+			hresult(c, -4)
+			break
+		}
+		var data [16]byte
+		binary.BigEndian.PutUint64(data[:8], d)
+		binary.BigEndian.PutUint64(data[8:], e)
+		_, err := m.Output.Write(data[:b])
+		return err
+	case 0x64: // H_EOI
+	case 0x68: // H_CPPR
+	case 0x6c: // H_IPI
+	case 0x70: // H_IPOLL
+		c.GPR[4] = 0xff000000
+		c.GPR[5] = 0
+	case 0x74: // H_XIRR
+		c.GPR[4] = 0xff000000
+	case 0x2fc: // H_XIRR_X
+		c.GPR[4] = 0xff000000
+		c.GPR[5] = m.TB
+	case 0xdc: // H_REGISTER_VPA
+		if b != 0 {
+			hresult(c, -4)
+		}
+	case 0xe0: // H_CEDE -- idle advancement is oscillator time, not retirement
+		m.sampleClock()
+		if m.DEC >= 0 {
+			advance := uint64(m.DEC) + 1
+			if m.clock != nil {
+				m.clock.WaitUntil(m.clockLast + advance)
+				m.sampleClock()
+			} else {
+				m.TB += advance
+				m.advanceDEC(advance)
+			}
+		}
+		c.MSR |= power64.MSREE
+	case 0x24: // H_SET_SPRG0
+		c.SPR[272] = a
+	case 0x2c, 0x134: // H_SET_DABR / H_SET_XDABR
+		c.SPR[1013] = a
+	case 0x31c: // H_SET_MODE
+		if b == 4 {
+			if a > 1 {
+				hresult(c, -4)
+			} else {
+				c.InterruptLE = a == 1
+			}
+		} else {
+			hresult(c, -2)
+		}
+	case 0xf000: // H_RTAS
+		return m.rtas(a)
+	case 0x124: // H_BULK_REMOVE (four request/response pairs)
+		for i := 0; i < 4; i++ {
+			word := c.GPR[4+i*2]
+			if word>>62 == 3 {
+				break
+			}
+			index := word & 0x00ffffffffffffff
+			response := uint64(1 << 62)
+			if index >= uint64(len(m.HPT)) || m.HPT[index].V&1 == 0 {
+				response |= 1 << 60
+			} else {
+				m.HPT[index].V = 0
+			}
+			c.GPR[4+i*2] = response | index
+		}
+	default:
+		hresult(c, -2)
+	}
+	return nil
+}
+func (m *Machine) rtas(address uint64) error {
+	if address > uint64(len(m.RAM)) || 12 > uint64(len(m.RAM))-address {
+		return fmt.Errorf("RTAS argument block outside RAM")
+	}
+	words := m.RAM[address:]
+	token, nargs, nret := binary.BigEndian.Uint32(words), binary.BigEndian.Uint32(words[4:]), binary.BigEndian.Uint32(words[8:])
+	if nargs > 16 || nret > 16 || uint64(12+4*(nargs+nret)) > uint64(len(words)) {
+		return fmt.Errorf("invalid RTAS argument counts")
+	}
+	arg := func(i uint32) uint32 {
+		if i >= nargs {
+			return 0
+		}
+		return binary.BigEndian.Uint32(words[12+i*4:])
+	}
+	ret := words[12+nargs*4 : 12+(nargs+nret)*4]
+	if m.NativeRAM != nil {
+		m.NativeRAM.BeforeWrite(address+12+uint64(nargs)*4, int(nret)*4)
+	}
+	for i := range ret {
+		ret[i] = 0
+	}
+	status := uint32(0)
+	switch token {
+	case 0x10, 0x11:
+		m.Done = true
+	case 0x12:
+		_, e := m.Output.Write([]byte{byte(arg(0))})
+		return e
+	case 0x13:
+		if nret >= 8 {
+			values := []uint32{0, 2026, 1, 1, 0, 0, 0, 0}
+			for i, v := range values {
+				binary.BigEndian.PutUint32(ret[i*4:], v)
+			}
+		}
+	case 0x20, 0x21, 0x22, 0x23: // empty XICS interrupt controller
+	default:
+		status = 0xffffffff
+	}
+	if nret > 0 {
+		binary.BigEndian.PutUint32(ret, status)
+	}
+	return nil
+}
+
+-- machine_test.go --
+package powermachine
+
+import (
+	"bytes"
+	"encoding/binary"
+	"renvo.dev/emulators/power64"
+	rt "renvo.dev/internal/rfe/runtime"
+	"testing"
+)
+
+func TestHashedTranslationPermissionsAndRC(t *testing.T) {
+	m, e := New(32, nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	c := &m.CPU
+	c.MSR |= power64.MSRIR | power64.MSRDR
+	c.SLB[0] = power64.SLB{ESID: 0xc000000008000000, VSID: 0x12345000}
+	a := uint64(0xc000000000008123)
+	hash := (uint64(0x12345000) >> 12) ^ 8
+	index := (hash & uint64(len(m.HPT)/8-1)) * 8
+	m.HPT[index] = HPTE{0x12345001, 0x5002}
+	p, e := m.translate(c, a, rt.Write)
+	if e != nil || p != 0x5123 {
+		t.Fatalf("translation=%x %v", p, e)
+	}
+	if m.HPT[index].R&0x180 != 0x180 {
+		t.Fatal("reference/change not updated")
+	}
+	m.HPT[index].R = 0x5003
+	if _, e = m.translate(c, a, rt.Write); e == nil {
+		t.Fatal("read-only mapping accepted store")
+	}
+	m.HPT[index].R = 0x5006
+	if _, e = m.translate(c, a, rt.Execute); e == nil {
+		t.Fatal("no-execute mapping accepted fetch")
+	}
+	m.HPT[index].V = 0
+	if _, e = m.translate(c, a, rt.Read); e == nil {
+		t.Fatal("absent PTE accepted")
+	}
+}
+func TestHypervisorTerminalPacking(t *testing.T) {
+	var out bytes.Buffer
+	m, _ := New(32, &out)
+	c := &m.CPU
+	c.GPR[3] = 0x58
+	c.GPR[4] = 0x30000000
+	c.GPR[5] = 9
+	c.GPR[6] = 0x4142434445464748
+	c.GPR[7] = 0x4900000000000000
+	if e := m.hypercall(c); e != nil {
+		t.Fatal(e)
+	}
+	if out.String() != "ABCDEFGHI" {
+		t.Fatal(out.String())
+	}
+	c.GPR[3] = 0x58
+	c.GPR[5] = 17
+	if e := m.hypercall(c); e != nil {
+		t.Fatal(e)
+	}
+	if c.GPR[3] != ^uint64(3) {
+		t.Fatal("invalid length accepted")
+	}
+}
+func TestDeviceTreeHasValidLayout(t *testing.T) {
+	m, _ := New(32, nil)
+	dt := m.dtb("console=hvc0", 0, 0, 0x100000)
+	if binary.BigEndian.Uint32(dt) != 0xd00dfeed || int(binary.BigEndian.Uint32(dt[4:])) != len(dt) {
+		t.Fatal("FDT header")
+	}
+	off := binary.BigEndian.Uint32(dt[8:])
+	end := binary.BigEndian.Uint32(dt[12:])
+	if off%8 != 0 || end > uint32(len(dt)) || binary.BigEndian.Uint32(dt[off:]) != 1 {
+		t.Fatal("FDT section layout")
+	}
+	if binary.BigEndian.Uint64(dt[40:]) != 0x100000 {
+		t.Fatal("FDT reservation")
+	}
+}
+func TestRAMBoundaryAndHypercallIndices(t *testing.T) {
+	m, _ := New(32, nil)
+	if _, f := m.Load(^uint64(0), 8, rt.Read, 0); f == nil {
+		t.Fatal("overflowing load")
+	}
+	if f := m.Store(uint64(len(m.RAM))-1, 8, 0, 0); f == nil {
+		t.Fatal("boundary store")
+	}
+	m.CPU.GPR[3] = 8
+	m.CPU.GPR[5] = uint64(len(m.HPT))
+	if e := m.hypercall(&m.CPU); e != nil {
+		t.Fatal(e)
+	}
+	if m.CPU.GPR[3] != ^uint64(3) {
+		t.Fatal("invalid H_ENTER index accepted")
+	}
+}
+
+-- ram_endian_test.go --
+package powermachine
+
+import (
+	"encoding/binary"
+	"renvo.dev/emulators/power64"
+	"testing"
+)
+
+func TestRAMFastWidthsGuestEndianAndUnaligned(t *testing.T) {
+	for _, le := range []bool{false, true} {
+		m, _ := New(32, nil)
+		m.CPU.MSR = power64.MSRSF
+		if le {
+			m.CPU.MSR |= power64.MSRLE
+		}
+		for _, form := range []struct {
+			width       int
+			load, store uint32
+		}{{1, 34, 38}, {2, 40, 44}, {4, 32, 36}, {8, 58, 62}} {
+			// DS-form addresses are multiples of four, so use RA for the unaligned base.
+			m.CPU.GPR[4] = 0x101
+			for i := 0; i < 8; i++ {
+				m.RAM[0x101+i] = byte(i + 1)
+			}
+			op := form.load<<26 | 3<<21 | 4<<16
+			if le {
+				binary.LittleEndian.PutUint32(m.RAM, op)
+			} else {
+				binary.BigEndian.PutUint32(m.RAM, op)
+			}
+			m.CPU.PC = 0
+			if e := m.CPU.Step(); e != nil {
+				t.Fatal(e)
+			}
+			var want uint64
+			for i := 0; i < form.width; i++ {
+				shift := i
+				if !le {
+					shift = form.width - 1 - i
+				}
+				want |= uint64(i+1) << uint(8*shift)
+			}
+			if m.CPU.GPR[3] != want {
+				t.Fatalf("LE=%t width=%d value=%x want=%x", le, form.width, m.CPU.GPR[3], want)
+			}
+			m.CPU.GPR[4] = 0x201
+			m.RAM[0x200], m.RAM[0x201+form.width] = 0xa5, 0xa5
+			op = form.store<<26 | 3<<21 | 4<<16
+			if le {
+				binary.LittleEndian.PutUint32(m.RAM, op)
+			} else {
+				binary.BigEndian.PutUint32(m.RAM, op)
+			}
+			m.CPU.PC = 0
+			if e := m.CPU.Step(); e != nil {
+				t.Fatal(e)
+			}
+			for i := 0; i < form.width; i++ {
+				if m.RAM[0x201+i] != byte(i+1) {
+					t.Fatal("store bytes", le, form.width, i)
+				}
+			}
+			if m.RAM[0x200] != 0xa5 || m.RAM[0x201+form.width] != 0xa5 {
+				t.Fatal("store crossed width")
+			}
+		}
+	}
+}

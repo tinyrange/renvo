@@ -1,0 +1,109 @@
+{
+  "baseline_commit": "de1f6c4d1141fb474dc2bdd5ea80cadb4c8a1f1b",
+  "clock": "real CLOCK_MONOTONIC including compilation; <=64 instructions between native polls",
+  "default_memory": "checked Go RAM; explicit fault-protected RAM remains optional, not selected after validation-seed regression",
+  "goal_iterations_per_second_each_seed": 4000,
+  "goal_reached": false,
+  "guest": "Linux 6.6.1 ppc64le single-vCPU PAPR-style partition, 256 MiB",
+  "host": "one-CPU Linux/amd64 sandbox, Go 1.26.0",
+  "independent_qemu": {
+    "cpu": "POWER8 TCG",
+    "crc_values": [
+      "e9f5",
+      "e714",
+      "1fd7",
+      "8e3a",
+      "382f",
+      "18f2",
+      "e3c1",
+      "0747",
+      "8d84",
+      "d304"
+    ],
+    "identical_elf_and_kernel": true,
+    "scope": "CRC-only; both ~3.1s seed runs fail upstream minimum duration, not valid performance results",
+    "score_valid": false,
+    "version": "10.2.1"
+  },
+  "input": {
+    "compiler": "GCC 13.4.0 POWER8 scalar O2 static integer-only port; upstream algorithms unchanged",
+    "contexts": 1,
+    "coremark_commit": "d5fad6bd094899101a4e5fd53af7298160ced6ab",
+    "dataset_bytes": 2000,
+    "elf_sha256": "87571069bcb3986e02382b604dfcbd279d734f7f68e1e61eb4af0d3ae9dcb675",
+    "iterations_each_seed": 20000,
+    "kernel_sha256": "8551365be8e829a7bfee722c61d2745cd9c608eef861e89d2a7e9e82d3e4e836"
+  },
+  "measurement": "fresh unprofiled strict TestLinuxCoreMarkPerformance",
+  "native_stats": {
+    "ArenaResets": 0,
+    "Blocks": 20852,
+    "BudgetStops": 195292,
+    "CodeReads": 123159,
+    "CompileFailures": 0,
+    "ContextChecks": 19424285,
+    "Evictions": 16644,
+    "IR": 8475722,
+    "Interpreted": 17527913,
+    "Invalidations": 112,
+    "LinkContextChanges": 64399,
+    "LinkMissStops": 2449408,
+    "Linked": 13337559263,
+    "LoopIterations": 942475216,
+    "MemoryExits": 892616,
+    "Native": 13337566714,
+    "NativeBytes": 5353856,
+    "NativeMemory": 2799194749,
+    "NativeSessions": 3582795,
+    "OtherStops": 6963,
+    "ProfileErrors": 0,
+    "ProfileMissAbsent": 0,
+    "ProfileMissCold": 0,
+    "ProfileMissInterpreted": 0,
+    "ProfileMissNative": 0,
+    "Promotions": 1370,
+    "RegionExits": 280055198,
+    "Regions": 1081,
+    "VersionChecks": 3056252
+  },
+  "profiling_only": {
+    "current_dispatcher_percent": 19.54,
+    "current_vdso_clock_percent": 17.79,
+    "lost_samples": 0
+  },
+  "seeds": {
+    "PERF": {
+      "final_crc": "382f",
+      "guest_seconds": 14.840206,
+      "host_seconds": 14.841815123,
+      "iterations_per_second": 1347.6901870499642,
+      "ticks": 14840206
+    },
+    "VALID": {
+      "final_crc": "d304",
+      "guest_seconds": 13.461432,
+      "host_seconds": 13.462889796,
+      "iterations_per_second": 1485.726035684762,
+      "ticks": 13461432
+    }
+  },
+  "status": "validated partial improvement, not 4000 it/sec; no merge or parent pin updates",
+  "unchanged_limits": {
+    "default_attempts": 2000000000,
+    "executable_arena_bytes": 8388608,
+    "poll_instructions": 64,
+    "selected_performance_attempts": 16000000000,
+    "session_instructions": 65536,
+    "shared_native_frame_bytes": 17408
+  },
+  "validation": {
+    "affected_runtime_engine_memory_clock_packages": "PASS",
+    "focused_linux_backend_source_and_unit_frontend": "PASS",
+    "full": "not run locally; normal CI/merge queue",
+    "legacy_2000_interpreter_original_2B_ceiling": "PASS",
+    "native_20000_strict_performance_gate": "PASS",
+    "native_linux_boot": "PASS",
+    "power_differential_and_direct_alias_fault_tests": "PASS",
+    "renvo_preflight": "PASS"
+  }
+}

@@ -11,10 +11,11 @@ type spaceIdentity struct {
 
 // SwitchAddressSpace is only for a checked MMU-root selection, not TLBI,
 // permission-control changes or page-table writes. All data descriptors are
-// revoked; executable links remain subject to the exact root identity guard.
+// revoked unless the owner explicitly retains checked root data; executable
+// links always remain subject to the exact root identity guard.
 func (m *RAM) SwitchAddressSpace() {
 	m.profileMapping[2]++
-	m.ForgetData()
+	m.forgetSelection()
 }
 
 func (m *RAM) contextIdentity() *engine.CodeIdentity {

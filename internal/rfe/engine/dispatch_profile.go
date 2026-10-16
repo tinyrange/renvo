@@ -7,6 +7,7 @@ import "encoding/json"
 type DispatchProfileSample struct {
 	MonotonicNS uint64
 	Stats       Stats
+	Successors  [5]uint64              // lookup, empty, wrong full PC, stale session, hit
 	Mapping     [4]uint64              // table writes, executable-page writes, root selections, all invalidations
 	Misses      []DispatchMissSample   `json:",omitempty"`
 	Memory      []DispatchMemorySample `json:",omitempty"`
@@ -32,6 +33,9 @@ func (e *Engine) recordDispatchProfile(c CPU) {
 		return
 	}
 	sample := DispatchProfileSample{MonotonicNS: now, Stats: e.Stats}
+	if e.native != nil {
+		sample.Successors = e.native.DispatchCounters()
+	}
 	if memory, ok := c.MemoryBus().(interface{ ProfileMappingCounters() [4]uint64 }); ok {
 		sample.Mapping = memory.ProfileMappingCounters()
 	}

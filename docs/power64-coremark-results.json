@@ -1,0 +1,49 @@
+{
+  "architecture": "ppc64le",
+  "benchmark_elf_sha256": "00092f275cdbd9f888f0260910b9f29025510fbbacf8eb6ea78b94b805f3c49a",
+  "clock": "host-monotonic realtime, 1000000 Hz timebase/decrementer",
+  "compiler": "GCC 13.4.0",
+  "compiler_flags": "-O2 -static -nostdlib -fno-builtin -fno-stack-protector -fno-pie -no-pie -mcpu=power8 -mno-altivec -mno-vsx -msoft-float -fno-tree-vectorize -I. -Iport -DITERATIONS=1000 -DPERFORMANCE_RUN=1 -Wl,-e,_start -Wl,--build-id=none",
+  "contexts": 1,
+  "coremark_revision": "d5fad6bd094899101a4e5fd53af7298160ced6ab",
+  "engine": "power64 RFE interpreter",
+  "fresh_automated_gate": "TestLinuxCoreMark passed after final source formatting; requires both host and guest >=10s, within 5%/100ms, CRCs and orderly guest poweroff",
+  "guest": "Linux 6.6.1",
+  "host_context": "one-CPU Linux/amd64 development sandbox; not physical POWER hardware",
+  "independent_control": {
+    "all_crcs_match": true,
+    "emulator": "QEMU 10.2.1 POWER8 pseries",
+    "identical_elf": true,
+    "performance_score": false,
+    "reason": "1000-iteration control is below ten seconds; used only for independent CRC verification"
+  },
+  "initramfs_sha256": "8b867fbc30f5e49ebc8ac658651c3dcb1dba5b885dfe53b9be208198d89c47d2",
+  "iterations_per_seed": 1000,
+  "kernel_sha256": "c5514d686b0e80f8bfb001366ff70db3cd690e87ee287a8f4929c83925103ba0",
+  "linux_source_sha256": "da1ed7d47c97ed72c9354091628740aa3c40a3c9cd7382871f3cedbd60588234",
+  "performance": {
+    "crcs": [
+      "e9f5",
+      "e714",
+      "1fd7",
+      "8e3a",
+      "d340"
+    ],
+    "guest_elapsed_microseconds": 25780918,
+    "iterations_per_guest_second": 38.788378288158704
+  },
+  "rfe_exit_code": 0,
+  "scope": "Hosted interpreter plus Linux guest overhead. No CoreMark/MHz, hardware comparison, EEMBC certification, native lowering, or BE Linux claim.",
+  "total_dataset_bytes": 2000,
+  "validation": {
+    "crcs": [
+      "18f2",
+      "e3c1",
+      "0747",
+      "8d84",
+      "26c2"
+    ],
+    "guest_elapsed_microseconds": 25806727,
+    "iterations_per_guest_second": 38.74958649347513
+  }
+}

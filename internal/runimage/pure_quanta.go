@@ -53,6 +53,7 @@ func (c *LinkedCall) CallQuanta(state []uint64, m *LinkedContextABI, pcSlot, lim
 		// Preserve them across separate calls; only budget/leaf progress reset.
 		m.Remaining, m.Retired = budget, 0
 		m.AdmissionEpoch = 0
+		m.TimerFunction, m.TimerDeadline, m.TimerExpired = 0, 0, 0
 		callContext(c.entry, uintptr(unsafe.Pointer(&state[0])), uintptr(unsafe.Pointer(m)), c.top)
 		// This is a real Go boundary after one, and only one, native quantum.
 		completed++
@@ -68,7 +69,7 @@ func (c *LinkedCall) CallQuanta(state []uint64, m *LinkedContextABI, pcSlot, lim
 		}
 		pc := state[pcSlot]
 		var link *LinkedDescriptorABI
-		base := ((pc >> 2) ^ (pc >> 12)) & 255
+		base := ((pc >> 2) ^ (pc >> 10)) & 255
 		for way := uint64(0); way < 4; way++ {
 			candidate := &m.Blocks[base+way*256]
 			if candidate.PC == pc && candidate.Instructions != 0 {

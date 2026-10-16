@@ -55,15 +55,24 @@ const (
 	RenvoRFEDirectGuest      = RenvoRFEAdmissionEpoch + RenvoRFEWordBytes
 	RenvoRFEDirectHost       = RenvoRFEDirectGuest + RenvoRFEWordBytes
 	RenvoRFEDirectSize       = RenvoRFEDirectHost + RenvoRFEWordBytes
-	RenvoRFEContextSize      = RenvoRFEDirectSize + RenvoRFEWordBytes
+	RenvoRFETimerFunction    = RenvoRFEDirectSize + RenvoRFEWordBytes
+	RenvoRFETimerDeadline    = RenvoRFETimerFunction + RenvoRFEWordBytes
+	RenvoRFETimerExpired     = RenvoRFETimerDeadline + RenvoRFEWordBytes
+	RenvoRFEHashPages        = RenvoRFETimerExpired + RenvoRFEWordBytes
+	RenvoRFEContextSize      = RenvoRFEHashPages + RenvoRFEWordBytes
 )
+
+// RenvoRFETimerPollInstructions bounds host-clock sampling inside an admitted,
+// non-aliasing timed native session. This is separate from exact retirement,
+// the 64-instruction compatibility boundary, and the total session budget.
+const RenvoRFETimerPollInstructions = 4096
 
 // Record-shape queries are shared by validation and every liveness/folding
 // pass. Select has a plain third SSA operand; carry/pair stores pack it above
 // the low byte of immediate flags. LoopContinue has only a left operand.
 func renvoRFEHasLeft(op int) bool { return op >= 2 && op != 15 }
 func renvoRFEHasRight(op int) bool {
-	return op >= 3 && op != 8 && op != 9 && op != 13 && op != 36 && op != 15 && op != 16 && op != 26 && op != 35 && op != 45
+	return op >= 3 && op != 8 && op != 9 && op != 13 && op != 36 && op != 15 && op != 16 && op != 26 && op != 35 && op != 45 && op != 46
 }
 func renvoRFEThirdOperand(op int, immediate int) int {
 	if op == 21 {
@@ -80,7 +89,7 @@ func renvoRFEValidateRecords(records []int, stateWords int, memory bool) bool {
 		return false
 	}
 	count := len(records) / 4
-	maxOperation := 45
+	maxOperation := 46
 	for i := 0; i < count; i++ {
 		op, left, right, immediate := records[i*4], records[i*4+1], records[i*4+2], records[i*4+3]
 		if op == 45 && (!memory || right < 1 || right > 1024 || immediate < 0 || immediate > 256) {
@@ -92,7 +101,7 @@ func renvoRFEValidateRecords(records []int, stateWords int, memory bool) bool {
 		if op == 43 && immediate != 8 && immediate != 16 && immediate != 32 && immediate != 64 {
 			return false
 		}
-		if op < 0 || op == 35 || op > maxOperation || !memory && (op >= 13 && op <= 16 || op == 26 || op == 36 || op == 37) || (op == 1 || op == 2) && (immediate < 0 || immediate >= stateWords) {
+		if op < 0 || op == 35 || op > maxOperation || !memory && (op >= 13 && op <= 16 || op == 26 || op == 36 || op == 37 || op == 46) || (op == 1 || op == 2) && (immediate < 0 || immediate >= stateWords) {
 			return false
 		}
 		if renvoRFEHasLeft(op) && (left < 0 || left >= i || renvoMemoryEffectOnly(records[left*4])) {
@@ -216,6 +225,7 @@ func renvoEmitStateBlockABI(records []int, stateWords int, context *renvoCompile
 			renvoRFERegImm(a, remainingReg, 0)
 			renvoRFERegStore(a, remainingReg, frameReg, -56, 8)
 			renvoRFERegStore(a, remainingReg, frameReg, -112, 8)
+			renvoRFERegStore(a, remainingReg, frameReg, -120, 8)
 		}
 		renvoAsmCallLabel(a, body)
 		if hasElapsed {
@@ -585,8 +595,12 @@ type renvoAsm struct {
 	rfeFrameBias          int
 	rfeNarrowSources      []int
 	rfeDirectMemory       bool
+	rfeSessionPageIndex   bool // owned checked body uses the per-dispatcher-call mode mask
+	rfePairedReadMiss     int  // +1 label of peeled read; zero retains the ordinary cold miss
 	rfeCodeVersions       bool
 	rfeLoopRegisterResult bool // private AMD64 results: RAX retirement, RDX status, ZF iff zero status
+	rfeBudgetIterations   bool // completed iterations are reconstructed from the exact countdown at exits
+	rfeBiasedLoopBudget   bool // hot countdown subtract admits its next body with CF/ZF directly
 	rfeFaultLabels        []int
 	rfeDirectSlows        []renvoRFEDirectSlow
 }
@@ -27357,7 +27371,7 @@ func RenvoEmitMemoryBlock(records []int, stateWords int, arm64 bool) ([]byte, bo
 }
 
 func renvoMemoryEffectOnly(op int) bool {
-	return op == 37 || op == 2 || op == 14 || op == 15 || op == 16 || op == 26 || op == 35
+	return op == 37 || op == 2 || op == 14 || op == 15 || op == 16 || op == 26 || op == 35 || op == 46
 }
 
 // RenvoEmitLinkedDispatcher loops only over previously published leaf entries.
@@ -27368,7 +27382,7 @@ func RenvoEmitLinkedDispatcher(pcSlot int, stateWords int, arm64 bool) ([]byte, 
 	if stateWords < 1 || stateWords > 256 || pcSlot < 0 || pcSlot >= stateWords {
 		return nil, false
 	}
-	return renvoEmitRegisterDispatcher(pcSlot, stateWords, arm64)
+	return renvoEmitRegisterDispatcher(pcSlot, stateWords, arm64, false)
 }
 
 // RFE leaf ABI: primary/state and secondary/context are caller scratch. Leaf
@@ -27729,7 +27743,16 @@ func renvoRFEProbeLink(a *renvoAsm, pc int, pointer int, scratch int, miss int) 
 	renvoAsmMarkLabel(a, found)
 }
 
-func renvoEmitRegisterDispatcher(pcSlot int, stateWords int, arm64 bool) ([]byte, bool) {
+// RenvoEmitProfileLinkedDispatcher adds diagnostic counters only. Ordinary
+// dispatchers contain no counter accesses. Both retain identical admission.
+func RenvoEmitProfileLinkedDispatcher(pcSlot int, stateWords int, arm64 bool) ([]byte, bool) {
+	if stateWords < 1 || stateWords > 256 || pcSlot < 0 || pcSlot >= stateWords {
+		return nil, false
+	}
+	return renvoEmitRegisterDispatcher(pcSlot, stateWords, arm64, true)
+}
+
+func renvoEmitRegisterDispatcher(pcSlot int, stateWords int, arm64 bool, profile bool) ([]byte, bool) {
 	arch := renvoArchAmd64
 	state, context, descriptor, count, remaining := 12, 13, 14, 15, 3
 	primary, secondary, temporary, target := 0, 2, 1, 8
@@ -27755,6 +27778,20 @@ func renvoEmitRegisterDispatcher(pcSlot int, stateWords int, arm64 bool) ([]byte
 	renvoRFERegMove(a, context, secondary)
 	renvoRFERegStore(a, context, frameReg, -(renvoRFESharedPrefix + 16), 8)
 	renvoRFEInitSharedFacts(a)
+	if !arm64 {
+		// Capture before any guest operation. Owned address spaces serialize
+		// mapping/execution and exclude guest writes to host metadata. The
+		// mask is rebuilt on every call, including compatibility sessions.
+		renvoRFERegLoad(a, temporary, context, RenvoRFEHashPages, 8)
+		plainIndex, indexReady := renvoAsmNewLabel(a), renvoAsmNewLabel(a)
+		renvoRFEJumpZero(a, temporary, plainIndex)
+		renvoRFERegImm(a, temporary, -1)
+		renvoAsmJmpLabel(a, indexReady)
+		renvoAsmMarkLabel(a, plainIndex)
+		renvoRFERegImm(a, temporary, 0)
+		renvoAsmMarkLabel(a, indexReady)
+		renvoRFERegStore(a, temporary, frameReg, -160, 8)
+	}
 	renvoRFERegLoad(a, remaining, context, RenvoRFERemaining, 8)
 	// Save the initial budget and total privately. Each validated leaf reduces
 	// remaining; reconstruct aggregate retirement only at the cold exit.
@@ -27779,11 +27816,28 @@ func renvoEmitRegisterDispatcher(pcSlot int, stateWords int, arm64 bool) ([]byte
 	genericSelect, callTarget := renvoAsmNewLabel(a), renvoAsmNewLabel(a)
 	preparedLoop, preparedMemory, preparedPure := renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a)
 	memoryResult := renvoAsmNewLabel(a)
-	validatePrepared := renvoAsmNewLabel(a)
+	preparedFit, preparedTail := renvoAsmNewLabel(a), renvoAsmNewLabel(a)
+	validatePrepared, admittedPrepared, cachedPrepared := renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a)
 	cachedLoop, cachedNext, cachedMiss, compatibleLoop := renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a)
+	preparedFamily := renvoAsmNewLabel(a)
+	// A resident timed session polls before entry and within the configured
+	// guest-instruction clock window. The global budget and current slice are private;
+	// guest RAM can never manufacture a timer callback or enable this path.
+	timerPoll, finalExit := renvoAsmNewLabel(a), renvoAsmNewLabel(a)
+	if !arm64 {
+		renvoRFERegLoad(a, temporary, frameReg, -120, 8)
+		renvoRFEJumpZero(a, temporary, loop)
+		renvoRFERegLoad(a, temporary, context, RenvoRFETimerFunction, 8)
+		renvoRFEJumpZero(a, temporary, loop)
+		renvoRFERegStore(a, remaining, frameReg, -136, 8)
+		renvoAsmJmpLabel(a, timerPoll)
+	}
 	renvoAsmMarkLabel(a, loop)
 	renvoRFEJumpZero(a, remaining, exit)
 	renvoAsmMarkLabel(a, selectTarget)
+	if !arm64 {
+		renvoRFERegMove(a, state, 11)
+	}
 	// Opaque arena-owned proofs bind full PC, public entry and exact count.
 	// Their offset/family/state shape was checked under the same arena lock.
 	// This borrowed view is refreshed and cleared on every host call.
@@ -27793,7 +27847,7 @@ func renvoEmitRegisterDispatcher(pcSlot int, stateWords int, arm64 bool) ([]byte
 	renvoRFERegMove(a, descriptor, primary)
 	renvoRFERegShift(a, descriptor, 9, 2)
 	renvoRFERegMove(a, temporary, primary)
-	renvoRFERegShift(a, temporary, 9, 12)
+	renvoRFERegShift(a, temporary, 9, 10)
 	renvoRFERegBinary(a, 7, descriptor, temporary)
 	renvoRFERegImmediate(a, 5, descriptor, 255)
 	renvoRFERegShift(a, descriptor, 8, 6)
@@ -27806,26 +27860,13 @@ func renvoEmitRegisterDispatcher(pcSlot int, stateWords int, arm64 bool) ([]byte
 	renvoRFEJumpZero(a, temporary, validatePrepared)
 	renvoRFECompareMemory(a, temporary, target, 32, secondary)
 	renvoRFEJump(a, 1, validatePrepared)
-	renvoRFERegBinary(a, 100, count, remaining)
-	renvoRFEJump(a, 4, exit)
-	// Loop returns account their own memory and never need the descriptor.
-	renvoRFERegLoad(a, primary, target, 24, 4)
-	renvoRFERegLoad(a, temporary, target, 28, 4)
-	renvoRFEJumpMasked(a, temporary, secondary, 8192, true, preparedLoop)
-	// Ordinary leaves still need their exact public memory-prefix table.
-	renvoRFERegLoad(a, descriptor, target, 40, 8)
-	renvoRFEDescriptorBase(a, secondary, context)
-	renvoRFERegBinary(a, 3, descriptor, secondary)
-	renvoRFEJumpMasked(a, temporary, secondary, 32768, false, preparedPure)
-	renvoAsmJmpLabel(a, preparedMemory)
+	renvoAsmJmpLabel(a, preparedFit)
 	renvoAsmMarkLabel(a, validatePrepared)
 	renvoRFEDescriptorBase(a, temporary, context)
 	renvoRFERegBinary(a, 3, descriptor, temporary)
 	renvoRFEProbeLink(a, primary, descriptor, temporary, genericSelect)
 	renvoRFECompareMemory(a, count, descriptor, 16, temporary)
 	renvoRFEJump(a, 1, genericSelect)
-	renvoRFERegBinary(a, 100, count, remaining)
-	renvoRFEJump(a, 4, exit)
 	renvoRFERegLoad(a, secondary, target, 8, 8)
 	renvoRFECompareMemory(a, secondary, descriptor, 8, temporary)
 	renvoRFEJump(a, 1, genericSelect)
@@ -27835,20 +27876,92 @@ func renvoEmitRegisterDispatcher(pcSlot int, stateWords int, arm64 bool) ([]byte
 	renvoRFERegStore(a, temporary, target, 40, 8)
 	renvoRFERegLoad(a, temporary, frameReg, -120, 8)
 	renvoRFERegStore(a, temporary, target, 32, 8)
+	renvoAsmMarkLabel(a, preparedFit)
+	renvoRFERegBinary(a, 100, count, remaining)
+	renvoRFEJump(a, 4, preparedTail)
+	renvoAsmMarkLabel(a, admittedPrepared)
+	if !arm64 {
+		// Predictions bind only table-relative offsets. Every use below still
+		// checks full PC, fresh nonzero epoch, and the remaining slice budget.
+		trained := renvoAsmNewLabel(a)
+		renvoRFERegLoad(a, temporary, frameReg, -120, 8)
+		renvoRFEJumpZero(a, temporary, trained)
+		renvoRFERegLoad(a, temporary, frameReg, -128, 8)
+		renvoRFEJumpZero(a, temporary, trained)
+		renvoRFERegLoad(a, secondary, context, RenvoRFEPreparedTargets, 8)
+		renvoRFERegMove(a, primary, target)
+		renvoRFERegBinary(a, 4, primary, secondary)
+		renvoRFERegImmediate(a, 3, primary, 1)
+		renvoRFERegLoad(a, secondary, temporary, 48, 4)
+		renvoRFERegBinary(a, 100, primary, secondary)
+		renvoRFEJump(a, 0, trained)
+		renvoRFERegShift(a, secondary, 8, 32)
+		renvoRFERegBinary(a, 6, primary, secondary)
+		renvoRFERegStore(a, primary, temporary, 48, 8)
+		renvoAsmMarkLabel(a, trained)
+	}
+	renvoAsmMarkLabel(a, cachedPrepared)
+	if !arm64 {
+		renvoRFERegStore(a, target, frameReg, -128, 8)
+	}
 	renvoRFERegLoad(a, primary, target, 24, 4)
 	renvoRFERegLoad(a, temporary, target, 28, 4)
-	// The arena-owned family selects a return continuation before the call.
-	// No family spill/reload is needed on this fully checked prepared path.
+	renvoAsmMarkLabel(a, preparedFamily)
+	if !arm64 {
+		renvoRFERegMove(a, state, 11)
+	}
 	renvoRFEJumpMasked(a, temporary, secondary, 8192, true, preparedLoop)
+	// Ordinary leaves retain their precise public memory-prefix descriptor.
+	renvoRFERegLoad(a, descriptor, target, 40, 8)
+	renvoRFEDescriptorBase(a, secondary, context)
+	renvoRFERegBinary(a, 3, descriptor, secondary)
 	renvoRFEJumpMasked(a, temporary, secondary, 32768, false, preparedPure)
 	renvoAsmJmpLabel(a, preparedMemory)
+	// A poll-window remainder is not a global scheduling tail. Never select
+	// the original leaf while a complete region still fits the global budget.
+	renvoAsmMarkLabel(a, preparedTail)
+	if !arm64 {
+		renvoRFERegMove(a, state, 11)
+	}
+	if arm64 {
+		renvoAsmJmpLabel(a, exit)
+	} else {
+		renvoRFERegLoad(a, temporary, frameReg, -120, 8)
+		renvoRFEJumpZero(a, temporary, exit)
+		renvoRFERegLoad(a, temporary, context, RenvoRFETimerFunction, 8)
+		renvoRFEJumpZero(a, temporary, exit)
+		renvoRFERegLoad(a, temporary, frameReg, -136, 8)
+		renvoRFERegLoad(a, secondary, frameReg, -144, 8)
+		renvoRFERegBinary(a, 4, temporary, secondary)
+		renvoRFERegBinary(a, 3, temporary, remaining)
+		renvoRFERegBinary(a, 100, count, temporary)
+		renvoRFEJump(a, 5, exit)
+		renvoRFERegLoad(a, count, target, 62, 2)
+		renvoRFEJumpZero(a, count, exit)
+		renvoRFERegBinary(a, 100, count, remaining)
+		renvoRFEJump(a, 4, exit)
+		renvoRFERegLoad(a, descriptor, target, 40, 8)
+		renvoRFEDescriptorBase(a, secondary, context)
+		renvoRFERegBinary(a, 3, descriptor, secondary)
+		renvoRFERegLoad(a, primary, target, 56, 4)
+		renvoRFERegLoad(a, temporary, target, 60, 2)
+		renvoRFERegImm(a, secondary, 0)
+		renvoRFERegStore(a, secondary, frameReg, -128, 8)
+		renvoRFEJumpMasked(a, temporary, secondary, 8192, true, preparedLoop)
+		renvoRFEJumpMasked(a, temporary, secondary, 32768, false, preparedPure)
+		renvoAsmJmpLabel(a, preparedMemory)
+	}
 	renvoAsmMarkLabel(a, genericSelect)
+	if !arm64 {
+		renvoRFERegImm(a, temporary, 0)
+		renvoRFERegStore(a, temporary, frameReg, -128, 8)
+	}
 	renvoRFERegLoad(a, primary, state, pcSlot*8, 8)
 	renvoRFEJumpMasked(a, primary, temporary, 3, true, exit)
 	renvoRFERegMove(a, descriptor, primary)
 	renvoRFERegShift(a, descriptor, 9, 2)
 	renvoRFERegMove(a, temporary, primary)
-	renvoRFERegShift(a, temporary, 9, 12)
+	renvoRFERegShift(a, temporary, 9, 10)
 	renvoRFERegBinary(a, 7, descriptor, temporary)
 	renvoRFERegImmediate(a, 5, descriptor, 255)
 	renvoRFERegShift(a, descriptor, 8, 6)
@@ -27990,7 +28103,7 @@ func renvoEmitRegisterDispatcher(pcSlot int, stateWords int, arm64 bool) ([]byte
 	} else {
 		// SUB defines this budget's ZF immediately before the branch. Skip
 		// the redundant head TEST only on its proven nonzero successor.
-		renvoRFEJump(a, 1, selectTarget)
+		renvoRFEJump(a, 1, cachedNext)
 		renvoAsmJmpLabel(a, exit)
 	}
 	renvoAsmMarkLabel(a, slow)
@@ -28014,28 +28127,24 @@ func renvoEmitRegisterDispatcher(pcSlot int, stateWords int, arm64 bool) ([]byte
 		renvoRFEJumpMasked(a, temporary, secondary, 512, false, compatibleLoop)
 		renvoRFERegLoad(a, temporary, frameReg, -120, 8)
 		renvoRFEJumpZero(a, temporary, compatibleLoop)
-		// Publish only a table-relative prediction, never executable authority.
-		// The next dispatch still checks full PC, fresh epoch and exact budget.
-		trained := renvoAsmNewLabel(a)
-		renvoRFERegLoad(a, temporary, frameReg, -128, 8)
-		renvoRFEJumpZero(a, temporary, trained)
-		renvoRFERegLoad(a, secondary, context, RenvoRFEPreparedTargets, 8)
-		renvoRFERegMove(a, descriptor, target)
-		renvoRFERegBinary(a, 4, descriptor, secondary)
-		renvoRFERegImmediate(a, 3, descriptor, 1)
-		renvoRFERegStore(a, descriptor, temporary, 48, 8)
-		renvoRFERegImm(a, secondary, 0)
-		renvoRFERegStore(a, secondary, frameReg, -128, 8)
-		renvoAsmMarkLabel(a, trained)
 		renvoAsmMarkLabel(a, cachedLoop)
-		renvoRFERegMove(a, descriptor, target)
 		renvoRFERegLoad(a, target, context, RenvoRFECodeView, 8)
 		renvoRFEJumpZero(a, target, exit)
 		renvoRFERegBinary(a, 3, target, primary)
 		// This private body consumes the already-resident R11 state base and
 		// shared-frame context. Unlike legacy entries, it preserves R11 and
 		// does not require redundant RAX/RDX argument reconstruction.
+		renvoRFERegStore(a, count, frameReg, -152, 8)
+		renvoRFERegStore(a, remaining, frameReg, -(renvoRFESharedPrefix + 56), 8)
 		renvoAsmEmit3(a, 0x41, 0xff, 0xd0)
+		// Private register-result bodies may clobber the five SysV preserved
+		// registers. R11 and the partitioned frame remain owned by this call.
+		// MOV-only reconstruction preserves the returned status condition.
+		// The hinted chain reads PC through the preserved R11 base. Rebuild
+		// the compatibility state register only at cold interoperability edges.
+		renvoRFERegLoad(a, context, frameReg, -(renvoRFESharedPrefix + 16), 8)
+		renvoRFERegLoad(a, count, frameReg, -152, 8)
+		renvoRFERegLoad(a, remaining, frameReg, -(renvoRFESharedPrefix + 56), 8)
 		cachedSlow, cachedSideExit, cachedPublish := renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a)
 		// The bounded loop reports dynamic progress and accounts its own exact
 		// memory prefix in generated code. Its registered body count is immutable.
@@ -28067,7 +28176,10 @@ func renvoEmitRegisterDispatcher(pcSlot int, stateWords int, arm64 bool) ([]byte
 		renvoAsmMarkLabel(a, cachedSideExit)
 		renvoRFEJumpZero(a, primary, bad)
 		renvoRFERegBinary(a, 100, primary, remaining)
-		renvoRFEJump(a, 3, bad)
+		// A precise positive prefix may consume an expired slice exactly.
+		// Faults still require room for their unretired instruction; this
+		// successful side exit does not. Never allow progress above budget.
+		renvoRFEJump(a, 4, bad)
 		renvoRFERegImm(a, secondary, 0)
 		renvoRFERegStore(a, secondary, context, 8, 8)
 		renvoRFERegBinary(a, 4, remaining, primary)
@@ -28078,30 +28190,78 @@ func renvoEmitRegisterDispatcher(pcSlot int, stateWords int, arm64 bool) ([]byte
 			renvoAsmJmpLabel(a, cachedPublish)
 		}
 		renvoAsmMarkLabel(a, cachedNext)
-		renvoRFERegLoad(a, target, descriptor, 48, 8)
-		renvoRFEJumpZero(a, target, cachedMiss)
+		// Keep the checked invocation epoch in the otherwise dead descriptor
+		// register across both hint probes. Neither probe changes this value.
+		renvoRFERegLoad(a, descriptor, frameReg, -120, 8)
+		renvoRFEJumpZero(a, descriptor, selectTarget)
+		renvoRFERegLoad(a, 6, frameReg, -128, 8)
+		renvoRFEJumpZero(a, 6, selectTarget)
+		if profile {
+			renvoRFERegLoad(a, secondary, context, RenvoRFEPreparedTargets, 8)
+			renvoRFECounterImmediate(a, secondary, 65536, 1, true)
+		}
+		secondSuccessor, matchedSuccessor := renvoAsmNewLabel(a), renvoAsmNewLabel(a)
+		// Keep the predecessor proof in caller-scratch RSI across both probes.
+		// A 32-bit load zero-extends each offset directly; neither a temporary
+		// packed-word copy nor a second frame/predecessor reload is necessary.
+		renvoRFERegLoad(a, target, 6, 48, 4)
+		noHint, wrongPC, wrongEpoch := cachedMiss, cachedMiss, cachedMiss
+		if profile {
+			noHint, wrongPC, wrongEpoch = renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a)
+		}
+		renvoRFEJumpZero(a, target, secondSuccessor)
 		renvoRFERegImmediate(a, 4, target, 1)
 		renvoRFERegLoad(a, temporary, context, RenvoRFEPreparedTargets, 8)
 		renvoRFERegBinary(a, 3, target, temporary)
-		renvoRFERegLoad(a, secondary, state, pcSlot*8, 8)
+		renvoRFERegLoad(a, secondary, 11, pcSlot*8, 8)
 		renvoRFECompareMemory(a, secondary, target, 0, temporary)
-		renvoRFEJump(a, 1, cachedMiss)
-		renvoRFERegLoad(a, temporary, frameReg, -120, 8)
-		renvoRFECompareMemory(a, temporary, target, 32, secondary)
-		renvoRFEJump(a, 1, cachedMiss)
+		renvoRFEJump(a, 0, matchedSuccessor)
+		renvoAsmMarkLabel(a, secondSuccessor)
+		renvoRFERegLoad(a, target, 6, 52, 4)
+		renvoRFEJumpZero(a, target, noHint)
+		renvoRFERegImmediate(a, 4, target, 1)
+		renvoRFERegLoad(a, temporary, context, RenvoRFEPreparedTargets, 8)
+		renvoRFERegBinary(a, 3, target, temporary)
+		renvoRFERegLoad(a, secondary, 11, pcSlot*8, 8)
+		renvoRFECompareMemory(a, secondary, target, 0, temporary)
+		renvoRFEJump(a, 1, wrongPC)
+		renvoAsmMarkLabel(a, matchedSuccessor)
+		renvoRFECompareMemory(a, descriptor, target, 32, secondary)
+		renvoRFEJump(a, 1, wrongEpoch)
 		renvoRFERegLoad(a, count, target, 16, 8)
+		cachedTail := renvoAsmNewLabel(a)
 		renvoRFERegBinary(a, 100, count, remaining)
-		renvoRFEJump(a, 4, cachedPublish)
-		renvoRFERegLoad(a, temporary, target, 28, 4)
-		renvoRFEJumpMasked(a, temporary, secondary, 512, false, cachedMiss)
+		renvoRFEJump(a, 4, cachedTail)
+		if profile {
+			renvoRFERegLoad(a, secondary, context, RenvoRFEPreparedTargets, 8)
+			renvoRFECounterImmediate(a, secondary, 65536+32, 1, true)
+		}
+		// This edge has already proved a fresh nonzero admission epoch, full
+		// PC, and fitting immutable body count. The register-result tag implies
+		// the loop family; no compatibility-session check is needed again.
+		renvoRFERegStore(a, target, frameReg, -128, 8)
 		renvoRFERegLoad(a, primary, target, 24, 4)
-		renvoAsmJmpLabel(a, cachedLoop)
+		renvoRFERegLoad(a, temporary, target, 28, 4)
+		renvoRFEJumpMasked(a, temporary, secondary, 512, true, cachedLoop)
+		renvoAsmJmpLabel(a, preparedFamily)
+		if profile {
+			for i, label := range []int{noHint, wrongPC, wrongEpoch} {
+				renvoAsmMarkLabel(a, label)
+				renvoRFERegLoad(a, secondary, context, RenvoRFEPreparedTargets, 8)
+				renvoRFECounterImmediate(a, secondary, 65536+8+i*8, 1, true)
+				renvoAsmJmpLabel(a, cachedMiss)
+			}
+		}
+		renvoAsmMarkLabel(a, cachedTail)
+		// Publish the preceding register-result body's progress before any
+		// cold tail check clobbers RAX, including denied/faulting originals.
+		renvoRFERegStore(a, primary, context, 0, 8)
+		renvoAsmJmpLabel(a, preparedTail)
 		renvoAsmMarkLabel(a, cachedPublish)
 		renvoRFERegStore(a, primary, context, 0, 8)
 		renvoAsmJmpLabel(a, exit)
 		renvoAsmMarkLabel(a, cachedMiss)
 		renvoRFERegStore(a, primary, context, 0, 8)
-		renvoRFERegStore(a, descriptor, frameReg, -128, 8)
 		renvoAsmJmpLabel(a, selectTarget)
 		renvoAsmMarkLabel(a, compatibleLoop)
 		legacyLoop := renvoAsmNewLabel(a)
@@ -28136,7 +28296,7 @@ func renvoEmitRegisterDispatcher(pcSlot int, stateWords int, arm64 bool) ([]byte
 	if arm64 {
 		renvoAsmJmpLabel(a, loop)
 	} else {
-		renvoRFEJump(a, 1, selectTarget)
+		renvoRFEJump(a, 1, cachedNext)
 		renvoAsmJmpLabel(a, exit)
 	}
 	renvoAsmMarkLabel(a, loopSlow)
@@ -28151,20 +28311,62 @@ func renvoEmitRegisterDispatcher(pcSlot int, stateWords int, arm64 bool) ([]byte
 	renvoAsmMarkLabel(a, loopSideExit)
 	renvoRFEJumpZero(a, primary, bad)
 	renvoRFERegBinary(a, 100, primary, remaining)
-	renvoRFEJump(a, 3, bad)
+	renvoRFEJump(a, 4, bad)
 	renvoRFERegImm(a, secondary, 0)
 	renvoRFERegStore(a, secondary, context, 8, 8)
 	renvoRFERegBinary(a, 4, remaining, primary)
 	if arm64 {
 		renvoAsmJmpLabel(a, loop)
 	} else {
-		renvoRFEJump(a, 1, selectTarget)
+		renvoRFEJump(a, 1, cachedNext)
 		renvoAsmJmpLabel(a, exit)
 	}
 	renvoAsmMarkLabel(a, bad)
 	renvoRFERegImm(a, primary, 3)
 	renvoRFERegStore(a, primary, context, 8, 8)
 	renvoAsmMarkLabel(a, exit)
+	if !arm64 {
+		renvoRFERegMove(a, state, 11)
+	}
+	if !arm64 {
+		renvoRFERegLoad(a, temporary, frameReg, -120, 8)
+		renvoRFEJumpZero(a, temporary, finalExit)
+		renvoRFERegLoad(a, temporary, context, RenvoRFETimerFunction, 8)
+		renvoRFEJumpZero(a, temporary, finalExit)
+		// Account this slice exactly once, even on a short link miss or fault.
+		renvoRFERegLoad(a, primary, frameReg, -144, 8)
+		renvoRFERegBinary(a, 4, primary, remaining)
+		renvoRFERegLoad(a, remaining, frameReg, -136, 8)
+		renvoRFERegBinary(a, 4, remaining, primary)
+		renvoRFERegStore(a, remaining, frameReg, -136, 8)
+		renvoRFEJumpZero(a, remaining, finalExit)
+		renvoRFEJumpZero(a, primary, finalExit)
+		renvoRFERegLoad(a, temporary, context, 8, 8)
+		renvoRFERegBinary(a, 101, temporary, temporary)
+		renvoRFEJump(a, 1, finalExit)
+		renvoAsmMarkLabel(a, timerPoll)
+		// SysV callee-saved state/context/count/remaining survive the C poll.
+		// RSP is 16-byte aligned on the arena-owned foreign stack. The fixed
+		// callback neither enters Go nor changes page/descriptor authority.
+		renvoRFERegLoad(a, 7, context, RenvoRFETimerDeadline, 8)
+		renvoRFERegLoad(a, target, context, RenvoRFETimerFunction, 8)
+		renvoAsmEmit3(a, 0x41, 0xff, 0xd0)
+		renvoRFERegMove(a, 11, state)
+		timerContinue := renvoAsmNewLabel(a)
+		renvoRFEJumpZero(a, primary, timerContinue)
+		renvoRFERegImm(a, primary, 1)
+		renvoRFERegStore(a, primary, context, RenvoRFETimerExpired, 8)
+		renvoAsmJmpLabel(a, finalExit)
+		renvoAsmMarkLabel(a, timerContinue)
+		renvoRFERegImmediate(a, 100, remaining, RenvoRFETimerPollInstructions)
+		smallSlice := renvoAsmNewLabel(a)
+		renvoRFEJump(a, 5, smallSlice)
+		renvoRFERegImm(a, remaining, RenvoRFETimerPollInstructions)
+		renvoAsmMarkLabel(a, smallSlice)
+		renvoRFERegStore(a, remaining, frameReg, -144, 8)
+		renvoAsmJmpLabel(a, loop)
+	}
+	renvoAsmMarkLabel(a, finalExit)
 	renvoRFERegLoad(a, primary, frameReg, -56, 8)
 	renvoRFERegBinary(a, 4, primary, remaining)
 	renvoRFERegLoad(a, secondary, frameReg, -112, 8)
@@ -28311,6 +28513,36 @@ func renvoRFESaveValue(a *renvoAsm, locations []int, value int) {
 // Inputs are address in primary, optional store data in secondary. Use only
 // reserved scratch registers, so live SSA values survive every permission,
 // ownership and generation check. All guards precede data/version mutation.
+// Fold only the cold descriptor index. Raw address/page tags and byte offsets
+// remain unchanged, and every caller keeps its full canonical/range/tag guards.
+// scratch is reserved and may be clobbered; page and live SSA registers survive.
+func renvoRFEPageIndex(a *renvoAsm, index, page, scratch int) {
+	frame := 5
+	if renvoRFEArm(a) {
+		frame = 29
+	}
+	renvoRFERegMove(a, index, page)
+	if a.rfeSessionPageIndex {
+		renvoRFERegMove(a, scratch, page)
+		renvoRFERegShift(a, scratch, 9, 6)
+		// Only owned non-aliasing bodies use the immutable invocation mask.
+		// Ordinary contexts may alias guest RAM and retain the dynamic check.
+		renvoRFERex(a, scratch, frame, true)
+		renvoAsmEmit8(a, 0x23)
+		renvoRFEMemoryOperand(a, scratch, frame, -160)
+		renvoRFERegBinary(a, 7, index, scratch)
+	} else {
+		renvoRFERegLoad(a, scratch, frame, -16, 8)
+		renvoRFERegLoad(a, scratch, scratch, RenvoRFEHashPages, 8)
+		plain := renvoAsmNewLabel(a)
+		renvoRFEJumpZero(a, scratch, plain)
+		renvoRFERegMove(a, scratch, page)
+		renvoRFERegShift(a, scratch, 9, 6)
+		renvoRFERegBinary(a, 7, index, scratch)
+		renvoAsmMarkLabel(a, plain)
+	}
+	renvoRFERegImmediate(a, 5, index, 63)
+}
 func renvoEmitRegisterMemoryAccess(a *renvoAsm, op int, size int, failure int, records []int, locations []int) {
 	if a.rfeFrameBias != 0 {
 		renvoEmitLoopMemoryAccess(a, op, size, failure, 0, 0, records, locations)
@@ -28335,8 +28567,7 @@ func renvoEmitRegisterMemoryAccess(a *renvoAsm, op int, size int, failure int, r
 	renvoRFEJump(a, 4, failure)
 	renvoRFERegMove(a, host, primary)
 	renvoRFERegShift(a, host, 9, 12) // full page number
-	renvoRFERegMove(a, descriptor, host)
-	renvoRFERegImmediate(a, 5, descriptor, 63)
+	renvoRFEPageIndex(a, descriptor, host, primary)
 	renvoRFERegShift(a, descriptor, 8, 5)
 	renvoRFERegLoad(a, primary, frame, -16, 8)
 	renvoRFERegBinary(a, 3, descriptor, primary)
@@ -28400,6 +28631,9 @@ func renvoRFEImmediateOperation(a *renvoAsm, op int, value int) bool {
 			renvoAsmEmit2(a, 0x89, 0xc0)
 		}
 		return true
+	}
+	if op == 5 && !renvoRFEArm(a) && value >= 0 && uint64(value) <= 4294967295 {
+		return renvoRFEDirectImmediate(a, op, 0, value)
 	}
 	if value < -2147483648 || value > 2147483647 {
 		return false
@@ -28549,37 +28783,113 @@ func renvoRFEFlagsCondition(a *renvoAsm, condition int, sub bool) {
 		}
 		return
 	}
-	opcode := 0x94
-	switch condition >> 1 {
-	case 0:
-		opcode = 0x94 // Z
-	case 1:
-		opcode = 0x92
-		if sub {
-			opcode = 0x93
-		} // carry/no-borrow
-	case 2:
-		opcode = 0x98 // N
-	case 3:
-		opcode = 0x90 // V
-	case 4:
-		opcode = 0x97 // no-borrow and nonzero
-	case 5:
-		opcode = 0x9d // N == V
-	case 6:
-		opcode = 0x9f // N == V and nonzero
-	}
-	if condition&1 != 0 {
-		opcode ^= 1
+	opcode := renvoRFESubConditionOpcode(condition)
+	if !sub && condition>>1 == 1 {
+		opcode ^= 1 // Addition carry is x86 CF, not subtraction no-borrow.
 	}
 	renvoAsmEmit3(a, 0x0f, opcode, 0xc0)
 	renvoAsmEmit3(a, 0x0f, 0xb6, 0xc0)
 }
 
+// A subtraction predicate needs flags, not the arithmetic result. Comparing
+// allocated operands directly preserves both even when the destination aliases
+// either dying input, and avoids fixed-register copies on hot and cold paths.
+func renvoRFEEmitSubCondition(a *renvoAsm, records []int, locations []int, i int) bool {
+	encoding := records[i*4+3]
+	width, condition := encoding&127, encoding>>8
+	if renvoRFEArm(a) || records[i*4] != 24 || encoding&128 == 0 || condition >= 14 || (width != 32 && width != 64) {
+		return false
+	}
+	renvoRFEEmitSubCompare(a, records, locations, i)
+	renvoRFEEmitSubPredicate(a, locations, i, condition)
+	return true
+}
+
+func renvoRFEEmitSubCompare(a *renvoAsm, records []int, locations []int, i int) {
+	width := records[i*4+3] & 127
+	left, right := records[i*4+1], records[i*4+2]
+	lhs := 0
+	if records[left*4] != 0 && locations[left] > 0 {
+		lhs = locations[left] - 1
+	} else {
+		renvoRFELoadValue(a, records, locations, left, lhs)
+	}
+	value := records[right*4+3]
+	if records[right*4] == 0 && (width == 32 || value >= -2147483648 && value <= 2147483647) {
+		renvoRFERex(a, 0, lhs, width == 64)
+		if value >= -128 && value <= 127 {
+			renvoAsmEmit3(a, 0x83, 0xf8|(lhs&7), value)
+		} else {
+			renvoAsmEmit2(a, 0x81, 0xf8|(lhs&7))
+			renvoAsmEmit32(a, value)
+		}
+	} else {
+		rhs := 1
+		if records[right*4] != 0 && locations[right] > 0 {
+			rhs = locations[right] - 1
+		} else {
+			renvoRFELoadValue(a, records, locations, right, rhs)
+		}
+		renvoRFERex(a, rhs, lhs, width == 64)
+		renvoAsmEmit2(a, 0x39, 0xc0|((rhs&7)<<3)|(lhs&7))
+	}
+}
+
+// SETcc, MOVZX and spill stores preserve all comparison flags. Consecutive
+// predicates may therefore read one CMP without storing flags or extending
+// any SSA lifetime. This helper never reads either compared operand.
+func renvoRFEEmitSubPredicate(a *renvoAsm, locations []int, i int, condition int) {
+	dst := 0
+	if locations[i] > 0 {
+		dst = locations[i] - 1
+	}
+	opcode := renvoRFESubConditionOpcode(condition)
+	if dst >= 4 && dst < 8 {
+		renvoAsmEmit8(a, 0x40)
+	} else {
+		renvoRFERex(a, 0, dst, false)
+	}
+	renvoAsmEmit3(a, 0x0f, opcode, 0xc0|(dst&7))
+	if dst >= 4 && dst < 8 {
+		renvoAsmEmit8(a, 0x40)
+	} else {
+		renvoRFERex(a, dst, dst, false)
+	}
+	renvoAsmEmit3(a, 0x0f, 0xb6, 0xc0|((dst&7)<<3)|(dst&7))
+	if locations[i] < 0 {
+		renvoRFERegStore(a, dst, 5, locations[i], 8)
+	}
+}
+
+func renvoRFESubConditionOpcode(condition int) int {
+	opcode := 0x94
+	switch condition >> 1 {
+	case 1:
+		opcode = 0x93
+	case 2:
+		opcode = 0x98
+	case 3:
+		opcode = 0x90
+	case 4:
+		opcode = 0x97
+	case 5:
+		opcode = 0x9d
+	case 6:
+		opcode = 0x9f
+	}
+	if condition&1 != 0 {
+		opcode ^= 1
+	}
+	return opcode
+}
+
 // Emit ordinary SSA operations directly in their allocated destination. The
 // allocator may reuse a dying right operand, so preserve it before destructive
-// two-address operations. Fixed-register flags/complex operations keep fallback.
+// two-address operations. Fixed-register complex operations keep fallback.
 func renvoRFEEmitDirectRecord(a *renvoAsm, records []int, locations []int, i int) bool {
+	if renvoRFEEmitSubCondition(a, records, locations, i) {
+		return true
+	}
 	if len(a.rfeNarrowSources) != 0 && a.rfeNarrowSources[i] >= 0 {
 		renvoRFEEmitNarrowRecord(a, records, locations, i, a.rfeNarrowSources[i])
 		return true
@@ -28787,6 +29097,21 @@ func renvoRFEDirectImmediate(a *renvoAsm, op int, dst int, value int) bool {
 		}
 		return true
 	}
+	if op == 5 && !renvoRFEArm(a) && value >= 0 && uint64(value) <= 4294967295 {
+		// A uint32 mask clears every high bit of a 64-bit AND. Its 32-bit
+		// instruction zero-extends exactly that result, including masks whose
+		// high bit cannot be represented by a sign-extended imm32 in AND r64.
+		// This is a value operation; architectural flags are emitted separately.
+		renvoRFERex(a, 0, dst, false)
+		signed := int(int32(value))
+		if signed >= -128 && signed <= 127 {
+			renvoAsmEmit3(a, 0x83, 0xe0|(dst&7), signed)
+		} else {
+			renvoAsmEmit2(a, 0x81, 0xe0|(dst&7))
+			renvoAsmEmit32(a, value)
+		}
+		return true
+	}
 	if value < -2147483648 || value > 2147483647 {
 		return false
 	}
@@ -28883,17 +29208,29 @@ func RenvoEmitCodeVersionedLoopBlock(records []int, stateWords int, instructions
 // callers and contexts without an active direct window. All internal branches
 // remain relative; returned fault offsets describe only precise scalar MOVs.
 func RenvoEmitDirectLoopBlock(records []int, stateWords int, instructions int) ([]byte, []int, bool) {
-	checked, _, ok := renvoEmitLoopBlockMode(records, stateWords, instructions, false, true, false, false, false)
+	return renvoEmitDirectLoopBlockMode(records, stateWords, instructions, false)
+}
+
+// Owned direct bodies share the register-result ABI; protected scalar faults
+// recover into the same precise exit maps and preserve that ABI on return.
+func RenvoEmitOwnedDirectLoopBlock(records []int, stateWords int, instructions int) ([]byte, []int, bool) {
+	return renvoEmitDirectLoopBlockMode(records, stateWords, instructions, true)
+}
+func renvoEmitDirectLoopBlockMode(records []int, stateWords int, instructions int, owned bool) ([]byte, []int, bool) {
+	checked, _, ok := renvoEmitLoopBlockMode(records, stateWords, instructions, false, true, false, owned, owned)
 	if !ok {
 		return nil, nil, false
 	}
-	fast, faults, ok := renvoEmitLoopBlockMode(records, stateWords, instructions, false, true, true, false, false)
+	fast, faults, ok := renvoEmitLoopBlockMode(records, stateWords, instructions, false, true, true, owned, owned)
 	if !ok {
 		return nil, nil, false
 	}
 	cc := &renvoCompileContext{renvoTargetArch: renvoArchAmd64, renvoTargetOS: renvoOSLinux, renvoNativeIntSize: 8, stripSymbols: true}
 	a := &renvoAsm{c: cc}
 	fallback, body := renvoAsmNewLabel(a), renvoAsmNewLabel(a)
+	if owned {
+		renvoRFERegLoad(a, 2, 5, -(renvoRFESharedPrefix + 16), 8)
+	}
 	renvoRFERegLoad(a, 0, 2, RenvoRFEAdmissionEpoch, 8)
 	renvoRFEJumpZero(a, 0, fallback)
 	renvoRFERegLoad(a, 0, 2, RenvoRFEDirectSize, 8)
@@ -28908,6 +29245,14 @@ func RenvoEmitDirectLoopBlock(records []int, stateWords int, instructions int) (
 	for i := 0; i < len(faults); i += 3 {
 		faults[i] += offset
 		faults[i+1] += offset
+	}
+	if owned {
+		a.code = renvoRFELoopCompatibilityEntry(a.code)
+		for i := 0; i < len(faults); i++ {
+			if i%3 != 2 {
+				faults[i] += 16
+			}
+		}
 	}
 	return a.code, faults, !a.patchFailed
 }
@@ -28925,12 +29270,23 @@ func renvoRFELoopCompatibilityEntry(body []byte) []byte {
 		renvoAsmEmit8(a, 0x90)
 	}
 	a.code = append(a.code, body...)
+	for i, reg := range []int{3, 12, 13, 14, 15} {
+		renvoRFERegStore(a, reg, 5, -(renvoRFESharedPrefix + 64 + i*8), 8)
+	}
+	renvoRFERegStore(a, 3, 5, -(renvoRFESharedPrefix + 56), 8)
 	renvoRFECounterImmediate(a, 2, 8, 0, false)
 	renvoAsmEmit8(a, 0xe8)
 	renvoAsmEmit32(a, 16-(len(a.code)+4))
 	renvoRFERegLoad(a, 1, 5, -(renvoRFESharedPrefix + 16), 8)
 	renvoRFERegStore(a, 0, 1, 0, 8)
 	renvoRFERegStore(a, 2, 1, 8, 8)
+	for i, reg := range []int{3, 12, 13, 14, 15} {
+		offset := -(renvoRFESharedPrefix + 64 + i*8)
+		if reg == 3 {
+			offset = -(renvoRFESharedPrefix + 56)
+		}
+		renvoRFERegLoad(a, reg, 5, offset, 8)
+	}
 	renvoAsmRet(a)
 	return a.code
 }
@@ -28952,8 +29308,29 @@ func renvoEmitLoopBlockMode(records []int, stateWords int, instructions int, arm
 	if !renvoRFEValidateRecords(records[:len(records)-4], stateWords, true) {
 		return nil, nil, false
 	}
+	records = renvoRFEReuseDifferenceZero(records)
+	variableCount := -1
+	for i := 0; i < count; i++ {
+		if records[i*4] == 46 {
+			if variableCount >= 0 || i != count-2 || !shared || !registerResult || arm64 || direct || !renvoRFEBoundedLoopCount(records, records[i*4+1], instructions) {
+				return nil, nil, false
+			}
+			variableCount = records[i*4+1]
+		}
+	}
+	if variableCount >= 0 {
+		for i := 0; i < count; i++ {
+			op := records[i*4]
+			if op == 13 || op == 14 || op == 36 || op == 37 || op == 45 {
+				return nil, nil, false
+			}
+		}
+	}
 	conditionValue := records[(count-1)*4+1]
 	oneShot := records[conditionValue*4] == 0 && records[conditionValue*4+3] == 0
+	if variableCount >= 0 && oneShot {
+		return nil, nil, false
+	}
 	inputs, stateMap, last := make([]int, stateWords), make([]int, stateWords), make([]int, count)
 	for i := 0; i < stateWords; i++ {
 		inputs[i], stateMap[i] = -1, -1
@@ -29064,6 +29441,12 @@ func renvoEmitLoopBlockMode(records []int, stateWords int, instructions int, arm
 	if memory == 0 {
 		registers = []int{8, 9, 10, 6, 7, 3, 12, 13}
 	}
+	derivedIterations := shared && registerResult && !arm64 && !direct && !oneShot && variableCount < 0 && !hasElapsed
+	if derivedIterations {
+		// The shared entry-budget word is already extended by every bounded
+		// timer refill. Its difference from R14 is exact completed work.
+		registers = append(registers, 15)
+	}
 	arch, frameReg, iterations, budget := renvoArchAmd64, 5, 15, 14
 	saved := []int{3, 12, 13, 14, 15}
 	if arm64 {
@@ -29157,8 +29540,11 @@ func renvoEmitLoopBlockMode(records []int, stateWords int, instructions int, arm
 			last[final] = -1
 		}
 	}
-	if !oneShot && !storesMemory {
-		// Read-only bodies cannot mutate even an aliased architectural input.
+	reloadableInputs := make([]bool, count)
+	if !storesMemory {
+		// Read-only bodies, including acyclic regions, cannot mutate even an
+		// aliased architectural input. Keep inputs reloadable only when every
+		// exit preserves that slot; restoration itself may otherwise change it.
 		for slot, input := range inputs {
 			if input < 0 || stateMap[slot] != input {
 				continue
@@ -29170,7 +29556,11 @@ func renvoEmitLoopBlockMode(records []int, stateWords int, instructions int, arm
 				}
 			}
 			if unchanged {
-				last[input] = -1
+				reloadableInputs[input] = true
+				// This leaf has the same value before every iteration and exit.
+				// Its ordinary location (or safe state reload) also reconstructs
+				// an inherited output; no back-edge snapshot copy is needed.
+				capturedLeaves[input] = false
 			}
 		}
 	}
@@ -29215,11 +29605,19 @@ func renvoEmitLoopBlockMode(records []int, stateWords int, instructions int, arm
 	for _, span := range readSpans {
 		// The fast load consumes the original index at the access itself,
 		// rather than at the now-eliminated address calculation.
-		if last[span.index] < span.load {
+		if span.elideAddress && last[span.index] < span.load {
 			last[span.index] = span.load
 		}
 	}
 	locations, spills := renvoRFELoopAllocate(records, last, registers, spillBase, !oneShot, inputs, stateMap)
+	// Preserve an immutable input in a hot register when one is available.
+	// Under pressure a state reload is cheaper than capturing a private spill,
+	// and its all-exits proof is independent of other allocations.
+	for value, reloadable := range reloadableInputs {
+		if reloadable && locations[value] < 0 {
+			locations[value] = 0
+		}
+	}
 	for value, cold := range coldInputs {
 		if cold {
 			locations[value] = -(spillBase + spills*8)
@@ -29288,6 +29686,10 @@ func renvoEmitLoopBlockMode(records []int, stateWords int, instructions int, arm
 	if len(readSpans) != 0 {
 		spills++
 	}
+	pollBase := -(spillBase + spills*8)
+	if shared && registerResult && !arm64 && !oneShot {
+		spills += 7
+	}
 	cc := &renvoCompileContext{renvoTargetArch: arch, renvoTargetOS: renvoOSLinux, renvoNativeIntSize: 8, stripSymbols: true}
 	g := renvoLinearGen{c: cc, stackPeak: spillBase + spills*8}
 	g.asm.c = cc
@@ -29295,7 +29697,10 @@ func renvoEmitLoopBlockMode(records []int, stateWords int, instructions int, arm
 	a.rfeNarrowSources = narrow
 	a.rfeDirectMemory = direct
 	a.rfeCodeVersions = codeVersions
+	a.rfeSessionPageIndex = shared && codeVersions && registerResult && !direct && !arm64
 	a.rfeLoopRegisterResult = registerResult
+	a.rfeBudgetIterations = derivedIterations
+	a.rfeBiasedLoopBudget = derivedIterations && len(readSpans) == 0 && instructions > 1
 	frame := -1
 	if shared {
 		if g.stackPeak+renvoRFESharedPrefix > renvoRFESharedFrameSize {
@@ -29309,6 +29714,12 @@ func renvoEmitLoopBlockMode(records []int, stateWords int, instructions int, arm
 		}
 	} else {
 		frame = renvoEmitGlobalInitFrameStart(&g)
+	}
+	if shared && registerResult && !arm64 {
+		// The private body does not preserve dispatcher registers. Its only
+		// entry-budget word is below the shared context and is
+		// extended by the same real-clock poll path as the running body.
+		saved = nil
 	}
 	for i, reg := range saved {
 		renvoRFERegStore(a, reg, frameReg, -(56 + i*8), 8)
@@ -29335,7 +29746,14 @@ func renvoEmitLoopBlockMode(records []int, stateWords int, instructions int, arm
 	}
 	if !oneShot {
 		renvoRFERegMove(a, budget, dispatcherBudget)
-		renvoRFERegImm(a, iterations, 0)
+		if a.rfeBiasedLoopBudget {
+			// remaining-(instructions-1) is positive exactly when another
+			// whole iteration fits. A hot subtraction can test this itself.
+			renvoRFERegImmediate(a, 4, budget, instructions-1)
+		}
+		if !derivedIterations {
+			renvoRFERegImm(a, iterations, 0)
+		}
 	}
 	if direct {
 		renvoRFERegLoad(a, 0, contextReg, RenvoRFEDirectGuest, 8)
@@ -29376,13 +29794,14 @@ func renvoEmitLoopBlockMode(records []int, stateWords int, instructions int, arm
 	}
 	loop, finish, branchExit, restore := renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a)
 	restoreCondition := renvoAsmNewLabel(a)
+	timerSites := []int{} // cold label, hot continuation, saved dispatcher budget
 	memorySlow := []renvoRFELoopMemorySlow{}
 	for i := range snapshots {
 		snapshots[i].label = renvoAsmNewLabel(a)
 	}
 	condition := records[(count-1)*4+1]
 	knownCondition := -1
-	if deferred[condition] && renvoRFEBooleanValue(records, condition) {
+	if records[condition*4] != 0 {
 		knownCondition = condition
 	}
 	passes := 1
@@ -29414,6 +29833,27 @@ func renvoEmitLoopBlockMode(records []int, stateWords int, instructions int, arm
 	// The first iteration establishes both permission-class facts before a
 	// steady iteration can begin. Early exits share the original checkpoint
 	// maps and counters; the peeled body is not extra guest work.
+	pairedRead, pairedWrite := -1, -1
+	if !arm64 && !oneShot && !direct && len(readSpans) == 0 {
+		for i := 0; i < count; i++ {
+			op := records[i*4]
+			if op == 13 && pairedRead == -1 && pairedWrite == -1 {
+				pairedRead = i
+			} else if op == 14 && pairedRead >= 0 && pairedWrite == -1 {
+				pairedWrite = i
+			} else if op == 13 || op == 14 || op == 37 {
+				pairedRead, pairedWrite = -2, -2
+			}
+		}
+		if pairedRead >= 0 && pairedWrite >= 0 {
+			if records[pairedRead*4+1] != records[pairedWrite*4+1] || records[pairedRead*4+3] < records[pairedWrite*4+3] || records[pairedRead*4+3] > 8 || cacheOffsets[pairedRead] != 0 || cacheOffsets[pairedWrite] != 0 {
+				pairedRead, pairedWrite = -2, -2
+			}
+		} else {
+			pairedRead, pairedWrite = -2, -2
+		}
+	}
+	pairedEntry := renvoAsmNewLabel(a)
 	for pass := 0; pass < passes; pass++ {
 		fast := len(readSpans) != 0 && pass == passes-1
 		if fast {
@@ -29422,6 +29862,7 @@ func renvoEmitLoopBlockMode(records []int, stateWords int, instructions int, arm
 			renvoAsmMarkLabel(a, loop)
 		}
 		exitIndex := 0
+		lastZero := -1
 		readFact, writeFact := pass != 0, pass != 0
 		readAddress, writeAddress, readSize, writeSize := -1, -1, 0, 0
 		for i := 0; i < count; i++ {
@@ -29432,13 +29873,19 @@ func renvoEmitLoopBlockMode(records []int, stateWords int, instructions int, arm
 			if op == 35 {
 				break
 			}
+			if op == 46 {
+				continue
+			}
 			if !renvoMemoryEffectOnly(op) && op != 13 && locations[i] == 0 {
 				continue
 			}
+			// Only the last emitted full-width arithmetic result may lend ZF.
+			// Effects, address synthesis and richer operations invalidate it.
+			lastZero = -1
 			if fast {
 				skipped := false
 				for _, span := range readSpans {
-					if i == span.address {
+					if i == span.address && span.elideAddress {
 						skipped = true
 					}
 					if i == span.load {
@@ -29446,9 +29893,20 @@ func renvoEmitLoopBlockMode(records []int, stateWords int, instructions int, arm
 						if locations[i] > 0 {
 							result = locations[i] - 1
 						}
-						renvoRFESpanLoad(a, records, locations, span.index, 1, true)
-						renvoRFERegLoad(a, 6, frameReg, span.offset, 8)
-						renvoRFEScaledGuestLoad(a, result, 6, 1, span.shift, immediate, signedWidths[i])
+						if span.elideAddress {
+							renvoRFESpanLoad(a, records, locations, span.index, 1, true)
+							renvoRFERegLoad(a, 6, frameReg, span.offset, 8)
+							renvoRFEScaledGuestLoad(a, result, 6, 1, span.shift, immediate, signedWidths[i])
+						} else {
+							address := 0
+							if locations[span.address] > 0 {
+								address = locations[span.address] - 1
+							} else {
+								renvoRFELoadValue(a, records, locations, span.address, 0)
+							}
+							renvoRFERegLoad(a, 6, frameReg, span.offset, 8)
+							renvoRFEIndexedGuestLoad(a, result, 6, address, immediate, signedWidths[i])
+						}
 						if result == 0 {
 							renvoRFESaveValue(a, locations, i)
 						}
@@ -29516,7 +29974,23 @@ func renvoEmitLoopBlockMode(records []int, stateWords int, instructions int, arm
 				} else {
 					writeAddress, writeSize = factAddress, factSize
 				}
+				if i == pairedRead && pairedRead >= 0 {
+					if pass == 0 {
+						// Both permissions are re-established by this original iteration.
+						renvoAsmMarkLabel(a, pairedEntry)
+					} else {
+						// A miss has not clobbered any allocated SSA register. Rejoin
+						// the peeled read, not an early write-permission failure.
+						a.rfePairedReadMiss = pairedEntry + 1
+					}
+				}
+				if pass != 0 && i == pairedWrite && pairedRead >= 0 {
+					// The preceding read stayed in the previous iteration's common
+					// read/write page. Its full-address bound covers this narrower store.
+					checked = true
+				}
 				renvoEmitLoopMemoryAccessDeferred(a, op, immediate, failure, cacheOffsets[i], signedWidths[i], records, locations, miss, publish, address, result, initialized, checked)
+				a.rfePairedReadMiss = 0
 				if op == 13 {
 					if immediate == 16 {
 						renvoRFESavePairHigh(a, locations, i+1)
@@ -29539,7 +30013,31 @@ func renvoEmitLoopBlockMode(records []int, stateWords int, instructions int, arm
 				renvoRFEEmitLoopAddress(a, records, locations, foldedAddresses, i)
 				continue
 			}
+			// Batch only adjacent, eagerly materialized predicates with exactly
+			// the same explicit operands and subtraction width. No effects or
+			// intervening use can occur, and all results remain in their original
+			// allocated locations. Cold/deferred predicates retain their own path.
+			if !arm64 && op == 24 && immediate&128 != 0 && immediate>>8 < 14 && (immediate&127 == 32 || immediate&127 == 64) {
+				end := i
+				for j := i + 1; j < count; j++ {
+					if records[j*4] != op || records[j*4+1] != left || records[j*4+2] != right || records[j*4+3]&255 != immediate&255 || records[j*4+3]>>8 >= 14 || deferred[j] || narrow[j] != -1 || signedSkip[j] || locations[j] == 0 {
+						break
+					}
+					end = j
+				}
+				if end > i {
+					renvoRFEEmitSubCompare(a, records, locations, i)
+					for j := i; j <= end; j++ {
+						renvoRFEEmitSubPredicate(a, locations, j, records[j*4+3]>>8)
+					}
+					i = end
+					continue
+				}
+			}
 			if renvoRFEEmitDirectRecord(a, records, locations, i) {
+				if derivedIterations && op >= 3 && op <= 7 && narrow[i] == -1 && !(op == 5 && records[right*4] == 0 && int64(records[right*4+3]) == 4294967295) {
+					lastZero = i
+				}
 				continue
 			}
 			if op >= 22 && op <= 25 {
@@ -29554,17 +30052,27 @@ func renvoEmitLoopBlockMode(records []int, stateWords int, instructions int, arm
 			return nil, nil, false
 		}
 		if !oneShot {
-			renvoRFERegImmediate(a, 3, iterations, 1)
-			renvoRFERegImmediate(a, 4, budget, instructions)
+			if !derivedIterations {
+				renvoRFERegImmediate(a, 3, iterations, 1)
+			}
+			if variableCount >= 0 {
+				renvoRFELoadValue(a, records, locations, variableCount, 0)
+				renvoRFERegBinary(a, 4, budget, 0)
+			} else if !derivedIterations {
+				renvoRFERegImmediate(a, 4, budget, instructions)
+			}
 		}
 		if records[condition*4] == 0 {
 			if records[condition*4+3] == 0 {
 				renvoAsmJmpLabel(a, branchExit)
 			}
-		} else {
+		} else if !derivedIterations || !renvoRFELoopZeroJump(a, records, deferred, condition, lastZero, false, branchExit) {
 			renvoRFELoopPredicateJump(a, records, locations, deferred, condition, false, branchExit)
 		}
 		if !oneShot {
+			if derivedIterations && !a.rfeBiasedLoopBudget {
+				renvoRFERegImmediate(a, 4, budget, instructions)
+			}
 			if fast {
 				// One test admits the next iteration only while both the
 				// proven span and the original instruction budget allow it.
@@ -29575,8 +30083,32 @@ func renvoEmitLoopBlockMode(records []int, stateWords int, instructions int, arm
 				renvoAsmJmpLabel(a, fastLoop)
 				renvoAsmMarkLabel(a, boundary)
 			}
-			renvoRFERegImmediate(a, 100, budget, instructions)
-			renvoRFEJump(a, 2, finish)
+			if a.rfeBiasedLoopBudget {
+				// The guest condition has already branched. Nothing may
+				// overwrite these flags before the exact admission branch.
+				renvoRFERegImmediate(a, 4, budget, instructions)
+			} else {
+				renvoRFERegImmediate(a, 100, budget, instructions)
+			}
+			if shared && registerResult && !arm64 {
+				savedBudget := -1
+				for index, reg := range saved {
+					if reg == 3 {
+						savedBudget = -(56 + index*8)
+					}
+				}
+				savedBudget = -56 // private entry budget, initialized by each caller
+				cold, resume := renvoAsmNewLabel(a), renvoAsmNewLabel(a)
+				if a.rfeBiasedLoopBudget {
+					renvoRFEJump(a, 5, cold) // JBE: subtract borrowed, or result is zero
+				} else {
+					renvoRFEJump(a, 2, cold)
+				}
+				renvoAsmMarkLabel(a, resume)
+				timerSites = append(timerSites, cold, resume, savedBudget)
+			} else {
+				renvoRFEJump(a, 2, finish)
+			}
 			// Capture before parallel phi assignments can overwrite the old leaves.
 			// These values are private and never survive a native call boundary.
 			for value, captured := range capturedLeaves {
@@ -29599,6 +30131,13 @@ func renvoEmitLoopBlockMode(records []int, stateWords int, instructions int, arm
 		}
 	}
 	renvoAsmMarkLabel(a, branchExit)
+	if derivedIterations {
+		// This completed iteration took its guest exit before the hot SUB.
+		renvoRFERegImmediate(a, 4, budget, instructions)
+		if a.rfeBiasedLoopBudget {
+			renvoRFERegImmediate(a, 3, budget, instructions-1)
+		}
+	}
 	renvoRFERegLoad(a, contextReg, frameReg, -16, 8)
 	renvoRFECounterImmediate(a, contextReg, RenvoRFELoopExits, 1, true)
 	restoreFinal := stateMap
@@ -29606,14 +30145,21 @@ func renvoEmitLoopBlockMode(records []int, stateWords int, instructions int, arm
 		restoreFinal = inputs
 	}
 	if knownCondition >= 0 {
-		renvoRFELoopRestoreState(a, records, locations, stateMap, inputs, restoreFinal, deferred, knownCondition, 0)
+		renvoRFELoopRestoreState(a, records, locations, stateMap, inputs, restoreFinal, deferred, knownCondition, 0, count)
 		renvoAsmJmpLabel(a, restoreCondition)
 	}
 	renvoAsmMarkLabel(a, finish)
-	renvoRFELoopRestoreState(a, records, locations, stateMap, inputs, restoreFinal, deferred, knownCondition, 1)
+	knownNonzero := -1
+	if renvoRFEBooleanValue(records, condition) {
+		knownNonzero = knownCondition
+	}
+	renvoRFELoopRestoreState(a, records, locations, stateMap, inputs, restoreFinal, deferred, knownNonzero, 1, count)
 	renvoAsmMarkLabel(a, restoreCondition)
+	renvoRFEReconstructIterations(a, instructions)
 	if oneShot {
 		renvoRFEAcyclicProgress(a, frameReg, contextReg, instructions, memory, 0, 1)
+	} else if variableCount >= 0 {
+		renvoRFEVariablePureProgress(a, frameReg, contextReg, iterations, instructions, 0, 0)
 	} else {
 		renvoRFELoopProgress(a, frameReg, contextReg, iterations, instructions, memory, 0, 0, 0)
 	}
@@ -29621,6 +30167,10 @@ func renvoEmitLoopBlockMode(records []int, stateWords int, instructions int, arm
 
 	for _, snapshot := range snapshots {
 		renvoAsmMarkLabel(a, snapshot.label)
+		if a.rfeBiasedLoopBudget {
+			// A fault/guard did not reach the completed-iteration SUB.
+			renvoRFERegImmediate(a, 3, budget, instructions-1)
+		}
 		// Read the old address before restoration can overwrite any architectural
 		// slot. SSA locations stay live to this access, including spilled inputs.
 		if snapshot.status == 1 {
@@ -29632,14 +30182,23 @@ func renvoEmitLoopBlockMode(records []int, stateWords int, instructions int, arm
 			renvoRFERegLoad(a, contextReg, frameReg, -16, 8)
 			renvoRFECounterImmediate(a, contextReg, RenvoRFELoopExits, 1, true)
 		}
-		renvoRFELoopRestoreInherited(a, records, capturedLocations, deferred, inherited, snapshot.values, stateMap, iterations)
+		inheritedProgress := iterations
+		if derivedIterations {
+			renvoRFERegLoad(a, 0, frameReg, -56, 8)
+			renvoRFERegBinary(a, 4, 0, budget)
+			inheritedProgress = 0 // only zero/nonzero is consumed here
+		}
+		renvoRFELoopRestoreInherited(a, records, capturedLocations, deferred, inherited, snapshot.values, stateMap, inheritedProgress)
 		knownGuard := -1
-		if snapshot.status != 1 && deferred[snapshot.address] && renvoRFEBooleanValue(records, snapshot.address) {
+		if snapshot.status != 1 {
 			knownGuard = snapshot.address
 		}
-		renvoRFELoopRestoreState(a, records, locations, snapshot.values, inputs, restoreFinal, deferred, knownGuard, 0)
+		renvoRFELoopRestoreState(a, records, locations, snapshot.values, inputs, restoreFinal, deferred, knownGuard, 0, snapshot.at)
+		renvoRFEReconstructIterations(a, instructions)
 		if oneShot {
 			renvoRFEAcyclicProgress(a, frameReg, contextReg, snapshot.progress, snapshot.memory, snapshot.status, 0)
+		} else if variableCount >= 0 {
+			renvoRFEVariablePureProgress(a, frameReg, contextReg, iterations, instructions, snapshot.progress, snapshot.status)
 		} else {
 			renvoRFELoopProgress(a, frameReg, contextReg, iterations, instructions, memory, snapshot.progress, snapshot.memory, snapshot.status)
 		}
@@ -29657,6 +30216,15 @@ func renvoEmitLoopBlockMode(records []int, stateWords int, instructions int, arm
 			renvoRFERegBinary(a, 4, 6, slow.address)
 		}
 		renvoAsmJmpLabel(a, slow.publish)
+	}
+	for site := 0; site < len(timerSites); site += 3 {
+		renvoAsmMarkLabel(a, timerSites[site])
+		if a.rfeBiasedLoopBudget {
+			// Wrapping addition recovers the exact nonnegative remainder
+			// even when the biased hot subtraction borrowed.
+			renvoRFERegImmediate(a, 3, budget, instructions-1)
+		}
+		renvoRFELoopTimerExtendCold(a, instructions, timerSites[site+2], pollBase, finish, timerSites[site+1], variableCount >= 0)
 	}
 	renvoAsmMarkLabel(a, restore)
 	for i, reg := range saved {
@@ -29752,6 +30320,34 @@ func renvoRFEEmitLoopAddress(a *renvoAsm, records []int, locations []int, folded
 		}
 		renvoRFERegStore(a, dst, frame, locations[i], 8)
 	}
+}
+
+// Reuse an already requested full-word difference for its adjacent equality.
+// In modulo-2^64 SSA, a == b iff a-b == 0, including wraparound. Rewriting
+// before liveness lets allocation retain the next loop counter instead of
+// separately extending and reloading the old counter solely for a branch.
+func renvoRFEReuseDifferenceZero(records []int) []int {
+	zero := -1
+	copied := false
+	for i := 0; i < len(records)/4; i++ {
+		if records[i*4] == 0 && records[i*4+3] == 0 {
+			zero = i
+		}
+		if zero < 0 || i == 0 || records[i*4] != 10 || records[(i-1)*4] != 4 {
+			continue
+		}
+		left, right := records[i*4+1], records[i*4+2]
+		a, b := records[(i-1)*4+1], records[(i-1)*4+2]
+		if !(left == a && right == b || left == b && right == a) {
+			continue
+		}
+		if !copied {
+			records = append([]int(nil), records...)
+			copied = true
+		}
+		records[i*4+1], records[i*4+2] = i-1, zero
+	}
+	return records
 }
 
 func renvoRFELoopAllocate(records []int, last []int, registers []int, spillBase int, hoisted bool, inputs []int, final []int) ([]int, int) {
@@ -29857,6 +30453,97 @@ func renvoRFELoopAllocate(records []int, last []int, registers []int, spillBase 
 // Missing inputs denote untouched architectural slots on the first iteration,
 // not on later iterations. Capture the previous iteration's final hot leaves
 // privately; deferred DAGs (including flags) remain unevaluated until an exit.
+// Keep an admitted cyclic body resident across the same bounded-instruction
+// deadline polls. Only the register-result shared foreign ABI owns these
+// private dispatcher words; compatibility and legacy calls cannot extend.
+func renvoRFELoopTimerExtendCold(a *renvoAsm, instructions int, savedBudget int, pollBase int, finish int, resume int, variable bool) {
+	bias := a.rfeFrameBias
+	resumed, expired, capped := renvoAsmNewLabel(a), renvoAsmNewLabel(a), renvoAsmNewLabel(a)
+	a.rfeFrameBias = 0
+	renvoRFERegLoad(a, 0, 5, -120, 8)
+	renvoRFEJumpZero(a, 0, finish)
+	a.rfeFrameBias = bias
+	renvoRFERegLoad(a, 2, 5, -16, 8)
+	renvoRFERegLoad(a, 0, 2, RenvoRFETimerFunction, 8)
+	renvoRFEJumpZero(a, 0, finish)
+	a.rfeFrameBias = 0
+	renvoRFERegLoad(a, 0, 5, -136, 8)
+	renvoRFERegLoad(a, 1, 5, -144, 8)
+	renvoRFERegBinary(a, 4, 0, 1)
+	renvoRFEJumpZero(a, 0, finish)
+	// An unused tail of the preceding poll window is included in the next
+	// one, not added above it. No replenishment exceeds the clock-poll window.
+	renvoRFERegImm(a, 1, RenvoRFETimerPollInstructions)
+	renvoRFERegBinary(a, 4, 1, 14)
+	renvoRFERegBinary(a, 100, 0, 1)
+	renvoRFEJump(a, 5, capped)
+	renvoRFERegMove(a, 0, 1)
+	renvoAsmMarkLabel(a, capped)
+	a.rfeFrameBias = bias
+	renvoRFERegStore(a, 0, 5, pollBase-48, 8)
+	// C preserves the allocated callee-saved registers, budget and iteration
+	// count. Preserve every possible volatile SSA register and the state base.
+	volatile := []int{8, 9, 10, 6, 7, 11}
+	for i, reg := range volatile {
+		renvoRFERegStore(a, reg, 5, pollBase-i*8, 8)
+	}
+	renvoRFERegLoad(a, 7, 2, RenvoRFETimerDeadline, 8)
+	renvoRFERegLoad(a, 0, 2, RenvoRFETimerFunction, 8)
+	renvoAsmEmit2(a, 0xff, 0xd0)
+	for i, reg := range volatile {
+		renvoRFERegLoad(a, reg, 5, pollBase-i*8, 8)
+	}
+	renvoRFERegBinary(a, 101, 0, 0)
+	renvoRFEJump(a, 1, expired)
+	renvoRFERegLoad(a, 0, 5, pollBase-48, 8)
+	renvoRFERegBinary(a, 3, 14, 0)
+	renvoRFERegLoad(a, 1, 5, savedBudget, 8)
+	renvoRFERegBinary(a, 3, 1, 0)
+	renvoRFERegStore(a, 1, 5, savedBudget, 8)
+	a.rfeFrameBias = 0
+	renvoRFERegLoad(a, 1, 5, -144, 8)
+	renvoRFERegBinary(a, 3, 1, 0)
+	renvoRFERegStore(a, 1, 5, -144, 8)
+	a.rfeFrameBias = bias
+	renvoAsmJmpLabel(a, resumed)
+	renvoAsmMarkLabel(a, expired)
+	// End the dispatcher window exactly at this completed iteration. Its
+	// normal exit accounts all previous windows once and returns global
+	// remaining, rather than treating this timer event as a guest fault.
+	renvoRFERegLoad(a, 1, 5, savedBudget, 8)
+	if variable || a.rfeBudgetIterations {
+		renvoRFERegMove(a, 0, 1)
+		renvoRFERegBinary(a, 4, 0, 14)
+	} else {
+		renvoRFERegMove(a, 0, 15)
+		renvoRFELoopMultiply(a, 0, instructions)
+	}
+	renvoRFERegStore(a, 0, 5, savedBudget, 8)
+	if variable || a.rfeBudgetIterations {
+		// The expiry contract caps the saved entry budget at completed
+		// progress. Its local unconsumed remainder must now be zero, or
+		// variable completion subtracts that remainder for a second time.
+		renvoRFERegImm(a, 14, 0)
+	}
+	a.rfeFrameBias = 0
+	renvoRFERegLoad(a, 2, 5, -144, 8)
+	renvoRFERegBinary(a, 4, 2, 1)
+	renvoRFERegBinary(a, 3, 2, 0)
+	renvoRFERegStore(a, 2, 5, -144, 8)
+	a.rfeFrameBias = bias
+	renvoRFERegLoad(a, 2, 5, -16, 8)
+	renvoRFERegImm(a, 0, 1)
+	renvoRFERegStore(a, 0, 2, RenvoRFETimerExpired, 8)
+	renvoAsmJmpLabel(a, finish)
+	renvoAsmMarkLabel(a, resumed)
+	renvoRFERegImmediate(a, 100, 14, instructions)
+	renvoRFEJump(a, 2, finish)
+	if a.rfeBiasedLoopBudget {
+		renvoRFERegImmediate(a, 4, 14, instructions-1)
+	}
+	renvoAsmJmpLabel(a, resume)
+}
+
 func renvoRFELoopInheritedOutputs(records []int, final []int, snapshots []renvoRFELoopExit, deferred []bool, cyclic bool) ([]bool, []bool) {
 	inherited, needed, leaves := make([]bool, len(final)), make([]bool, len(deferred)), make([]bool, len(deferred))
 	if !cyclic {
@@ -29931,9 +30618,9 @@ func renvoRFEBooleanValue(records []int, value int) bool {
 	if op == 10 || op == 11 || op == 24 || op == 25 || op == 42 {
 		return true
 	}
-	if op == 7 {
+	if op == 5 || op == 7 {
 		left, right := records[value*4+1], records[value*4+2]
-		return records[right*4] == 0 && records[right*4+3] == 1 && renvoRFEBooleanValue(records, left)
+		return records[right*4] == 0 && records[right*4+3] == 1 && (op == 5 || renvoRFEBooleanValue(records, left))
 	}
 	return false
 }
@@ -29941,23 +30628,175 @@ func renvoRFEBooleanValue(records []int, value int) bool {
 // Specialize only completed-iteration cold restoration. The checked branch
 // proves the exact normalized predicate; early fault maps have no such fact.
 // Selection aliases keep their original private SSA locations and lifetimes.
-func renvoRFEKnownExitValues(original []int, known int, truth int) ([]int, []int) {
+// Branch-known facts are scoped to one exit and one exact SSA flag source.
+// Enumerate the possible NZCV words, never infer from unrelated comparisons.
+func renvoRFEConditionTruth(flags int, condition int) int {
+	n, z, c, v := flags&8 != 0, flags&4 != 0, flags&2 != 0, flags&1 != 0
+	result := true
+	switch condition >> 1 {
+	case 0:
+		result = z
+	case 1:
+		result = c
+	case 2:
+		result = n
+	case 3:
+		result = v
+	case 4:
+		result = c && !z
+	case 5:
+		result = n == v
+	case 6:
+		result = n == v && !z
+	}
+	if condition&1 != 0 && condition != 15 {
+		result = !result
+	}
+	if result {
+		return 1
+	}
+	return 0
+}
+
+func renvoRFEExitFlagFacts(records []int, original []int, known int, truth int) {
+	op, left, right, encoding := original[known*4], original[known*4+1], original[known*4+2], original[known*4+3]
+	shape := encoding & 255
+	if !(op == 24 && (shape == 160 || shape == 192) || op == 25 && (shape == 32 || shape == 64)) {
+		return
+	}
+	possible := []int{}
+	for flags := 0; flags < 16; flags++ {
+		n, z, c, v := flags&8 != 0, flags&4 != 0, flags&2 != 0, flags&1 != 0
+		if op == 24 {
+			// Subtraction has a zero result iff the width-truncated operands
+			// are equal: N=V=0 and no borrow. Signed overflow has N != C.
+			if z && (n || !c || v) || v && n == c {
+				continue
+			}
+		} else if c || v || n && z {
+			continue // Logical results have C=V=0 and cannot be both zero/negative.
+		}
+		if renvoRFEConditionTruth(flags, encoding>>8) == truth {
+			possible = append(possible, flags)
+		}
+	}
+	if len(possible) == 0 {
+		return
+	}
+	for i := 0; i < len(records)/4; i++ {
+		if original[i*4] != op || original[i*4+1] != left || original[i*4+2] != right || original[i*4+3]&255 != shape {
+			continue
+		}
+		condition := original[i*4+3] >> 8
+		value := renvoRFEConditionTruth(possible[0], condition)
+		constant := true
+		for _, flags := range possible {
+			if renvoRFEConditionTruth(flags, condition) != value {
+				constant = false
+			}
+		}
+		if constant {
+			records[i*4], records[i*4+3] = 0, value
+		}
+	}
+}
+
+// Fold a flag predicate only after exit facts prove all of its operands.
+// Width truncation and carry/overflow follow the same arithmetic semantics as
+// the emitted operation; no conclusion is drawn from a merely nonzero value.
+func renvoRFEConstantCondition(op int, encoding int, left uint64, right uint64) int {
+	width := encoding & 127
+	if width == 32 {
+		left, right = uint64(uint32(left)), uint64(uint32(right))
+	}
+	result := left
+	carry, overflow := false, false
+	sign := uint64(1) << uint(width-1)
+	if op == 24 {
+		sub := encoding&128 != 0
+		result = left + right
+		if sub {
+			result = left - right
+		}
+		if width == 32 {
+			result = uint64(uint32(result))
+		}
+		if sub {
+			carry = left >= right
+			overflow = (left^right)&(left^result)&sign != 0
+		} else {
+			carry = result < left
+			overflow = ^(left^right)&(left^result)&sign != 0
+		}
+	}
+	flags := 0
+	if result&sign != 0 {
+		flags |= 8
+	}
+	if result == 0 {
+		flags |= 4
+	}
+	if carry {
+		flags |= 2
+	}
+	if overflow {
+		flags |= 1
+	}
+	return renvoRFEConditionTruth(flags, encoding>>8)
+}
+
+func renvoRFEKnownExitValues(original []int, known int, truth int, before int) ([]int, []int) {
 	records := append([]int(nil), original...)
 	count := len(records) / 4
 	aliases := make([]int, count)
 	for i := range aliases {
 		aliases[i] = i
 	}
-	value, fact := known, truth
-	for {
-		op, left, right := original[value*4], original[value*4+1], original[value*4+2]
-		records[value*4], records[value*4+3] = 0, fact
-		invert := op == 7 && original[right*4] == 0 && original[right*4+3] == 1
-		invert = invert || op == 10 && original[right*4] == 0 && original[right*4+3] == 0
-		if !invert || !renvoRFEBooleanValue(original, left) {
-			break
+	facts := []int{}
+	for i := 0; i < before; i++ {
+		if (original[i*4] == 16 || original[i*4] == 26) && renvoRFEBooleanValue(original, original[i*4+1]) {
+			facts = append(facts, original[i*4+1], 1)
 		}
-		value, fact = left, 1-fact
+	}
+	if known >= 0 {
+		facts = append(facts, known, truth)
+	}
+	for at := 0; at < len(facts); at += 2 {
+		value, fact := facts[at], facts[at+1]
+		for {
+			op, left, right := original[value*4], original[value*4+1], original[value*4+2]
+			records[value*4], records[value*4+3] = 0, fact
+			// A true full-word equality proves the exact other operand, even
+			// when it is not Boolean. False/nonzero predicates prove no such value.
+			if op == 10 && fact == 1 {
+				if original[right*4] == 0 {
+					records[left*4], records[left*4+3] = 0, original[right*4+3]
+				} else if original[left*4] == 0 {
+					records[right*4], records[right*4+3] = 0, original[left*4+3]
+				}
+			}
+			// A zero-width-truncated comparison does not constrain architectural
+			// high bits. Only full-width zero/equality may prove the raw SSA word.
+			encoding := original[value*4+3]
+			if (op == 24 || op == 25) && encoding&127 == 64 && (encoding>>8 == 0 && fact == 1 || encoding>>8 == 1 && fact == 0) {
+				if op == 25 {
+					records[left*4], records[left*4+3] = 0, 0
+				} else if encoding&128 != 0 {
+					if original[right*4] == 0 {
+						records[left*4], records[left*4+3] = 0, original[right*4+3]
+					} else if original[left*4] == 0 {
+						records[right*4], records[right*4+3] = 0, original[left*4+3]
+					}
+				}
+			}
+			invert := op == 7 && original[right*4] == 0 && original[right*4+3] == 1
+			invert = invert || op == 10 && original[right*4] == 0 && original[right*4+3] == 0
+			if !invert || !renvoRFEBooleanValue(original, left) {
+				break
+			}
+			value, fact = left, 1-fact
+		}
+		renvoRFEExitFlagFacts(records, original, value, fact)
 	}
 	for i := 0; i < count; i++ {
 		op, left, right, imm := records[i*4], records[i*4+1], records[i*4+2], records[i*4+3]
@@ -29983,15 +30822,49 @@ func renvoRFEKnownExitValues(original []int, known int, truth int) ([]int, []int
 					aliases[i] = imm
 				}
 			}
-		} else if (op == 7 || op == 10) && records[left*4] == 0 && records[right*4] == 0 {
-			result := records[left*4+3] ^ records[right*4+3]
-			if op == 10 {
-				result = 0
-				if records[left*4+3] == records[right*4+3] {
-					result = 1
+		} else if op >= 3 && op <= 12 {
+			lconst, rconst := records[left*4] == 0, records[right*4] == 0
+			lval, rval := uint64(records[left*4+3]), uint64(records[right*4+3])
+			if lconst && (rconst || op == 8 || op == 9) {
+				result := uint64(0)
+				switch op {
+				case 3:
+					result = lval + rval
+				case 4:
+					result = lval - rval
+				case 5:
+					result = lval & rval
+				case 6:
+					result = lval | rval
+				case 7:
+					result = lval ^ rval
+				case 8:
+					result = lval << uint(imm)
+				case 9:
+					result = lval >> uint(imm)
+				case 10:
+					if lval == rval {
+						result = 1
+					}
+				case 11:
+					if lval < rval {
+						result = 1
+					}
+				case 12:
+					result = lval * rval
 				}
+				records[i*4], records[i*4+3] = 0, int(result)
+			} else if (op == 3 || op == 6 || op == 7) && lconst && lval == 0 {
+				aliases[i] = right
+			} else if (op == 3 || op == 4 || op == 6 || op == 7) && rconst && rval == 0 || op == 5 && rconst && rval == ^uint64(0) || op == 12 && rconst && rval == 1 || (op == 8 || op == 9) && imm == 0 {
+				aliases[i] = left
+			} else if op == 5 && (lconst && lval == 0 || rconst && rval == 0) || op == 12 && (lconst && lval == 0 || rconst && rval == 0) {
+				records[i*4], records[i*4+3] = 0, 0
 			}
-			records[i*4], records[i*4+3] = 0, result
+		}
+		if (op == 24 || op == 25) && records[left*4] == 0 && (op == 25 || records[right*4] == 0) {
+			value := renvoRFEConstantCondition(op, imm, uint64(records[left*4+3]), uint64(records[right*4+3]))
+			records[i*4], records[i*4+3] = 0, value
 		}
 		if op == 33 || op == 34 || op == 37 {
 			records[i*4+3] = imm&255 | aliases[imm>>8]<<8
@@ -30121,11 +30994,15 @@ func renvoRFELoopColdLocations(a *renvoAsm, records []int, locations []int, cold
 	return result
 }
 
-func renvoRFELoopRestoreState(a *renvoAsm, records []int, locations []int, values []int, inputs []int, final []int, deferred []bool, known int, truth int) {
+func renvoRFELoopRestoreState(a *renvoAsm, records []int, locations []int, values []int, inputs []int, final []int, deferred []bool, known int, truth int, before int) {
 	done := make([]bool, len(deferred))
 	aliases := []int(nil)
-	if known >= 0 {
-		records, aliases = renvoRFEKnownExitValues(records, known, truth)
+	hasFacts := known >= 0
+	for i := 0; i < before && !hasFacts; i++ {
+		hasFacts = (records[i*4] == 16 || records[i*4] == 26) && renvoRFEBooleanValue(records, records[i*4+1])
+	}
+	if hasFacts {
+		records, aliases = renvoRFEKnownExitValues(records, known, truth, before)
 	}
 	roots := append([]int(nil), values...)
 	for slot, value := range roots {
@@ -30232,6 +31109,39 @@ func renvoRFELoopProgress(a *renvoAsm, frameReg int, contextReg int, iterations 
 		}
 	}
 }
+
+// All SSA restoration must precede this call: R15 may hold a live guest
+// value throughout the body. The private caller's entry budget and R14 differ
+// by an exact multiple of the immutable instruction count, even after refills.
+func renvoRFEReconstructIterations(a *renvoAsm, instructions int) {
+	if !a.rfeBudgetIterations {
+		return
+	}
+	renvoRFERegLoad(a, 0, 5, -56, 8)
+	renvoRFERegBinary(a, 4, 0, 14)
+	// The dividend is an exact multiple, so divide out powers of two,
+	// then multiply by the odd factor's inverse modulo 2^64. This is exact
+	// for every representable quotient, not an approximate reciprocal or
+	// an assumption about a particular scheduling budget.
+	odd, shift := instructions, 0
+	for odd&1 == 0 {
+		odd >>= 1
+		shift++
+	}
+	if shift != 0 {
+		renvoRFERegShift(a, 0, 9, shift)
+	}
+	if odd != 1 {
+		inverse := uint64(1)
+		for bit := 0; bit < 6; bit++ {
+			inverse *= 2 - uint64(odd)*inverse
+		}
+		renvoRFERegImm(a, 1, int(inverse))
+		renvoRFERegBinary(a, 12, 0, 1)
+	}
+	renvoRFERegMove(a, 15, 0)
+}
+
 func renvoRFELoopMultiply(a *renvoAsm, dst int, value int) {
 	if !renvoRFEDirectImmediate(a, 12, dst, value) {
 		renvoRFERegImm(a, 16, value)
@@ -30456,7 +31366,11 @@ func renvoEmitLoopCheckedMemoryAccessDeferred(a *renvoAsm, op int, size int, fai
 			renvoRFERegMove(a, temp, address)
 			renvoRFEMemoryFactSubtract(a, temp, tag)
 			renvoRFERegImmediate(a, 100, temp, 4096-size)
-			renvoRFEJump(a, 4, miss)
+			boundMiss := miss
+			if a.rfePairedReadMiss != 0 && op == 13 {
+				boundMiss = a.rfePairedReadMiss - 1
+			}
+			renvoRFEJump(a, 4, boundMiss)
 		}
 		renvoRFEMemoryFactLoad(a, host, data)
 		// A prior successful access of this permission class established a
@@ -30595,8 +31509,7 @@ func renvoEmitLoopMemoryMiss(a *renvoAsm, op int, size int, failure int, address
 	renvoRFERegShift(a, primary, 9, 36)
 	renvoRFERegBinary(a, 101, primary, primary)
 	renvoRFEJump(a, 1, failure)
-	renvoRFERegMove(a, descriptor, host)
-	renvoRFERegImmediate(a, 5, descriptor, 63)
+	renvoRFEPageIndex(a, descriptor, host, primary)
 	renvoRFERegShift(a, descriptor, 8, 5)
 	renvoRFERegLoad(a, primary, frame, -16, 8)
 	renvoRFERegBinary(a, 3, descriptor, primary)
@@ -31026,6 +31939,34 @@ func renvoRFELoopColdValueOnce(a *renvoAsm, records []int, locations []int, cold
 	renvoRFESaveValue(a, locations, value)
 }
 
+// Reuse only an exact SSA result whose complete zero flag is still live.
+// Deferred boolean wrappers emit nothing; unwrapping them changes polarity,
+// not the value whose arithmetic established ZF. Failure emits no code.
+func renvoRFELoopZeroJump(a *renvoAsm, records []int, cold []bool, value int, producer int, truth bool, label int) bool {
+	if producer < 0 {
+		return false
+	}
+	if value == producer {
+		cc := 0
+		if truth {
+			cc = 1
+		}
+		renvoRFEJump(a, cc, label)
+		return true
+	}
+	if !cold[value] {
+		return false
+	}
+	op, left, right := records[value*4], records[value*4+1], records[value*4+2]
+	if op == 7 && renvoRFEBooleanValue(records, value) {
+		return renvoRFELoopZeroJump(a, records, cold, left, producer, !truth, label)
+	}
+	if op == 10 && records[right*4] == 0 && records[right*4+3] == 0 {
+		return renvoRFELoopZeroJump(a, records, cold, left, producer, !truth, label)
+	}
+	return false
+}
+
 // Only flags produced immediately below are consumed by the fused branch.
 // Iteration/progress updates precede this helper and cannot clobber those flags.
 func renvoRFELoopPredicateJump(a *renvoAsm, records []int, locations []int, cold []bool, value int, truth bool, label int) {
@@ -31043,6 +31984,41 @@ func renvoRFELoopPredicateJump(a *renvoAsm, records []int, locations []int, cold
 	if cold[value] && op == 10 && records[right*4] == 0 && records[right*4+3] == 0 && cold[left] && (records[left*4] == 10 || records[left*4] == 11 || records[left*4] == 24 || records[left*4] == 25) {
 		renvoRFELoopPredicateJump(a, records, locations, cold, left, !truth, label)
 		return
+	}
+	// A cold one-bit mask is a truth test, not a materialized SSA result.
+	// Read the original operand without altering it: architectural exits may
+	// still need every other bit. Only skip a shift that is itself deferred.
+	if !renvoRFEArm(a) && cold[value] && op == 5 && records[right*4] == 0 {
+		mask := uint64(records[right*4+3])
+		if mask != 0 && mask&(mask-1) == 0 {
+			bit := 0
+			for mask > 1 {
+				mask >>= 1
+				bit++
+			}
+			source := left
+			if cold[left] && records[left*4] == 9 && records[left*4+3] < 64-bit {
+				bit += records[left*4+3]
+				source = records[left*4+1]
+			}
+			locations = renvoRFELoopColdLocations(a, records, locations, cold, []int{source}, false)
+			renvoRFELoopColdValue(a, records, locations, cold, source)
+			reg := 0
+			if records[source*4] != 0 && locations[source] > 0 {
+				reg = locations[source] - 1
+			} else {
+				renvoRFELoadValue(a, records, locations, source, reg)
+			}
+			renvoRFERex(a, 0, reg, true)
+			renvoAsmEmit3(a, 0x0f, 0xba, 0xe0|(reg&7)) // BT r64, imm8
+			renvoAsmEmit8(a, bit)
+			cc := 0x83 // carry clear: selected bit is zero
+			if truth {
+				cc = 0x82
+			}
+			renvoAmd64AsmJccLabel(a, cc, label)
+			return
+		}
 	}
 	locations = renvoRFELoopColdLocations(a, records, locations, cold, []int{value}, false)
 	predicateDone := make([]bool, len(cold))
@@ -31165,7 +32141,10 @@ func renvoRFELoopPredicateJump(a *renvoAsm, records []int, locations []int, cold
 // phi temporaries, translation facts and preserved registers live below it.
 // Bounds cover 2048 records, all spilled, plus <=16 invariant access facts and page facts.
 // Leaves make no calls; legacy framed entries may nest once below this area.
-const renvoRFESharedPrefix = 128
+// Dispatcher-owned words include cross-leaf page/epoch facts, admission and
+// prediction state, and the resident timer's two budget words. Keep these
+// disjoint from all biased leaf scratch, within the unchanged total frame cap.
+const renvoRFESharedPrefix = 160
 const renvoRFESharedFrameSize = 17408
 
 func renvoRFEFrameDisplacement(a *renvoAsm, base int, disp int) int {
@@ -31202,6 +32181,21 @@ func renvoRFECaptureElapsed(a *renvoAsm, slot int, shared bool) {
 		a.rfeFrameBias = 0
 		renvoRFERegLoad(a, 0, frameReg, -56, 8)
 		renvoRFERegBinary(a, 4, 0, remainingReg)
+		if !renvoRFEArm(a) {
+			untimed := renvoAsmNewLabel(a)
+			renvoRFERegLoad(a, 1, frameReg, -120, 8)
+			renvoRFEJumpZero(a, 1, untimed)
+			renvoRFERegLoad(a, 1, frameReg, -(renvoRFESharedPrefix + 16), 8)
+			renvoRFERegLoad(a, 1, 1, RenvoRFETimerFunction, 8)
+			renvoRFEJumpZero(a, 1, untimed)
+			// RBX describes only the current timer slice. Elapsed retirement
+			// includes earlier slices, independently of the real clock poll.
+			renvoRFERegLoad(a, 1, frameReg, -136, 8)
+			renvoRFERegBinary(a, 4, 0, 1)
+			renvoRFERegLoad(a, 1, frameReg, -144, 8)
+			renvoRFERegBinary(a, 3, 0, 1)
+			renvoAsmMarkLabel(a, untimed)
+		}
 		renvoRFERegLoad(a, 1, frameReg, -112, 8)
 		renvoRFERegBinary(a, 3, 0, 1)
 		a.rfeFrameBias = bias
@@ -31274,7 +32268,8 @@ func renvoRFEUsedPreservedRegisters(locations []int, candidates []int, iteration
 }
 
 // Shared translation proofs occupy only the dispatcher's reserved prefix.
-// They never survive a <=64-instruction native call or a host slow path.
+// They may survive timer polls only inside the same admitted, non-aliasing
+// foreign session. No proof survives a return or a host slow path.
 func renvoRFEInitSharedFacts(a *renvoAsm) {
 	frame, scratch := 5, 1
 	if renvoRFEArm(a) {
@@ -31353,6 +32348,20 @@ func renvoRFESignedLoadSources(records []int) ([]int, []int, []bool) {
 		}
 	}
 	for i := 0; i < count; i++ {
+		if records[i*4] == 19 && records[i*4+3] == 64 {
+			shift, amount := records[i*4+1], records[i*4+2]
+			if records[shift*4] == 8 && uses[shift] == 1 && records[amount*4] == 0 {
+				load := records[shift*4+1]
+				if records[load*4] == 13 && uses[load] == 1 {
+					size := records[load*4+3]
+					if (size == 1 || size == 2 || size == 4) && records[shift*4+3] == 64-size*8 && records[amount*4+3]&63 == 64-size*8 {
+						widths[load], aliases[i] = 64, load
+						skip[shift], skip[i] = true, true
+					}
+				}
+			}
+			continue
+		}
 		if records[i*4] != 4 {
 			continue
 		}
@@ -31804,6 +32813,7 @@ func renvoRFEIndexedGuestStore(a *renvoAsm, source int, base int, index int, siz
 // property, independent of guest ISA, program counter, and benchmark identity.
 type renvoRFEReadSpan struct {
 	load, address, base, index, step, shift, offset int
+	elideAddress                                    bool // only sole-use folded address expressions may disappear
 }
 
 func renvoRFELowWordInput(records []int, value int) int {
@@ -31855,8 +32865,13 @@ func renvoRFELoopReadSpans(records []int, final []int, folded []int) []renvoRFER
 			continue
 		}
 		address := records[i*4+1]
-		shift := folded[address]
-		if records[i*4+3] > 8 || shift < 0 || uses[address] != 1 {
+		// Proving the affine address is independent of deleting its arithmetic.
+		// A scaled index or the full address may be an architectural exit root.
+		if records[address*4] != 3 {
+			return nil
+		}
+		shift := records[address*4+2]
+		if records[i*4+3] > 8 || records[shift*4] != 8 || records[shift*4+3] < 1 || records[shift*4+3] > 3 {
 			return nil
 		}
 		base := records[address*4+1]
@@ -31864,7 +32879,13 @@ func renvoRFELoopReadSpans(records []int, final []int, folded []int) []renvoRFER
 		if index < 0 || records[index*4] != 1 || !renvoRFESpanInvariant(records, final, base) {
 			return nil
 		}
-		next := renvoRFELowWordInput(records, final[records[index*4+3]])
+		output := final[records[index*4+3]]
+		next := renvoRFELowWordInput(records, output)
+		// A full-width addition has the same low-word recurrence. Its
+		// architectural high bits remain in the original SSA/exit maps.
+		if next < 0 && output >= 0 && records[output*4] == 3 {
+			next = output
+		}
 		if next < 0 || records[next*4] != 3 {
 			return nil
 		}
@@ -31882,7 +32903,7 @@ func renvoRFELoopReadSpans(records []int, final []int, folded []int) []renvoRFER
 		if !renvoRFESpanInvariant(records, final, stepInput) {
 			return nil
 		}
-		spans = append(spans, renvoRFEReadSpan{load: i, address: address, base: base, index: index, step: step, shift: records[shift*4+3]})
+		spans = append(spans, renvoRFEReadSpan{load: i, address: address, base: base, index: index, step: step, shift: records[shift*4+3], elideAddress: folded[address] >= 0 && uses[address] == 1})
 		if len(spans) > 4 {
 			return nil
 		}
@@ -31950,8 +32971,7 @@ func renvoRFEGuardReadSpan(a *renvoAsm, records []int, locations []int, span ren
 	renvoAsmMarkLabel(a, lookup)
 	renvoRFERegMove(a, 1, 0)
 	renvoRFERegShift(a, 1, 9, 12)
-	renvoRFERegMove(a, 7, 1)
-	renvoRFERegImmediate(a, 5, 7, 63)
+	renvoRFEPageIndex(a, 7, 1, 0)
 	renvoRFERegShift(a, 7, 8, 5)
 	renvoRFERegLoad(a, 0, 5, -16, 8)
 	renvoRFERegBinary(a, 3, 7, 0)
@@ -31966,8 +32986,72 @@ func renvoRFEGuardReadSpan(a *renvoAsm, records []int, locations []int, span ren
 	renvoRFERegShift(a, 1, 8, 12)
 	renvoRFERegBinary(a, 4, 6, 1)
 	renvoAsmMarkLabel(a, ready)
-	// Retain bias + guest base, allowing a single scaled host load per stream.
-	renvoRFESpanLoad(a, records, locations, span.base, 0, false)
-	renvoRFERegBinary(a, 3, 6, 0)
+	// Elided addresses use bias+base and a scaled index. Observable original
+	// arithmetic uses its full SSA address with the unmodified translation bias.
+	if span.elideAddress {
+		renvoRFESpanLoad(a, records, locations, span.base, 0, false)
+		renvoRFERegBinary(a, 3, 6, 0)
+	}
 	renvoRFERegStore(a, 6, 5, span.offset, 8)
+}
+
+// Static interval proof for a selected pure-loop retirement expression. No
+// architectural input can directly confer a budget; only bounded constants,
+// their non-wrapping sums, and selections of proven counts participate.
+func renvoRFEBoundedLoopCount(records []int, value int, limit int) bool {
+	count := len(records) / 4
+	lo, hi := make([]int, count), make([]int, count)
+	for i := 0; i < count; i++ {
+		lo[i], hi[i] = -1, -1
+		op, left, right, imm := records[i*4], records[i*4+1], records[i*4+2], records[i*4+3]
+		if op == 0 && imm >= 0 && imm <= 256 {
+			lo[i], hi[i] = imm, imm
+		}
+		if op == 3 && lo[left] >= 0 && lo[right] >= 0 && hi[left]+hi[right] <= 256 {
+			lo[i], hi[i] = lo[left]+lo[right], hi[left]+hi[right]
+		}
+		if op == 10 || op == 11 || op == 24 || op == 25 || op == 42 {
+			lo[i], hi[i] = 0, 1
+		}
+		if op == 5 && records[right*4] == 0 && records[right*4+3] >= 0 && records[right*4+3] <= 256 {
+			lo[i], hi[i] = 0, records[right*4+3]
+		}
+		if op == 8 && lo[left] >= 0 && imm >= 0 && imm < 9 && hi[left]<<uint(imm) <= 256 {
+			lo[i], hi[i] = lo[left]<<uint(imm), hi[left]<<uint(imm)
+		}
+		if op == 12 && lo[left] >= 0 && lo[right] >= 0 && hi[left]*hi[right] <= 256 {
+			lo[i], hi[i] = lo[left]*lo[right], hi[left]*hi[right]
+		}
+		if op == 21 && lo[right] >= 0 && lo[imm] >= 0 {
+			lo[i], hi[i] = lo[right], hi[right]
+			if lo[imm] < lo[i] {
+				lo[i] = lo[imm]
+			}
+			if hi[imm] > hi[i] {
+				hi[i] = hi[imm]
+			}
+		}
+	}
+	return value >= 0 && value < count && lo[value] > 0 && hi[value] <= limit
+}
+
+// Pure variable iterations account preceding completed bodies from the actual
+// private budget delta, never iterationCount*maximum. Guard checkpoints still
+// carry an exact static prefix within the current iteration.
+func renvoRFEVariablePureProgress(a *renvoAsm, frameReg int, contextReg int, iterations int, maximum int, prefix int, status int) {
+	renvoRFERegLoad(a, contextReg, frameReg, -16, 8)
+	renvoRFERegLoad(a, 0, frameReg, -56, 8)
+	renvoRFERegBinary(a, 4, 0, 14)
+	if prefix != 0 {
+		renvoRFERegImmediate(a, 3, 0, prefix)
+	}
+	renvoRFECounterAdd(a, contextReg, RenvoRFELoopIterations, iterations, 1)
+	if status == 0 {
+		renvoRFERegImmediate(a, 100, 0, maximum)
+		renvoAsmEmit2(a, 0x19, 0xd2)
+		renvoAsmEmit3(a, 0x83, 0xe2, 4)
+	} else {
+		renvoRFERegImm(a, 2, status)
+		renvoRFERegBinary(a, 101, 2, 2)
+	}
 }

@@ -1,0 +1,2825 @@
+RFE 1
+
+-- rfe.json --
+{
+  "format": 1,
+  "name": "power64",
+  "import": "renvo.dev/emulators/power64"
+}
+
+-- adapter.go --
+package power64
+
+import (
+	"renvo.dev/internal/rfe/engine"
+	rt "renvo.dev/internal/rfe/runtime"
+)
+
+type EngineConfig = engine.EngineConfig
+type Engine = engine.Engine
+type Stats = engine.Stats
+type NativeMemory = engine.NativeMemory
+
+const (
+	StatePC    = 32
+	StateLR    = 33
+	StateCTR   = 34
+	StateMSR   = 35
+	StateXER   = 36
+	StateCR    = 37
+	StateWords = 38
+)
+
+// TierCPU owns a stable, portable state array, not an unsafe view of CPU fields.
+// Import before an engine invocation and Sync afterward. Machine adapters may
+// override slow execution to retain interrupt and attempted-instruction accounting.
+type TierCPU struct {
+	CPU    *CPU
+	State  [StateWords]uint64
+	Memory engine.Memory
+}
+
+func NewTierCPU(cpu *CPU, memory engine.Memory) *TierCPU {
+	if memory == nil {
+		memory = cpu
+	}
+	c := &TierCPU{CPU: cpu, Memory: memory}
+	c.Import()
+	return c
+}
+func (c *TierCPU) Import() {
+	copy(c.State[:32], c.CPU.GPR[:])
+	c.State[StatePC], c.State[StateLR], c.State[StateCTR] = c.CPU.PC, c.CPU.LR, c.CPU.CTR
+	c.State[StateMSR], c.State[StateXER], c.State[StateCR] = c.CPU.MSR, c.CPU.XER, uint64(c.CPU.CR)
+}
+func (c *TierCPU) Sync() {
+	copy(c.CPU.GPR[:], c.State[:32])
+	c.CPU.PC, c.CPU.LR, c.CPU.CTR = c.State[StatePC], c.State[StateLR], c.State[StateCTR]
+	c.CPU.MSR, c.CPU.XER, c.CPU.CR = c.State[StateMSR], c.State[StateXER], uint32(c.State[StateCR])
+}
+func (c *TierCPU) Registers() []uint64      { return c.State[:] }
+func (c *TierCPU) Retirement() *uint64      { return &c.CPU.Tick }
+func (c *TierCPU) MemoryBus() engine.Memory { return c.Memory }
+func (c *TierCPU) Step() error {
+	c.Sync()
+	err := c.CPU.Step()
+	c.Import()
+	return err
+}
+func (c *TierCPU) ExecuteInstruction(ins engine.Instruction) error {
+	c.Sync()
+	err := c.CPU.Execute(uint32(ins.Bits))
+	c.Import()
+	return err
+}
+func (c *CPU) Read(a uint64, n int, execute bool) (uint64, error) {
+	access := rt.Read
+	if execute {
+		access = rt.Execute
+	}
+	return c.read(a, n, access)
+}
+func (c *CPU) Write(a uint64, n int, v uint64) error { return c.write(a, n, v) }
+func DefaultEngineConfig() engine.EngineConfig       { return engine.DefaultEngineConfig() }
+func NewEngine(config engine.EngineConfig) (*engine.Engine, error) {
+	return engine.New(config, Architecture())
+}
+
+-- cpu.go --
+// POWER Book III-S interpreter. No host byte order is assumed.
+package power64
+
+import (
+	"fmt"
+	"math/bits"
+	rt "renvo.dev/internal/rfe/runtime"
+)
+
+const (
+	MSRSF  uint64 = 1 << 63
+	MSRVEC uint64 = 1 << 25
+	MSREE  uint64 = 1 << 15
+	MSRPR  uint64 = 1 << 14
+	MSRIR  uint64 = 1 << 5
+	MSRDR  uint64 = 1 << 4
+	MSRLE  uint64 = 1
+	XERSO  uint64 = 1 << 31
+	XEROV  uint64 = 1 << 30
+	XERCA  uint64 = 1 << 29
+)
+
+type SLB struct{ ESID, VSID uint64 }
+type CPU struct {
+	GPR [32]uint64
+	// VR bytes use architectural order: byte 0 contains bits 0..7 (the MSB).
+	VR                    [32][16]byte
+	PC, LR, CTR, MSR, XER uint64
+	CR                    uint32
+	SPR                   [1024]uint64
+	SLB                   [64]SLB
+	SLBVersion            uint64
+	Bus                   rt.Bus
+	Tick                  uint64
+	InterruptLE           bool
+	Hypercall             func(*CPU) error
+	Translate             func(*CPU, uint64, rt.Access) (uint64, error)
+	SPRRead               func(uint32) (uint64, bool)
+	SPRWrite              func(uint32, uint64) bool
+	Reservation           uint64
+	Reserved              bool
+}
+type exception struct {
+	vector          uint64
+	address, status uint64
+}
+
+func (e *exception) Error() string { return fmt.Sprintf("exception %#x at %#x", e.vector, e.address) }
+func (c *CPU) Exception(vector, savedPC, status uint64) {
+	c.SPR[26], c.SPR[27] = savedPC, c.MSR|status
+	c.MSR = c.MSR & (MSRSF | 1<<12)
+	if c.InterruptLE {
+		c.MSR |= MSRLE
+	}
+	c.PC = vector
+	c.Reserved = false
+}
+func (c *CPU) physical(a uint64, access rt.Access) (uint64, error) {
+	if c.Translate != nil {
+		return c.Translate(c, a, access)
+	}
+	return a, nil
+}
+func swap(v uint64, w int) uint64 {
+	switch w {
+	case 2:
+		return uint64(bits.ReverseBytes16(uint16(v)))
+	case 4:
+		return uint64(bits.ReverseBytes32(uint32(v)))
+	case 8:
+		return bits.ReverseBytes64(v)
+	}
+	return v
+}
+func (c *CPU) read(a uint64, w int, access rt.Access) (uint64, error) {
+	if a&4095+uint64(w) > 4096 {
+		var v uint64
+		for i := 0; i < w; i++ {
+			x, e := c.read(a+uint64(i), 1, access)
+			if e != nil {
+				return 0, e
+			}
+			v |= x << uint(i*8)
+		}
+		if c.MSR&MSRLE == 0 {
+			v = swap(v, w)
+		}
+		return v, nil
+	}
+	p, e := c.physical(a, access)
+	if e != nil {
+		return 0, e
+	}
+	v, f := c.Bus.Load(p, w, access, c.Tick)
+	if f != nil {
+		return 0, f
+	}
+	if c.MSR&MSRLE == 0 {
+		v = swap(v, w)
+	}
+	return v, nil
+}
+func (c *CPU) write(a uint64, w int, v uint64) error {
+	if a&4095+uint64(w) > 4096 {
+		var physical [8]uint64
+		for i := 0; i < w; i++ {
+			p, e := c.physical(a+uint64(i), rt.Write)
+			if e != nil {
+				return e
+			}
+			physical[i] = p
+		}
+		if c.MSR&MSRLE == 0 {
+			v = swap(v, w)
+		}
+		for i := 0; i < w; i++ {
+			if f := c.Bus.Store(physical[i], 1, v>>uint(i*8), c.Tick); f != nil {
+				return f
+			}
+		}
+		c.Reserved = false
+		return nil
+	}
+	p, e := c.physical(a, rt.Write)
+	if e != nil {
+		return e
+	}
+	if c.MSR&MSRLE == 0 {
+		v = swap(v, w)
+	}
+	if f := c.Bus.Store(p, w, v, c.Tick); f != nil {
+		return f
+	}
+	c.Reserved = false
+	return nil
+}
+
+// TranslationMiss is an architectural exception, not an emulator stop.
+func TranslationMiss(a uint64, access rt.Access, segment bool, protection bool) error {
+	v := uint64(0x300)
+	s := uint64(1 << 30)
+	if protection {
+		s = 1 << 27
+	}
+	if access == rt.Write {
+		s |= 1 << 25
+	}
+	if access == rt.Execute {
+		v = 0x400
+	}
+	if segment {
+		v = 0x380
+		if access == rt.Execute {
+			v = 0x480
+		}
+	}
+	return &exception{v, a, s}
+}
+func (c *CPU) crfield(field int, value uint32) {
+	shift := uint(28 - field*4)
+	c.CR = (c.CR &^ (15 << shift)) | ((value & 15) << shift)
+}
+func (c *CPU) record(v uint64) {
+	r := uint32(2)
+	if int64(v) < 0 {
+		r = 8
+	} else if v > 0 {
+		r = 4
+	}
+	if c.XER&XERSO != 0 {
+		r |= 1
+	}
+	c.crfield(0, r)
+}
+func (c *CPU) carry(on bool) {
+	c.XER &^= XERCA
+	if on {
+		c.XER |= XERCA
+	}
+}
+func (c *CPU) overflow(on bool) {
+	c.XER &^= XEROV
+	if on {
+		c.XER |= XEROV | XERSO
+	}
+}
+func (c *CPU) base(r uint32) uint64 {
+	if r == 0 {
+		return 0
+	}
+	return c.GPR[r]
+}
+func sext(v uint64, n uint) uint64 { return uint64(int64(v<<(64-n)) >> (64 - n)) }
+func mask(mb, me uint, width uint) uint64 {
+	// POWER numbers mask bits from the most significant end. Two edge masks
+	// also cover a wrapping interval, without a loop over every bit.
+	all := ^uint64(0) >> (64 - width)
+	left, right := all>>mb, all<<(width-1-me)&all
+	if mb <= me {
+		return left & right
+	}
+	return left | right
+}
+func (c *CPU) branch(bo, bi uint32, decrement bool) bool {
+	countOK := true
+	if decrement && bo&4 == 0 {
+		c.CTR--
+		countOK = (c.CTR != 0) != (bo&2 != 0)
+	}
+	conditionOK := bo&16 != 0 || ((c.CR>>(31-bi))&1 != 0) == (bo&8 != 0)
+	return countOK && conditionOK
+}
+func sprnum(op uint32) uint32 { return (op >> 16 & 31) | (op >> 6 & 0x3e0) }
+func (c *CPU) readSPR(s uint32) uint64 {
+	switch s {
+	case 1:
+		return c.XER
+	case 8:
+		return c.LR
+	case 9:
+		return c.CTR
+	}
+	if c.SPRRead != nil {
+		if v, ok := c.SPRRead(s); ok {
+			return v
+		}
+	}
+	return c.SPR[s]
+}
+func (c *CPU) writeSPR(s uint32, v uint64) {
+	switch s {
+	case 1:
+		c.XER = v
+		return
+	case 8:
+		c.LR = v
+		return
+	case 9:
+		c.CTR = v
+		return
+	}
+	if c.SPRWrite != nil && c.SPRWrite(s, v) {
+		return
+	}
+	c.SPR[s] = v
+}
+func (c *CPU) Step() error {
+	oldPC := c.PC
+	op, e := c.read(c.PC, 4, rt.Execute)
+	if e == nil {
+		return c.Execute(uint32(op))
+	}
+	return c.finish(uint32(op), oldPC, e)
+}
+
+// Execute runs an already execute-checked instruction, with exactly Step's
+// exception, PC and retirement semantics. Fetch authority remains with the bus.
+func (c *CPU) Execute(op uint32) error {
+	oldPC := c.PC
+	c.PC += 4
+	return c.finish(op, oldPC, c.execute(op, oldPC))
+}
+func (c *CPU) finish(op uint32, oldPC uint64, e error) error {
+	if x, ok := e.(*exception); ok {
+		if x.vector == 0x300 || x.vector == 0x380 {
+			c.SPR[19], c.SPR[18] = x.address, x.status
+			c.Exception(x.vector, oldPC, 0)
+		} else {
+			c.Exception(x.vector, oldPC, x.status)
+		}
+		return nil
+	}
+	if e != nil {
+		return fmt.Errorf("pc=%#x op=%08x msr=%#x: %w", oldPC, op, c.MSR, e)
+	}
+	c.Tick++
+	return nil
+}
+func (c *CPU) execute(op uint32, pc uint64) error {
+	if c.MSR&MSRPR != 0 && op>>26 == 19 {
+		xo := op >> 1 & 1023
+		if xo == 18 || xo == 50 {
+			return &exception{vector: 0x700, status: 1 << 18}
+		}
+	}
+	rtreg, ra, rb := op>>21&31, op>>16&31, op>>11&31
+	imm := sext(uint64(op&65535), 16)
+	a, b := c.GPR[ra], c.GPR[rb]
+	var result uint64
+	writeRT, writeRA, record := false, false, false
+	primary := op >> 26
+	switch primary {
+	case 2, 3: // tdi/twi
+		lhs, rhs := a, imm
+		if primary == 3 {
+			lhs, rhs = sext(uint64(uint32(a)), 32), sext(uint64(uint32(imm)), 32)
+		}
+		to := rtreg
+		if to&16 != 0 && int64(lhs) < int64(rhs) || to&8 != 0 && int64(lhs) > int64(rhs) || to&4 != 0 && lhs == rhs || to&2 != 0 && lhs < rhs || to&1 != 0 && lhs > rhs {
+			return &exception{vector: 0x700, status: 1 << 17}
+		}
+	case 7:
+		result = uint64(int64(a) * int64(imm))
+		writeRT = true
+	case 8:
+		result = imm - a
+		c.carry(imm >= a)
+		writeRT = true
+	case 10, 11:
+		lhs, rhs := a, imm
+		if primary == 10 {
+			rhs = uint64(op & 65535)
+		}
+		if op&(1<<21) == 0 {
+			if primary == 11 {
+				lhs, rhs = sext(uint64(uint32(lhs)), 32), sext(uint64(uint32(rhs)), 32)
+			} else {
+				lhs, rhs = uint64(uint32(lhs)), uint64(uint32(rhs))
+			}
+		}
+		r := uint32(2)
+		if primary == 11 {
+			if int64(lhs) < int64(rhs) {
+				r = 8
+			} else if int64(lhs) > int64(rhs) {
+				r = 4
+			}
+		} else {
+			if lhs < rhs {
+				r = 8
+			} else if lhs > rhs {
+				r = 4
+			}
+		}
+		if c.XER&XERSO != 0 {
+			r |= 1
+		}
+		c.crfield(int(op>>23&7), r)
+	case 12, 13:
+		result = a + imm
+		c.carry(result < a)
+		writeRT = true
+		record = primary == 13
+	case 14:
+		result = c.base(ra) + imm
+		writeRT = true
+	case 15:
+		result = c.base(ra) + (imm << 16)
+		writeRT = true
+	case 16:
+		if c.branch(rtreg, ra, true) {
+			target := pc + sext(uint64(op&0xfffc), 16)
+			if op&2 != 0 {
+				target = sext(uint64(op&0xfffc), 16)
+			}
+			c.PC = target
+		}
+		if op&1 != 0 {
+			c.LR = pc + 4
+		}
+	case 17:
+		if op>>5&127 == 1 {
+			if c.MSR&MSRPR != 0 {
+				return &exception{vector: 0x700, status: 1 << 18}
+			}
+			if c.Hypercall != nil {
+				return c.Hypercall(c)
+			}
+			return fmt.Errorf("hypercall without partition")
+		}
+		c.Exception(0xc00, pc+4, 0)
+	case 18:
+		target := sext(uint64(op&0x3fffffc), 26)
+		if op&2 == 0 {
+			target += pc
+		}
+		c.PC = target
+		if op&1 != 0 {
+			c.LR = pc + 4
+		}
+	case 19:
+		xo := op >> 1 & 1023
+		switch xo {
+		case 16, 528:
+			target := c.LR
+			if xo == 528 {
+				target = c.CTR
+			}
+			if c.branch(rtreg, ra, xo == 16) {
+				c.PC = target &^ 3
+			}
+			if op&1 != 0 {
+				c.LR = pc + 4
+			}
+		case 18, 50:
+			c.PC = c.SPR[26] &^ 3
+			c.MSR = c.SPR[27]
+		case 150: // isync
+		case 0:
+			c.crfield(int(op>>23&7), (c.CR>>uint(28-int(op>>18&7)*4))&15)
+		case 33, 129, 193, 225, 257, 289, 417, 449:
+			x, y := (c.CR>>(31-ra))&1, (c.CR>>(31-rb))&1
+			var v uint32
+			switch xo {
+			case 33:
+				v = ^(x | y)
+			case 129:
+				v = x &^ y
+			case 193:
+				v = x ^ y
+			case 225:
+				v = ^(x & y)
+			case 257:
+				v = x & y
+			case 289:
+				v = ^(x ^ y)
+			case 417:
+				v = x | ^y
+			case 449:
+				v = x | y
+			}
+			bit := uint(31 - rtreg)
+			c.CR = c.CR&^(1<<bit) | ((v & 1) << bit)
+		default:
+			return fmt.Errorf("unsupported XL opcode %d", xo)
+		}
+	case 20, 21, 23:
+		sh := rb
+		if primary == 23 {
+			sh = uint32(b) & 31
+		}
+		rot := uint64(bits.RotateLeft32(uint32(c.GPR[rtreg]), int(sh)))
+		m := mask(uint(op>>6&31), uint(op>>1&31), 32)
+		result = rot & m
+		if primary == 20 {
+			result |= a &^ m
+		}
+		writeRA = true
+		record = op&1 != 0
+	case 24, 25, 26, 27, 28, 29:
+		v := uint64(op & 65535)
+		if primary&1 != 0 {
+			v <<= 16
+		}
+		s := c.GPR[rtreg]
+		switch primary {
+		case 24, 25:
+			result = s | v
+		case 26, 27:
+			result = s ^ v
+		case 28, 29:
+			result = s & v
+			record = true
+		}
+		writeRA = true
+	case 30:
+		sh := uint(rb) | (uint(op>>1&1) << 5)
+		mb := uint(op>>6&31) | (uint(op & 32))
+		xo := op >> 2 & 7
+		s := c.GPR[rtreg]
+		r := bits.RotateLeft64(s, int(sh))
+		m := uint64(0)
+		switch xo {
+		case 0:
+			m = mask(mb, 63, 64)
+		case 1:
+			m = mask(0, mb, 64)
+		case 2, 3:
+			m = mask(mb, 63-sh, 64)
+		default:
+			sh = uint(b & 63)
+			r = bits.RotateLeft64(s, int(sh))
+			if op>>1&15 == 8 {
+				m = mask(mb, 63, 64)
+			} else if op>>1&15 == 9 {
+				m = mask(0, mb, 64)
+			} else {
+				return fmt.Errorf("unsupported MD opcode")
+			}
+		}
+		result = r & m
+		if xo == 3 {
+			result |= a &^ m
+		}
+		writeRA = true
+		record = op&1 != 0
+	case 31:
+		return c.extended(op, pc)
+	case 32, 33, 34, 35, 40, 41, 42, 43, 58:
+		address := c.base(ra) + imm
+		width := 4
+		update := primary&1 != 0
+		signed := primary == 42 || primary == 43
+		switch primary {
+		case 34, 35:
+			width = 1
+		case 40, 41, 42, 43:
+			width = 2
+		case 58:
+			address = c.base(ra) + sext(uint64(op&0xfffc), 16)
+			width = 8
+			update = op&3 == 1
+			signed = op&3 == 2
+			if signed {
+				width = 4
+			}
+			if op&3 == 3 {
+				return fmt.Errorf("reserved DS load")
+			}
+		}
+		v, e := c.read(address, width, rt.Read)
+		if e != nil {
+			return e
+		}
+		if signed {
+			v = sext(v, uint(width*8))
+		}
+		c.GPR[rtreg] = v
+		if update {
+			c.GPR[ra] = address
+		}
+	case 36, 37, 38, 39, 44, 45, 62:
+		address := c.base(ra) + imm
+		width := 4
+		update := primary&1 != 0
+		switch primary {
+		case 38, 39:
+			width = 1
+		case 44, 45:
+			width = 2
+		case 62:
+			address = c.base(ra) + sext(uint64(op&0xfffc), 16)
+			width = 8
+			update = op&3 == 1
+			if op&3 > 1 {
+				return fmt.Errorf("reserved DS store")
+			}
+		}
+		if e := c.write(address, width, c.GPR[rtreg]); e != nil {
+			return e
+		}
+		if update {
+			c.GPR[ra] = address
+		}
+	case 46, 47:
+		address := c.base(ra) + imm
+		for r := rtreg; r < 32; r++ {
+			if primary == 46 {
+				v, e := c.read(address, 4, rt.Read)
+				if e != nil {
+					return e
+				}
+				c.GPR[r] = v
+			} else {
+				if e := c.write(address, 4, c.GPR[r]); e != nil {
+					return e
+				}
+			}
+			address += 4
+		}
+	default:
+		return fmt.Errorf("unsupported primary opcode %d", primary)
+	}
+	if writeRT {
+		c.GPR[rtreg] = result
+	}
+	if writeRA {
+		c.GPR[ra] = result
+	}
+	if record {
+		c.record(result)
+	}
+	return nil
+}
+
+-- cpu_test.go --
+package power64
+
+import (
+	"encoding/binary"
+	rt "renvo.dev/internal/rfe/runtime"
+	"testing"
+)
+
+type memoryBus []byte
+
+func (m memoryBus) Load(a uint64, w int, access rt.Access, tick uint64) (uint64, *rt.Fault) {
+	if a > uint64(len(m)) || w < 1 || w > 8 || uint64(w) > uint64(len(m))-a {
+		return 0, &rt.Fault{Kind: rt.Boundary, Address: a, Width: w}
+	}
+	var v uint64
+	for i := 0; i < w; i++ {
+		v |= uint64(m[a+uint64(i)]) << uint(i*8)
+	}
+	return v, nil
+}
+func (m memoryBus) Store(a uint64, w int, v uint64, tick uint64) *rt.Fault {
+	if a > uint64(len(m)) || w < 1 || w > 8 || uint64(w) > uint64(len(m))-a {
+		return &rt.Fault{Kind: rt.Boundary, Address: a, Width: w}
+	}
+	for i := 0; i < w; i++ {
+		m[a+uint64(i)] = byte(v >> uint(i*8))
+	}
+	return nil
+}
+func (m memoryBus) Peek(a uint64, w int) (uint64, bool) {
+	v, f := m.Load(a, w, rt.Execute, 0)
+	return v, f == nil
+}
+func TestEndianLoadStore(t *testing.T) {
+	for _, le := range []bool{false, true} {
+		m := memoryBus(make([]byte, 256))
+		c := CPU{Bus: m, MSR: MSRSF}
+		var order binary.ByteOrder = binary.BigEndian
+		if le {
+			c.MSR |= MSRLE
+			order = binary.LittleEndian
+		}
+		order.PutUint32(m, 0x80600080)
+		order.PutUint32(m[4:], 0x90600088)
+		copy(m[128:], []byte{0x12, 0x34, 0x56, 0x78})
+		if e := c.Step(); e != nil {
+			t.Fatal(e)
+		}
+		expected := uint64(order.Uint32(m[128:]))
+		if c.GPR[3] != expected {
+			t.Fatalf("LE=%t: load=%x want=%x", le, c.GPR[3], expected)
+		}
+		if e := c.Step(); e != nil {
+			t.Fatal(e)
+		}
+		if order.Uint32(m[136:]) != uint32(expected) {
+			t.Fatal("store byte order")
+		}
+	}
+}
+func TestCarryOverflowAndRecord(t *testing.T) {
+	c := CPU{}
+	c.GPR[4] = ^uint64(0)
+	c.GPR[5] = 1
+	op := uint32(31<<26 | 3<<21 | 4<<16 | 5<<11 | 10<<1 | 1)
+	if e := c.execute(op, 0); e != nil {
+		t.Fatal(e)
+	}
+	if c.GPR[3] != 0 || c.XER&XERCA == 0 || c.CR>>28 != 2 {
+		t.Fatalf("addc: %#v", c)
+	}
+	c.GPR[4] = 0x7fffffffffffffff
+	c.GPR[5] = 1
+	op = 31<<26 | 3<<21 | 4<<16 | 5<<11 | 778<<1 | 1
+	if e := c.execute(op, 0); e != nil {
+		t.Fatal(e)
+	}
+	if c.XER&(XEROV|XERSO) != (XEROV|XERSO) || c.CR>>28 != 9 {
+		t.Fatal("addo record/overflow")
+	}
+}
+func TestBranchUsesOldLR(t *testing.T) {
+	c := CPU{LR: 0x80}
+	if e := c.execute(0x4e800021, 0x40); e != nil {
+		t.Fatal(e)
+	}
+	if c.PC != 0x80 || c.LR != 0x44 {
+		t.Fatal("bclrl target/link ordering")
+	}
+	c.CTR = 1
+	c.PC = 0x44
+	if e := c.execute(0x4200fff8, 0x44); e != nil {
+		t.Fatal(e)
+	}
+	if c.CTR != 0 || c.PC != 0x44 {
+		t.Fatal("bdnz")
+	}
+}
+func TestExceptionRoundTrip(t *testing.T) {
+	c := CPU{MSR: MSRSF | MSREE | MSRIR | MSRDR | MSRLE, InterruptLE: true}
+	saved := c.MSR
+	c.Exception(0x900, 0x1234, 0)
+	if c.PC != 0x900 || c.MSR&MSREE != 0 || c.SPR[26] != 0x1234 {
+		t.Fatal("exception entry")
+	}
+	if e := c.execute(0x4c000024, 0x900); e != nil {
+		t.Fatal(e)
+	}
+	if c.PC != 0x1234 || c.MSR != saved {
+		t.Fatal("rfid")
+	}
+}
+func TestReservationInvalidatedByStore(t *testing.T) {
+	m := memoryBus(make([]byte, 256))
+	c := CPU{Bus: m, MSR: MSRLE}
+	c.GPR[4] = 128
+	c.GPR[5] = 0
+	c.GPR[3] = 42
+	if e := c.execute(31<<26|6<<21|4<<16|5<<11|20<<1, 0); e != nil {
+		t.Fatal(e)
+	}
+	if !c.Reserved {
+		t.Fatal("lwarx")
+	}
+	if e := c.write(132, 4, 1); e != nil {
+		t.Fatal(e)
+	}
+	if e := c.execute(31<<26|3<<21|4<<16|5<<11|150<<1|1, 4); e != nil {
+		t.Fatal(e)
+	}
+	if c.CR>>28&2 != 0 {
+		t.Fatal("stwcx succeeded after intervening store")
+	}
+}
+
+-- direct_link_test.go --
+package power64
+
+import (
+	"fmt"
+	"renvo.dev/internal/rfe/engine"
+	emu "renvo.dev/internal/rfe/runtime"
+	"testing"
+)
+
+type directFlowWord uint32
+
+func (w directFlowWord) Read(address uint64, size int, execute bool) (uint64, error) {
+	if size != 4 || !execute {
+		return 0, fmt.Errorf("non-fetch access")
+	}
+	return uint64(w), nil
+}
+func (w directFlowWord) Write(address uint64, size int, value uint64) error {
+	return fmt.Errorf("unexpected write")
+}
+
+// Direct linked branches retain their LR update on both taken and untaken
+// paths. A guarded multi-block body must commit only the scalar call prefix
+// when its conditional target is not selected; it cannot execute the callee.
+func TestDirectLinkedBranchRegionPrefixes(t *testing.T) {
+	if !nativeHost() {
+		t.Skip("native host unavailable")
+	}
+	n, err := emu.NewNative(1 << 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer n.Close()
+	if err = n.PrepareLinks(StateWords, StatePC); err != nil {
+		t.Fatal(err)
+	}
+	for _, word := range []uint32{18<<26 | 0x1001, 18<<26 | 0x2003, 16<<26 | 12<<21 | 2<<16 | 0x1001, 16<<26 | 12<<21 | 2<<16 | 0x2003} {
+		ins, err := fetchPower(directFlowWord(word), 0x1000)
+		if err != nil || !ins.Terminal || !ins.Flow.Known || ins.Flow.Next != 0x2000 {
+			t.Fatal("immediate linked flow", word, ins, err)
+		}
+		var b emu.Builder
+		b.Store(StatePC, b.Constant(0x1000))
+		if !LowerInstruction(&b, ins, 0) {
+			t.Fatal("call lowering")
+		}
+		b.Checkpoint(StateWords, 1)
+		b.RegionGuard(b.Binary(emu.Equal, b.Load(StatePC), b.Constant(0x2000)))
+		b.Store(StatePC, b.Constant(0x2000))
+		add := uint32(14<<26 | 3<<21 | 3<<16 | 7)
+		if !LowerInstruction(&b, engine.Instruction{PC: 0x2000, Bits: uint64(add), Length: 4}, 1) {
+			t.Fatal("callee lowering")
+		}
+		b.Checkpoint(StateWords, 2)
+		b.LoopContinue(b.Constant(0))
+		entry, err := n.CompileLoop(b.FinishMemory(StateWords), StateWords, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, cr := range []uint32{0, 1 << 29} {
+			for _, budget := range []uint64{1, 2, 3, 64} {
+				cpu := CPU{PC: 0x1000, MSR: MSRSF | MSRLE, LR: 0xdeadbeef, CTR: 9, CR: cr, XER: 0xe0000000}
+				cpu.GPR[3] = ^uint64(2)
+				initial := NewTierCPU(&cpu, nil).State
+				retired := uint64(0)
+				if budget >= 2 {
+					if err := cpu.Execute(word); err != nil {
+						t.Fatal(err)
+					}
+					retired++
+					if cpu.PC == 0x2000 {
+						if err := cpu.Execute(add); err != nil {
+							t.Fatal(err)
+						}
+						retired++
+					}
+				}
+				want := NewTierCPU(&cpu, nil).State
+				m := new(emu.MemoryContext)
+				m.ClaimLinks(n)
+				m.PublishLink(0x1000, entry, 2, [17]uint8{})
+				if err := n.CallLinked(initial[:], m, budget); err != nil {
+					t.Fatal(err)
+				}
+				if initial != want || m.Total != retired || m.Remaining != budget-retired || m.Status != 0 || m.MemoryTotal != 0 {
+					t.Fatal("linked branch prefix", word, cr, budget, initial, want, m.Total, m.Remaining, m.Status)
+				}
+			}
+		}
+	}
+	for _, word := range []uint32{0x4e800020, 0x4e800021, 0x4e800420, 0x4e800421} {
+		ins, err := fetchPower(directFlowWord(word), 0x1000)
+		if err != nil || !ins.Terminal || ins.Flow.Known {
+			t.Fatal("guessed indirect successor", word, ins, err)
+		}
+	}
+}
+
+-- extended.go --
+package power64
+
+import (
+	"fmt"
+	"math/bits"
+	rt "renvo.dev/internal/rfe/runtime"
+)
+
+func (c *CPU) extended(op uint32, pc uint64) error {
+	rs, ra, rb := op>>21&31, op>>16&31, op>>11&31
+	a, b, s := c.GPR[ra], c.GPR[rb], c.GPR[rs]
+	xo := op >> 1 & 1023
+	if c.MSR&MSRPR != 0 {
+		switch xo {
+		case 83, 146, 178, 402, 434, 498, 851, 915, 306, 370, 566:
+			return &exception{vector: 0x700, status: 1 << 18}
+		case 339, 467:
+			if sprnum(op)&16 != 0 {
+				return &exception{vector: 0x700, status: 1 << 18}
+			}
+		}
+	}
+	result := uint64(0)
+	writeRT, writeRA, record := false, false, op&1 != 0
+	address := c.base(ra) + b
+	switch xo {
+	case 103, 231: // lvx/stvx
+		return c.vectorMemory(rs, address, xo == 231)
+	case 0, 32:
+		lhs, rhs := a, b
+		if op&(1<<21) == 0 {
+			if xo == 0 {
+				lhs, rhs = sext(uint64(uint32(a)), 32), sext(uint64(uint32(b)), 32)
+			} else {
+				lhs, rhs = uint64(uint32(a)), uint64(uint32(b))
+			}
+		}
+		r := uint32(2)
+		if xo == 0 {
+			if int64(lhs) < int64(rhs) {
+				r = 8
+			} else if int64(lhs) > int64(rhs) {
+				r = 4
+			}
+		} else {
+			if lhs < rhs {
+				r = 8
+			} else if lhs > rhs {
+				r = 4
+			}
+		}
+		if c.XER&XERSO != 0 {
+			r |= 1
+		}
+		c.crfield(int(op>>23&7), r)
+		return nil
+	case 4, 68:
+		lhs, rhs := a, b
+		if xo == 4 {
+			lhs, rhs = sext(uint64(uint32(a)), 32), sext(uint64(uint32(b)), 32)
+		}
+		to := rs
+		if to&16 != 0 && int64(lhs) < int64(rhs) || to&8 != 0 && int64(lhs) > int64(rhs) || to&4 != 0 && lhs == rhs || to&2 != 0 && lhs < rhs || to&1 != 0 && lhs > rhs {
+			return &exception{vector: 0x700, status: 1 << 17}
+		}
+		return nil
+	case 19:
+		result = uint64(c.CR)
+		writeRT = true
+		record = false
+	case 144:
+		fm := op >> 12 & 255
+		for f := 0; f < 8; f++ {
+			if fm&(1<<uint(7-f)) != 0 {
+				c.crfield(f, uint32(s>>uint(28-f*4)))
+			}
+		}
+		return nil
+	case 83:
+		result = c.MSR
+		writeRT = true
+		record = false
+	case 146, 178:
+		if op&(1<<16) != 0 {
+			c.MSR = c.MSR&^(MSREE|1<<1) | (s & (MSREE | 1<<1))
+		} else {
+			c.MSR = s
+		}
+		return nil
+	case 339, 371:
+		result = c.readSPR(sprnum(op))
+		writeRT = true
+		record = false
+	case 467:
+		c.writeSPR(sprnum(op), s)
+		return nil
+	case 23, 55, 87, 119, 279, 311, 343, 375, 21, 53, 341, 373, 532, 534, 790:
+		width := 4
+		update := false
+		signed := false
+		reverse := false
+		switch xo {
+		case 55:
+			update = true
+		case 87:
+			width = 1
+		case 119:
+			width = 1
+			update = true
+		case 279:
+			width = 2
+		case 311:
+			width = 2
+			update = true
+		case 343:
+			width = 2
+			signed = true
+		case 375:
+			width = 2
+			signed = true
+			update = true
+		case 21:
+			width = 8
+		case 53:
+			width = 8
+			update = true
+		case 341:
+			signed = true
+		case 373:
+			signed = true
+			update = true
+		case 532:
+			width = 8
+			reverse = true
+		case 534:
+			reverse = true
+		case 790:
+			width = 2
+			reverse = true
+		}
+		v, e := c.read(address, width, rt.Read)
+		if e != nil {
+			return e
+		}
+		if reverse {
+			v = swap(v, width)
+		}
+		if signed {
+			v = sext(v, uint(width*8))
+		}
+		c.GPR[rs] = v
+		if update {
+			c.GPR[ra] = address
+		}
+		return nil
+	case 151, 183, 215, 247, 407, 439, 149, 181, 660, 662, 918:
+		width := 4
+		update := false
+		reverse := false
+		switch xo {
+		case 183:
+			update = true
+		case 215:
+			width = 1
+		case 247:
+			width = 1
+			update = true
+		case 407:
+			width = 2
+		case 439:
+			width = 2
+			update = true
+		case 149:
+			width = 8
+		case 181:
+			width = 8
+			update = true
+		case 660:
+			width = 8
+			reverse = true
+		case 662:
+			reverse = true
+		case 918:
+			width = 2
+			reverse = true
+		}
+		if reverse {
+			s = swap(s, width)
+		}
+		if e := c.write(address, width, s); e != nil {
+			return e
+		}
+		if update {
+			c.GPR[ra] = address
+		}
+		return nil
+	case 20, 84:
+		width := 4
+		if xo == 84 {
+			width = 8
+		}
+		v, e := c.read(address, width, rt.Read)
+		if e != nil {
+			return e
+		}
+		p, e := c.physical(address, rt.Read)
+		if e != nil {
+			return e
+		}
+		c.Reservation = p &^ 127
+		c.Reserved = true
+		c.GPR[rs] = v
+		return nil
+	case 150, 214:
+		width := 4
+		if xo == 214 {
+			width = 8
+		}
+		p, e := c.physical(address, rt.Write)
+		if e != nil {
+			return e
+		}
+		r := uint32(0)
+		if c.XER&XERSO != 0 {
+			r = 1
+		}
+		if c.Reserved && c.Reservation == p&^127 {
+			if e := c.write(address, width, s); e != nil {
+				return e
+			}
+			r |= 2
+		}
+		c.Reserved = false
+		c.crfield(0, r)
+		return nil
+	case 24:
+		if b&32 == 0 {
+			result = uint64(uint32(s) << uint(b&31))
+		}
+		writeRA = true
+	case 536:
+		if b&32 == 0 {
+			result = uint64(uint32(s) >> uint(b&31))
+		}
+		writeRA = true
+	case 27:
+		if b&64 == 0 {
+			result = s << uint(b&63)
+		}
+		writeRA = true
+	case 539:
+		if b&64 == 0 {
+			result = s >> uint(b&63)
+		}
+		writeRA = true
+	case 26:
+		result = uint64(bits.LeadingZeros32(uint32(s)))
+		writeRA = true
+	case 58:
+		result = uint64(bits.LeadingZeros64(s))
+		writeRA = true
+	case 28:
+		result = s & b
+		writeRA = true
+	case 60:
+		result = s &^ b
+		writeRA = true
+	case 124:
+		result = ^(s | b)
+		writeRA = true
+	case 284:
+		result = ^(s ^ b)
+		writeRA = true
+	case 316:
+		result = s ^ b
+		writeRA = true
+	case 412:
+		result = s | ^b
+		writeRA = true
+	case 444:
+		result = s | b
+		writeRA = true
+	case 476:
+		result = ^(s & b)
+		writeRA = true
+	case 922:
+		result = sext(s&65535, 16)
+		writeRA = true
+	case 954:
+		result = sext(s&255, 8)
+		writeRA = true
+	case 986:
+		result = sext(s&0xffffffff, 32)
+		writeRA = true
+	case 792, 824, 794:
+		width := uint(32)
+		shift := uint(b & 63)
+		if xo == 824 {
+			shift = uint(rb)
+		}
+		if xo == 794 {
+			width = 64
+			shift = uint(b & 127)
+		}
+		v := s
+		if width == 32 {
+			v = sext(uint64(uint32(v)), 32)
+		}
+		if shift >= width {
+			result = uint64(int64(v) >> 63)
+			c.carry(int64(v) < 0)
+		} else {
+			result = uint64(int64(v) >> shift)
+			c.carry(int64(v) < 0 && v&((uint64(1)<<shift)-1) != 0)
+		}
+		writeRA = true
+	case 826, 827: // sradi uses one extra shift bit in the XO field
+		shift := uint(rb) | uint(op&2)<<4
+		result = uint64(int64(s) >> shift)
+		c.carry(int64(s) < 0 && s&((uint64(1)<<shift)-1) != 0)
+		writeRA = true
+	case 598, 854, 86, 54, 246, 278, 470, 982, 306, 370, 566: // barriers/cache/TLB operations in a coherent uniprocessor
+		return nil
+	case 1014:
+		start := address &^ 127
+		for off := uint64(0); off < 128; off += 8 {
+			if e := c.write(start+off, 8, 0); e != nil {
+				return e
+			}
+		}
+		return nil
+	case 402:
+		c.SLBVersion++
+		index := int(b & 63)
+		c.SLB[index] = SLB{ESID: b, VSID: s}
+		return nil
+	case 434:
+		c.SLBVersion++
+		for i := 1; i < len(c.SLB); i++ {
+			c.SLB[i] = SLB{}
+		}
+		return nil
+	case 498:
+		c.SLBVersion++
+		esid := b &^ uint64(0xfffffff)
+		for i := range c.SLB {
+			if c.SLB[i].ESID&^uint64(0xfffffff) == esid {
+				c.SLB[i] = SLB{}
+			}
+		}
+		return nil
+	case 851, 915:
+		entry := c.SLB[b&63]
+		result = entry.VSID
+		if xo == 915 {
+			result = entry.ESID
+		}
+		writeRT = true
+		record = false
+	case 659, 595:
+		result = 0
+		writeRT = true
+		record = false
+	case 506:
+		result = uint64(bits.OnesCount64(s))
+		writeRA = true
+	case 122:
+		for i := uint(0); i < 64; i += 8 {
+			result |= uint64(bits.OnesCount8(byte(s>>i))) << i
+		}
+		writeRA = true
+	case 378:
+		result = uint64(bits.OnesCount32(uint32(s))) | uint64(bits.OnesCount32(uint32(s>>32)))<<32
+		writeRA = true
+	case 508: // cmpb
+		for i := uint(0); i < 64; i += 8 {
+			if byte(s>>i) == byte(b>>i) {
+				result |= 255 << i
+			}
+		}
+		writeRA = true
+	default:
+		base := xo & 511
+		oe := xo&512 != 0
+		switch base {
+		case 266, 10, 138, 234, 202:
+			rhs := b
+			carry := uint64(0)
+			if base == 138 || base == 234 || base == 202 {
+				if c.XER&XERCA != 0 {
+					carry = 1
+				}
+			}
+			if base == 234 {
+				rhs = ^uint64(0)
+			}
+			if base == 202 {
+				rhs = 0
+			}
+			sum, ca := bits.Add64(a, rhs, carry)
+			result = sum
+			if base != 266 {
+				c.carry(ca != 0)
+			}
+			if oe {
+				c.overflow((^(a^rhs)&(a^result))>>63 != 0)
+			}
+			writeRT = true
+		case 40, 8, 136, 232, 200:
+			rhs := b
+			carry := uint64(1)
+			if base == 136 || base == 232 || base == 200 {
+				carry = 0
+				if c.XER&XERCA != 0 {
+					carry = 1
+				}
+			}
+			if base == 232 {
+				rhs = ^uint64(0)
+			}
+			if base == 200 {
+				rhs = 0
+			}
+			sum, ca := bits.Add64(^a, rhs, carry)
+			result = sum
+			if base != 40 {
+				c.carry(ca != 0)
+			}
+			if oe {
+				c.overflow(((a^rhs)&(rhs^result))>>63 != 0)
+			}
+			writeRT = true
+		case 104:
+			result = 0 - a
+			writeRT = true
+			if oe {
+				c.overflow(a == 1<<63)
+			}
+		case 235:
+			result = sext(uint64(uint32(a)*uint32(b)), 32)
+			writeRT = true
+		case 233:
+			result = a * b
+			writeRT = true
+		case 11:
+			result = uint64(uint32((uint64(uint32(a)) * uint64(uint32(b))) >> 32))
+			writeRT = true
+		case 75:
+			result = uint64((int64(int32(a)) * int64(int32(b))) >> 32)
+			writeRT = true
+		case 9:
+			hi, _ := bits.Mul64(a, b)
+			result = hi
+			writeRT = true
+		case 73:
+			hi, _ := bits.Mul64(a, b)
+			if int64(a) < 0 {
+				hi -= b
+			}
+			if int64(b) < 0 {
+				hi -= a
+			}
+			result = hi
+			writeRT = true
+		case 459:
+			if uint32(b) != 0 {
+				result = uint64(uint32(a) / uint32(b))
+			}
+			writeRT = true
+		case 491:
+			if int32(b) != 0 {
+				result = sext(uint64(uint32(int32(a)/int32(b))), 32)
+			}
+			writeRT = true
+		case 457:
+			if b != 0 {
+				result = a / b
+			}
+			writeRT = true
+		case 489:
+			if b != 0 {
+				result = uint64(int64(a) / int64(b))
+			}
+			writeRT = true
+		default:
+			return fmt.Errorf("unsupported X opcode %d (word %08x)", xo, op)
+		}
+	}
+	if writeRT {
+		c.GPR[rs] = result
+	}
+	if writeRA {
+		c.GPR[ra] = result
+	}
+	if record {
+		c.record(result)
+	}
+	return nil
+}
+
+-- lower.go --
+package power64
+
+import (
+	"renvo.dev/internal/rfe/engine"
+	emu "renvo.dev/internal/rfe/runtime"
+)
+
+// EndianPolicy is an immutable decoder annotation. An adapter may set it only
+// when its code-context/version guards separate the two fetch byte orders.
+// Generic buses leave Decoded nil and retain dynamic MSR.LE selection.
+type EndianPolicy struct{ Little bool }
+
+type memoryForm struct {
+	size                                   int
+	load, update, signed, reverse, indexed bool
+}
+
+func scalarMemory(op uint32) (d memoryForm, ok bool) {
+	p, x := op>>26, op>>1&1023
+	d.size = 4
+	switch p {
+	case 32, 33, 34, 35, 40, 41, 42, 43, 58:
+		d.load = true
+		d.update = p&1 != 0
+		d.signed = p == 42 || p == 43
+		if p == 34 || p == 35 {
+			d.size = 1
+		}
+		if p >= 40 && p <= 43 {
+			d.size = 2
+		}
+		if p == 58 {
+			if op&3 == 3 {
+				return d, false
+			}
+			d.size = 8
+			d.update = op&3 == 1
+			d.signed = op&3 == 2
+			if d.signed {
+				d.size = 4
+			}
+		}
+	case 36, 37, 38, 39, 44, 45, 62:
+		d.update = p&1 != 0
+		if p == 38 || p == 39 {
+			d.size = 1
+		}
+		if p == 44 || p == 45 {
+			d.size = 2
+		}
+		if p == 62 {
+			if op&3 > 1 {
+				return d, false
+			}
+			d.size = 8
+			d.update = op&3 == 1
+		}
+	case 31:
+		d.indexed = true
+		switch x {
+		case 23, 55, 87, 119, 279, 311, 343, 375, 21, 53, 341, 373, 532, 534, 790:
+			d.load = true
+			d.update = x == 55 || x == 119 || x == 311 || x == 375 || x == 53 || x == 373
+			d.signed = x == 343 || x == 375 || x == 341 || x == 373
+			d.reverse = x == 532 || x == 534 || x == 790
+			if x == 87 || x == 119 {
+				d.size = 1
+			}
+			if x == 279 || x == 311 || x == 343 || x == 375 || x == 790 {
+				d.size = 2
+			}
+			if x == 21 || x == 53 || x == 532 {
+				d.size = 8
+			}
+		case 151, 183, 215, 247, 407, 439, 149, 181, 660, 662, 918:
+			d.update = x == 183 || x == 247 || x == 439 || x == 181
+			d.reverse = x == 660 || x == 662 || x == 918
+			if x == 215 || x == 247 {
+				d.size = 1
+			}
+			if x == 407 || x == 439 || x == 918 {
+				d.size = 2
+			}
+			if x == 149 || x == 181 || x == 660 {
+				d.size = 8
+			}
+		default:
+			return d, false
+		}
+	default:
+		return d, false
+	}
+	return d, true
+}
+
+// Classification is independent of mutable CPU state. Privileged operations,
+// atomics, traps and timer reads retain precise architectural slow execution.
+func lowerable(op uint32) (memory, ok bool) {
+	if _, ok := scalarMemory(op); ok {
+		return true, true
+	}
+	p, x := op>>26, op>>1&1023
+	switch p {
+	case 7, 8, 10, 11, 12, 13, 14, 15, 16, 18, 20, 21, 23, 24, 25, 26, 27, 28, 29:
+		return false, true
+	case 30:
+		return false, (op>>2&7) <= 3 || op>>1&15 == 8 || op>>1&15 == 9
+	case 19:
+		switch x {
+		case 0, 16, 528, 33, 129, 193, 225, 257, 289, 417, 449:
+			return false, true
+		}
+	case 31:
+		switch x {
+		case 103, 231: // vector memory retains precise slow execution
+			return true, false
+		case 0, 32, 19, 144, 24, 536, 27, 539, 26, 58, 28, 60, 124, 284, 316, 412, 444, 476, 922, 954, 986, 792, 824, 794, 826, 827, 506, 122, 378, 508, 659, 595:
+			return false, true
+		case 339, 371, 467:
+			s := sprnum(op)
+			return false, s == 1 || s == 8 || s == 9
+		}
+		switch x & 511 {
+		case 266, 10, 138, 234, 202, 40, 8, 136, 232, 200, 104, 235, 233, 11, 75, 9, 73, 459, 491, 457, 489:
+			return false, true
+		}
+	}
+	return false, false
+}
+func Architecture() engine.Architecture {
+	return engine.Architecture{Name: "power64", StateWords: StateWords, PC: StatePC, Alignment: 4, Fetch: fetchPower, Lower: LowerInstruction}
+}
+func fetchPower(memory engine.Memory, pc uint64) (engine.Instruction, error) {
+	word, err := memory.Read(pc, 4, true)
+	if err != nil {
+		return engine.Instruction{}, err
+	}
+	op := uint32(word)
+	mem, ok := lowerable(op)
+	ins := engine.Instruction{PC: pc, Bits: word, Length: 4, Memory: mem, InterpretOnly: !ok, ScheduleBoundary: !ok, Flow: engine.Successors{Next: pc + 4, Known: true}}
+	switch op >> 26 {
+	case 18:
+		target := sext(uint64(op&0x3fffffc), 26)
+		if op&2 == 0 {
+			target += pc
+		}
+		ins.Terminal = true
+		ins.Flow.Next = target
+		// The link bit writes LR but does not make this immediate target
+		// dynamic. Region lowering retains the LR write and full-PC guard.
+		ins.Flow.Known = true
+	case 16:
+		target := sext(uint64(op&0xfffc), 16)
+		if op&2 == 0 {
+			target += pc
+		}
+		ins.Terminal = true
+		ins.Flow = engine.Successors{Next: target, Alternate: pc + 4, Conditional: true, Known: true}
+	case 19:
+		if x := op >> 1 & 1023; x == 16 || x == 528 {
+			ins.Terminal = true
+			ins.Flow.Known = false
+		}
+	}
+	return ins, nil
+}
+func bitAnd(b *emu.Builder, v emu.Value, mask uint64) emu.Value {
+	return b.Binary(emu.And, v, b.Constant(mask))
+}
+func invert(b *emu.Builder, v emu.Value) emu.Value {
+	return b.Binary(emu.Xor, v, b.Constant(^uint64(0)))
+}
+func nonzero(b *emu.Builder, v emu.Value) emu.Value {
+	return b.Binary(emu.Equal, b.Binary(emu.Equal, v, b.Constant(0)), b.Constant(0))
+}
+func signExtend(b *emu.Builder, v emu.Value, width int) emu.Value {
+	return b.VariableShift(emu.ArithmeticShr, b.Shift(emu.Shl, v, uint64(64-width)), b.Constant(uint64(64-width)), 64)
+}
+func signedLess(b *emu.Builder, a, c emu.Value) emu.Value {
+	return b.Binary(emu.Less, b.Binary(emu.Xor, a, b.Constant(1<<63)), b.Binary(emu.Xor, c, b.Constant(1<<63)))
+}
+func crField(b *emu.Builder, field int, v emu.Value) {
+	shift := uint64(28 - field*4)
+	b.Store(StateCR, b.Binary(emu.Or, bitAnd(b, b.Load(StateCR), 0xffffffff & ^(uint64(15)<<shift)), b.Shift(emu.Shl, bitAnd(b, v, 15), shift)))
+}
+func crFromFlags(b *emu.Builder, flags emu.Value, lessCondition, greaterCondition int, field int) {
+	less, _ := b.FlagCondition(flags, lessCondition)
+	greater, _ := b.FlagCondition(flags, greaterCondition)
+	equal, _ := b.FlagCondition(flags, 0)
+	v := b.Binary(emu.Or, b.Shift(emu.Shl, less, 3), b.Binary(emu.Or, b.Shift(emu.Shl, greater, 2), b.Shift(emu.Shl, equal, 1)))
+	crField(b, field, b.Binary(emu.Or, v, bitAnd(b, b.Shift(emu.Shr, b.Load(StateXER), 31), 1)))
+}
+func compareCR(b *emu.Builder, a, c emu.Value, width int, signed bool, field int) {
+	less, greater := 3, 8 // unsigned LO/HI predicates
+	if signed {
+		less, greater = 11, 12
+	} // signed LT/GT predicates
+	crFromFlags(b, b.ArithmeticFlags(a, c, width, true), less, greater, field)
+}
+func recordCR(b *emu.Builder, v emu.Value) {
+	crFromFlags(b, b.LogicalFlags(v, 64), 4, 12, 0)
+}
+func carryXER(b *emu.Builder, on emu.Value) {
+	b.Store(StateXER, b.Binary(emu.Or, bitAnd(b, b.Load(StateXER), ^XERCA), b.Shift(emu.Shl, on, 29)))
+}
+func overflowXER(b *emu.Builder, on emu.Value) {
+	b.Store(StateXER, b.Binary(emu.Or, bitAnd(b, b.Load(StateXER), ^XEROV), b.Choose(on, b.Constant(XEROV|XERSO), b.Constant(0))))
+}
+func branchTest(b *emu.Builder, bo, bi uint32, decrement bool) emu.Value {
+	count := b.Constant(1)
+	if decrement && bo&4 == 0 {
+		ctr := b.Binary(emu.Sub, b.Load(StateCTR), b.Constant(1))
+		b.Store(StateCTR, ctr)
+		count = nonzero(b, ctr)
+		if bo&2 != 0 {
+			count = b.Binary(emu.Xor, count, b.Constant(1))
+		}
+	}
+	condition := b.Constant(1)
+	if bo&16 == 0 {
+		condition = bitAnd(b, b.Shift(emu.Shr, b.Load(StateCR), uint64(31-bi)), 1)
+		if bo&8 == 0 {
+			condition = b.Binary(emu.Xor, condition, b.Constant(1))
+		}
+	}
+	return b.Binary(emu.And, count, condition)
+}
+func reverseValue(b *emu.Builder, v emu.Value, size int) emu.Value {
+	if size == 1 {
+		return v
+	}
+	width := 32
+	if size == 8 {
+		width = 64
+	}
+	return b.RichUnary(emu.ReverseBytes, v, width, size*8)
+}
+func LowerInstruction(b *emu.Builder, ins engine.Instruction, completed int) bool {
+	op, pc := uint32(ins.Bits), ins.PC
+	mem, ok := lowerable(op)
+	if !ok {
+		return false
+	} // rejection never mutates the builder
+	rs, ra, rb := int(op>>21&31), int(op>>16&31), int(op>>11&31)
+	p := op >> 26
+	if mem {
+		d, _ := scalarMemory(op)
+		b.Store(StatePC, b.Constant(pc))
+		b.Checkpoint(StateWords, completed)
+		base := b.Constant(0)
+		if ra != 0 {
+			base = b.Load(ra)
+		}
+		off := b.Constant(sext(uint64(op&65535), 16))
+		if p == 58 || p == 62 {
+			off = b.Constant(sext(uint64(op&0xfffc), 16))
+		}
+		if d.indexed {
+			off = b.Load(rb)
+		}
+		address := b.Binary(emu.Add, base, off)
+		endian := func(v emu.Value) emu.Value {
+			if policy, ok := ins.Decoded.(EndianPolicy); ok {
+				if policy.Little {
+					return v
+				}
+				return reverseValue(b, v, d.size)
+			}
+			le := nonzero(b, bitAnd(b, b.Load(StateMSR), MSRLE))
+			return b.Choose(le, v, reverseValue(b, v, d.size))
+		}
+		if d.load {
+			v := endian(b.MemoryLoad(address, d.size))
+			if d.reverse {
+				v = reverseValue(b, v, d.size)
+			}
+			if d.signed {
+				v = signExtend(b, v, d.size*8)
+			}
+			b.Store(rs, v)
+		} else {
+			v := b.Load(rs)
+			if d.reverse {
+				v = reverseValue(b, v, d.size)
+			}
+			v = endian(v)
+			b.MemoryStore(address, v, d.size)
+		}
+		if d.update {
+			b.Store(ra, address)
+		}
+		b.Store(StatePC, b.Constant(pc+4))
+		return true
+	}
+	a, c, s := b.Load(ra), b.Load(rb), b.Load(rs)
+	imm := b.Constant(sext(uint64(op&65535), 16))
+	result := b.Constant(0)
+	dst, record := -1, false
+	switch p {
+	case 7:
+		result = b.Binary(emu.Mul, a, imm)
+		dst = rs
+	case 8:
+		result = b.Binary(emu.Sub, imm, a)
+		carryXER(b, b.Binary(emu.Equal, b.Binary(emu.Less, imm, a), b.Constant(0)))
+		dst = rs
+	case 10, 11:
+		rhs := imm
+		if p == 10 {
+			rhs = b.Constant(uint64(op & 65535))
+		}
+		width := 64
+		if op&(1<<21) == 0 {
+			width = 32
+		}
+		// CMP predicates have the architectural width; widening signed word
+		// operands first only introduces redundant shifts and allocations.
+		compareCR(b, a, rhs, width, p == 11, int(op>>23&7))
+	case 12, 13:
+		result = b.Binary(emu.Add, a, imm)
+		carryXER(b, b.Binary(emu.Less, result, a))
+		dst = rs
+		record = p == 13
+	case 14, 15:
+		base := b.Constant(0)
+		if ra != 0 {
+			base = a
+		}
+		if p == 15 {
+			imm = b.Shift(emu.Shl, imm, 16)
+		}
+		result = b.Binary(emu.Add, base, imm)
+		dst = rs
+	case 16, 18:
+		target := sext(uint64(op&0xfffc), 16)
+		if p == 18 {
+			target = sext(uint64(op&0x3fffffc), 26)
+		}
+		if op&2 == 0 {
+			target += pc
+		}
+		next := b.Constant(target)
+		if p == 16 {
+			next = b.Choose(branchTest(b, uint32(rs), uint32(ra), true), next, b.Constant(pc+4))
+		}
+		b.Store(StatePC, next)
+		if op&1 != 0 {
+			b.Store(StateLR, b.Constant(pc+4))
+		}
+		return true
+	case 19:
+		x := op >> 1 & 1023
+		switch x {
+		case 16, 528:
+			slot := StateLR
+			if x == 528 {
+				slot = StateCTR
+			}
+			target := bitAnd(b, b.Load(slot), ^uint64(3))
+			cond := branchTest(b, uint32(rs), uint32(ra), x == 16)
+			b.Store(StatePC, b.Choose(cond, target, b.Constant(pc+4)))
+			if op&1 != 0 {
+				b.Store(StateLR, b.Constant(pc+4))
+			}
+			return true
+		case 0:
+			crField(b, int(op>>23&7), bitAnd(b, b.Shift(emu.Shr, b.Load(StateCR), uint64(28-int(op>>18&7)*4)), 15))
+		default:
+			lhs := bitAnd(b, b.Shift(emu.Shr, b.Load(StateCR), uint64(31-ra)), 1)
+			rhs := bitAnd(b, b.Shift(emu.Shr, b.Load(StateCR), uint64(31-rb)), 1)
+			switch x {
+			case 33:
+				result = invert(b, b.Binary(emu.Or, lhs, rhs))
+			case 129:
+				result = b.Binary(emu.And, lhs, invert(b, rhs))
+			case 193:
+				result = b.Binary(emu.Xor, lhs, rhs)
+			case 225:
+				result = invert(b, b.Binary(emu.And, lhs, rhs))
+			case 257:
+				result = b.Binary(emu.And, lhs, rhs)
+			case 289:
+				result = invert(b, b.Binary(emu.Xor, lhs, rhs))
+			case 417:
+				result = b.Binary(emu.Or, lhs, invert(b, rhs))
+			case 449:
+				result = b.Binary(emu.Or, lhs, rhs)
+			}
+			shift := uint64(31 - rs)
+			b.Store(StateCR, b.Binary(emu.Or, bitAnd(b, b.Load(StateCR), 0xffffffff & ^(uint64(1)<<shift)), b.Shift(emu.Shl, bitAnd(b, result, 1), shift)))
+		}
+	case 20, 21, 23, 30:
+		width, sh := 32, b.Constant(uint64(rb))
+		m := mask(uint(op>>6&31), uint(op>>1&31), 32)
+		merge := p == 20
+		if p == 23 {
+			sh = bitAnd(b, c, 31)
+		}
+		if p == 30 {
+			width = 64
+			amount := uint(rb) | uint(op>>1&1)<<5
+			sh = b.Constant(uint64(amount))
+			mb := uint(op>>6&31) | uint(op&32)
+			x := op >> 2 & 7
+			switch x {
+			case 0:
+				m = mask(mb, 63, 64)
+			case 1:
+				m = mask(0, mb, 64)
+			case 2, 3:
+				m = mask(mb, 63-amount, 64)
+				merge = x == 3
+			default:
+				sh = bitAnd(b, c, 63)
+				if op>>1&15 == 8 {
+					m = mask(mb, 63, 64)
+				} else {
+					m = mask(0, mb, 64)
+				}
+			}
+		}
+		rot := b.VariableShift(emu.RotateRight, s, b.Binary(emu.Sub, b.Constant(0), sh), width)
+		result = bitAnd(b, rot, m)
+		if merge {
+			result = b.Binary(emu.Or, result, bitAnd(b, a, ^m))
+		}
+		dst = ra
+		record = op&1 != 0
+	case 24, 25, 26, 27, 28, 29:
+		v := uint64(op & 65535)
+		if p&1 != 0 {
+			v <<= 16
+		}
+		kind := emu.Or
+		if p == 26 || p == 27 {
+			kind = emu.Xor
+		}
+		if p == 28 || p == 29 {
+			kind = emu.And
+			record = true
+		}
+		result = b.Binary(kind, s, b.Constant(v))
+		dst = ra
+	case 31:
+		return lowerX(b, op, pc)
+	}
+	if dst >= 0 {
+		b.Store(dst, result)
+	}
+	if record {
+		recordCR(b, result)
+	}
+	b.Store(StatePC, b.Constant(pc+4))
+	return true
+}
+
+-- lower_memory_test.go --
+package power64
+
+import (
+	"bytes"
+	"encoding/binary"
+	"renvo.dev/internal/rfe/engine"
+	emu "renvo.dev/internal/rfe/runtime"
+	"testing"
+)
+
+func TestNativeScalarMemoryEndianUpdateReverseAndAliases(t *testing.T) {
+	n, e := emu.NewNative(8 << 20)
+	if e != nil {
+		if nativeHost() {
+			t.Fatal(e)
+		}
+		t.Skip(e)
+	}
+	defer n.Close()
+	var forms []uint32
+	for _, p := range []uint32{32, 33, 34, 35, 40, 41, 42, 43, 58, 36, 37, 38, 39, 44, 45, 62} {
+		forms = append(forms, p<<26|4)
+		if p == 58 {
+			forms = append(forms, p<<26|5, p<<26|6)
+		}
+		if p == 62 {
+			forms = append(forms, p<<26|5)
+		}
+	}
+	for _, x := range []uint32{23, 55, 87, 119, 279, 311, 343, 375, 21, 53, 341, 373, 532, 534, 790, 151, 183, 215, 247, 407, 439, 149, 181, 660, 662, 918} {
+		forms = append(forms, 31<<26|x<<1)
+	}
+	for _, le := range []bool{false, true} {
+		for _, form := range forms {
+			for _, rs := range []uint32{3, 4, 5} {
+				op := form | rs<<21 | 4<<16
+				d, _ := scalarMemory(op)
+				if d.indexed {
+					op |= 5 << 11
+				}
+				expected := memoryBus(make([]byte, 65536))
+				actual := memoryBus(make([]byte, 65536))
+				for i := 0; i < 4096; i++ {
+					expected[0x8000+i] = byte(i*73 + 41)
+				}
+				copy(actual, expected)
+				cpu := CPU{Bus: expected, PC: 0x1000, MSR: MSRSF, LR: 0x8888, CTR: 77, XER: XERSO, CR: 0x12345678}
+				if le {
+					cpu.MSR |= MSRLE
+				}
+				cpu.GPR[3], cpu.GPR[4], cpu.GPR[5] = 0x80ff0180a1b2c3d4, 0x8003, 19
+				c := NewTierCPU(&cpu, nil)
+				state := c.State
+				if e := cpu.Execute(op); e != nil {
+					t.Fatal(e)
+				}
+				c.Import()
+				want := c.State
+				var b emu.Builder
+				if !LowerInstruction(&b, engine.Instruction{PC: 0x1000, Bits: uint64(op), Length: 4}, 0) {
+					t.Fatalf("memory rejection %08x", op)
+				}
+				b.Checkpoint(StateWords, 1)
+				ops := b.FinishMemory(StateWords)
+				entry, e := n.CompileMemory(ops, StateWords)
+				if e != nil {
+					t.Fatalf("compile %08x: %v", op, e)
+				}
+				clock := uint64(1)
+				ctx := &emu.MemoryContext{}
+				ctx.Clock = &clock
+				ctx.Fill(8, (*[4096]byte)(actual[0x8000:0x9000]), 3, &clock)
+				if e := n.CallMemory(entry, state[:], ctx); e != nil || ctx.Status != 0 || ctx.Retired != 1 {
+					t.Fatalf("native op=%08x LE=%t status=%d retired=%d err=%v", op, le, ctx.Status, ctx.Retired, e)
+				}
+				if state != want || !bytes.Equal(expected, actual) {
+					t.Fatalf("op=%08x LE=%t state=%x want=%x", op, le, state, want)
+				}
+			}
+		}
+	}
+	// Cross-page stores must exit before any access or RA update, even when the
+	// first descriptor is writable. The architectural CPU owns the complete check.
+	op := uint32(37<<26 | 3<<21 | 4<<16)
+	var b emu.Builder
+	LowerInstruction(&b, engine.Instruction{PC: 0x1000, Bits: uint64(op), Length: 4}, 0)
+	b.Checkpoint(StateWords, 1)
+	entry, e := n.CompileMemory(b.FinishMemory(StateWords), StateWords)
+	if e != nil {
+		t.Fatal(e)
+	}
+	data := make([]byte, 8192)
+	binary.LittleEndian.PutUint32(data[4092:], 0xaabbccdd)
+	state := [StateWords]uint64{}
+	state[StatePC], state[StateMSR], state[3], state[4] = 0x1000, MSRSF|MSRLE, 0x12345678, 4095
+	clock := uint64(1)
+	ctx := &emu.MemoryContext{}
+	ctx.Clock = &clock
+	ctx.Fill(0, (*[4096]byte)(data[:4096]), 3, &clock)
+	if e := n.CallMemory(entry, state[:], ctx); e != nil || ctx.Status != 1 || ctx.Retired != 0 || ctx.Address != 4095 || state[StatePC] != 0x1000 || state[4] != 4095 || binary.LittleEndian.Uint32(data[4092:]) != 0xaabbccdd {
+		t.Fatal("partial native cross-page store", ctx.Status, ctx.Retired, state, e)
+	}
+}
+
+-- lower_test.go --
+package power64
+
+import (
+	"math/rand"
+	"renvo.dev/internal/rfe/engine"
+	emu "renvo.dev/internal/rfe/runtime"
+	"runtime"
+	"testing"
+)
+
+func nativeHost() bool {
+	return (runtime.GOOS == "linux" || runtime.GOOS == "windows") && (runtime.GOARCH == "amd64" || runtime.GOARCH == "arm64") || runtime.GOOS == "darwin" && runtime.GOARCH == "arm64"
+}
+func TestIntegerLoweringAllTiers(t *testing.T) {
+	n, e := emu.NewNative(16 << 20)
+	if e != nil && nativeHost() {
+		t.Fatal(e)
+	}
+	if n != nil {
+		defer n.Close()
+	}
+	rng := rand.New(rand.NewSource(7331))
+	var words []uint32
+	for _, p := range []uint32{7, 8, 10, 11, 12, 13, 14, 15, 16, 18, 20, 21, 23, 24, 25, 26, 27, 28, 29, 30} {
+		for i := 0; i < 16; i++ {
+			w := p<<26 | uint32(rng.Intn(1<<26))
+			if _, ok := lowerable(w); ok {
+				words = append(words, w)
+			}
+		}
+	}
+	for _, x := range []uint32{0, 32, 19, 144, 24, 536, 27, 539, 26, 58, 28, 60, 124, 284, 316, 412, 444, 476, 922, 954, 986, 792, 824, 794, 826, 827, 506, 122, 378, 508, 659, 595, 266, 10, 138, 234, 202, 40, 8, 136, 232, 200, 104, 235, 233, 11, 75, 9, 73, 459, 491, 457, 489} {
+		for _, regs := range [][3]uint32{{3, 4, 5}, {3, 3, 5}, {3, 4, 3}, {0, 0, 0}, {31, 31, 31}} {
+			for _, rc := range []uint32{0, 1} {
+				words = append(words, 31<<26|regs[0]<<21|regs[1]<<16|regs[2]<<11|x<<1|rc)
+				// Arithmetic OE forms only: don't reinterpret a different X opcode.
+				if x == 266 || x == 10 || x == 138 || x == 40 || x == 8 || x == 136 || x == 104 {
+					words = append(words, words[len(words)-1]|1<<10)
+				}
+			}
+		}
+	}
+	for _, spr := range []uint32{1, 8, 9} {
+		for _, x := range []uint32{339, 371, 467} {
+			words = append(words, 31<<26|3<<21|(spr&31)<<16|(spr&0x3e0)<<6|x<<1)
+		}
+	}
+	for _, x := range []uint32{0, 16, 528, 33, 129, 193, 225, 257, 289, 417, 449} {
+		for i := 0; i < 8; i++ {
+			words = append(words, 19<<26|uint32(rng.Intn(1<<26))&^uint32(2046)|x<<1)
+		}
+	}
+	edges := []uint64{0, 1, 31, 32, 63, 64, 127, 128, 0x7fffffff, 0x80000000, 0xffffffff, 1<<63 - 1, 1 << 63, ^uint64(0)}
+	for _, op := range words {
+		var b emu.Builder
+		if !LowerInstruction(&b, engine.Instruction{PC: 0x1000, Bits: uint64(op), Length: 4}, 0) {
+			t.Fatalf("rejected %08x", op)
+		}
+		ops := b.Finish(StateWords)
+		entry := 0
+		if n != nil {
+			entry, e = n.Compile(ops, StateWords)
+			if e != nil {
+				t.Fatalf("compile %08x: %v", op, e)
+			}
+		}
+		for i := 0; i < 32; i++ {
+			cpu := CPU{PC: 0x1000, MSR: MSRSF | MSRLE, CR: rng.Uint32(), XER: rng.Uint64(), LR: rng.Uint64(), CTR: rng.Uint64()}
+			if i&1 != 0 {
+				cpu.MSR &^= MSRSF
+			}
+			for r := range cpu.GPR {
+				cpu.GPR[r] = rng.Uint64()
+			}
+			cpu.GPR[op>>16&31] = edges[i%len(edges)]
+			cpu.GPR[op>>11&31] = edges[(i*3)%len(edges)]
+			if i%4 == 0 {
+				cpu.CTR = uint64(i / 4)
+			}
+			adapter := NewTierCPU(&cpu, nil)
+			initial := adapter.State
+			if e := cpu.Execute(op); e != nil {
+				t.Fatalf("interpreter %08x: %v", op, e)
+			}
+			adapter.Import()
+			want := adapter.State
+			for _, native := range []bool{false, true} {
+				if native && n == nil {
+					continue
+				}
+				got := initial
+				var err error
+				if native {
+					err = n.Call(entry, got[:])
+				} else {
+					err = emu.Interpret(ops, got[:])
+				}
+				if err != nil {
+					t.Fatalf("op=%08x native=%t: %v", op, native, err)
+				}
+				for slot := range got {
+					if got[slot] != want[slot] {
+						t.Fatalf("op=%08x case=%d native=%t slot=%d got=%x want=%x initial=%x", op, i, native, slot, got[slot], want[slot], initial)
+					}
+				}
+			}
+		}
+	}
+}
+func TestLoweringRejectsWithoutBuilderMutation(t *testing.T) {
+	for _, op := range []uint32{0, 0x44000022, 31<<26 | 84<<1, 31<<26 | 178<<1, 31<<26 | 371<<1 | 12<<16, 58<<26 | 3, 62<<26 | 2} {
+		var b emu.Builder
+		b.Store(0, b.Constant(99))
+		before := len(b.Ops)
+		if LowerInstruction(&b, engine.Instruction{Bits: uint64(op)}, 0) || len(b.Ops) != before {
+			t.Fatalf("rejection mutated builder for %08x", op)
+		}
+	}
+}
+
+-- lower_x.go --
+package power64
+
+import emu "renvo.dev/internal/rfe/runtime"
+
+func lowerX(b *emu.Builder, op uint32, pc uint64) bool {
+	rs, ra, rb := int(op>>21&31), int(op>>16&31), int(op>>11&31)
+	x := op >> 1 & 1023
+	a, c, s := b.Load(ra), b.Load(rb), b.Load(rs)
+	result := b.Constant(0)
+	dst, record := -1, op&1 != 0
+	switch x {
+	case 0, 32:
+		width := 64
+		if op&(1<<21) == 0 {
+			width = 32
+		}
+		compareCR(b, a, c, width, x == 0, int(op>>23&7))
+		record = false
+	case 19:
+		result = b.Load(StateCR)
+		dst = rs
+		record = false
+	case 144:
+		fm := op >> 12 & 255
+		mask := uint64(0)
+		for f := 0; f < 8; f++ {
+			if fm&(1<<uint(7-f)) != 0 {
+				mask |= 15 << uint(28-f*4)
+			}
+		}
+		b.Store(StateCR, b.Binary(emu.Or, bitAnd(b, b.Load(StateCR), 0xffffffff & ^mask), bitAnd(b, s, mask)))
+		record = false
+	case 339, 371, 467:
+		slot := StateXER
+		switch sprnum(op) {
+		case 8:
+			slot = StateLR
+		case 9:
+			slot = StateCTR
+		}
+		if x == 467 {
+			b.Store(slot, s)
+		} else {
+			result = b.Load(slot)
+			dst = rs
+		}
+		record = false
+	case 24, 536, 27, 539:
+		width, kind := 32, emu.VariableShl
+		if x == 27 || x == 539 {
+			width = 64
+		}
+		if x == 536 || x == 539 {
+			kind = emu.VariableShr
+		}
+		v := b.VariableShift(kind, s, bitAnd(b, c, uint64(width-1)), width)
+		good := b.Binary(emu.Equal, bitAnd(b, c, uint64(width)), b.Constant(0))
+		result = b.Choose(good, v, b.Constant(0))
+		dst = ra
+	case 26, 58:
+		width := 32
+		if x == 58 {
+			width = 64
+		}
+		result = b.RichUnary(emu.LeadingZeros, s, width, 0)
+		dst = ra
+	case 28, 60, 124, 284, 316, 412, 444, 476:
+		switch x {
+		case 28:
+			result = b.Binary(emu.And, s, c)
+		case 60:
+			result = b.Binary(emu.And, s, invert(b, c))
+		case 124:
+			result = invert(b, b.Binary(emu.Or, s, c))
+		case 284:
+			result = invert(b, b.Binary(emu.Xor, s, c))
+		case 316:
+			result = b.Binary(emu.Xor, s, c)
+		case 412:
+			result = b.Binary(emu.Or, s, invert(b, c))
+		case 444:
+			result = b.Binary(emu.Or, s, c)
+		case 476:
+			result = invert(b, b.Binary(emu.And, s, c))
+		}
+		dst = ra
+	case 922, 954, 986:
+		width := 16
+		if x == 954 {
+			width = 8
+		}
+		if x == 986 {
+			width = 32
+		}
+		result = signExtend(b, s, width)
+		dst = ra
+	case 792, 824, 794, 826, 827:
+		width := 32
+		shift := bitAnd(b, c, 63)
+		if x == 824 {
+			shift = b.Constant(uint64(rb))
+		}
+		if x == 794 {
+			width = 64
+			shift = bitAnd(b, c, 127)
+		}
+		if x == 826 || x == 827 {
+			width = 64
+			shift = b.Constant(uint64(rb) | uint64(op&2)<<4)
+		}
+		value := s
+		if width == 32 {
+			value = signExtend(b, s, 32)
+		}
+		small := b.Binary(emu.Less, shift, b.Constant(uint64(width)))
+		clipped := b.Choose(small, shift, b.Constant(63))
+		result = b.VariableShift(emu.ArithmeticShr, value, clipped, 64)
+		// A negative input sets CA iff any discarded bit is nonzero. For an
+		// architectural overshift every negative value has discarded set bits.
+		discardedMask := b.Binary(emu.Sub, b.VariableShift(emu.VariableShl, b.Constant(1), shift, 64), b.Constant(1))
+		discarded := b.Choose(small, nonzero(b, b.Binary(emu.And, value, discardedMask)), b.Constant(1))
+		negative := b.Shift(emu.Shr, value, 63)
+		carryXER(b, b.Binary(emu.And, negative, discarded))
+		dst = ra
+	case 659, 595:
+		result = b.Constant(0)
+		dst = rs
+		record = false
+	case 506, 122, 378:
+		v := b.Binary(emu.Sub, s, bitAnd(b, b.Shift(emu.Shr, s, 1), 0x5555555555555555))
+		v = b.Binary(emu.Add, bitAnd(b, v, 0x3333333333333333), bitAnd(b, b.Shift(emu.Shr, v, 2), 0x3333333333333333))
+		v = bitAnd(b, b.Binary(emu.Add, v, b.Shift(emu.Shr, v, 4)), 0x0f0f0f0f0f0f0f0f)
+		result = v
+		if x == 506 {
+			result = b.Shift(emu.Shr, b.Binary(emu.Mul, v, b.Constant(0x0101010101010101)), 56)
+		}
+		if x == 378 {
+			lo := bitAnd(b, b.Shift(emu.Shr, b.Binary(emu.Mul, bitAnd(b, v, 0xffffffff), b.Constant(0x01010101)), 24), 255)
+			hi := bitAnd(b, b.Shift(emu.Shr, b.Binary(emu.Mul, b.Shift(emu.Shr, v, 32), b.Constant(0x01010101)), 24), 255)
+			result = b.Binary(emu.Or, lo, b.Shift(emu.Shl, hi, 32))
+		}
+		dst = ra
+	case 508:
+		for i := uint64(0); i < 64; i += 8 {
+			equal := b.Binary(emu.Equal, bitAnd(b, b.Shift(emu.Shr, s, i), 255), bitAnd(b, b.Shift(emu.Shr, c, i), 255))
+			result = b.Binary(emu.Or, result, b.Shift(emu.Shl, b.Binary(emu.Mul, equal, b.Constant(255)), i))
+		}
+		dst = ra
+	default:
+		base, oe := x&511, x&512 != 0
+		switch base {
+		case 266, 10, 138, 234, 202, 40, 8, 136, 232, 200:
+			rhs, carry, lhs := c, b.Constant(0), a
+			sub := base == 40 || base == 8 || base == 136 || base == 232 || base == 200
+			if base == 138 || base == 234 || base == 202 || base == 136 || base == 232 || base == 200 {
+				carry = bitAnd(b, b.Shift(emu.Shr, b.Load(StateXER), 29), 1)
+			}
+			if base == 234 || base == 232 {
+				rhs = b.Constant(^uint64(0))
+			}
+			if base == 202 || base == 200 {
+				rhs = b.Constant(0)
+			}
+			if sub {
+				lhs = invert(b, a)
+				if base == 40 || base == 8 {
+					carry = b.Constant(1)
+				}
+			}
+			partial := b.Binary(emu.Add, lhs, rhs)
+			result = b.Binary(emu.Add, partial, carry)
+			if base != 266 && base != 40 {
+				carryXER(b, b.Binary(emu.Or, b.Binary(emu.Less, partial, lhs), b.Binary(emu.Less, result, partial)))
+			}
+			if oe {
+				sign := b.Binary(emu.And, invert(b, b.Binary(emu.Xor, a, rhs)), b.Binary(emu.Xor, a, result))
+				if sub {
+					sign = b.Binary(emu.And, b.Binary(emu.Xor, a, rhs), b.Binary(emu.Xor, rhs, result))
+				}
+				overflowXER(b, b.Shift(emu.Shr, sign, 63))
+			}
+			dst = rs
+		case 104:
+			result = b.Binary(emu.Sub, b.Constant(0), a)
+			if oe {
+				overflowXER(b, b.Binary(emu.Equal, a, b.Constant(1<<63)))
+			}
+			dst = rs
+		case 235, 233:
+			result = b.Binary(emu.Mul, a, c)
+			if base == 235 {
+				result = signExtend(b, result, 32)
+			}
+			dst = rs
+		case 11, 75:
+			lhs, rhs := bitAnd(b, a, 0xffffffff), bitAnd(b, c, 0xffffffff)
+			if base == 75 {
+				lhs, rhs = signExtend(b, a, 32), signExtend(b, c, 32)
+			}
+			result = b.Shift(emu.Shr, b.Binary(emu.Mul, lhs, rhs), 32)
+			if base == 75 {
+				result = signExtend(b, result, 32)
+			}
+			dst = rs
+		case 9, 73:
+			result = b.MultiplyHigh(a, c, base == 73)
+			dst = rs
+		case 459, 491, 457, 489:
+			width, kind := 64, emu.UnsignedDivide
+			if base == 459 || base == 491 {
+				width = 32
+			}
+			if base == 491 || base == 489 {
+				kind = emu.SignedDivide
+			}
+			result = b.Divide(kind, a, c, width)
+			if base == 491 {
+				result = signExtend(b, result, 32)
+			}
+			divisor := c
+			if width == 32 {
+				divisor = bitAnd(b, divisor, 0xffffffff)
+			}
+			result = b.Choose(nonzero(b, divisor), result, b.Constant(0))
+			dst = rs
+		}
+	}
+	if dst >= 0 {
+		b.Store(dst, result)
+	}
+	if record {
+		recordCR(b, result)
+	}
+	b.Store(StatePC, b.Constant(pc+4))
+	return true
+}
+
+-- mask_test.go --
+package power64
+
+import "testing"
+
+func TestRotateMaskAllIntervals(t *testing.T) {
+	for _, width := range []uint{32, 64} {
+		for mb := uint(0); mb < width; mb++ {
+			for me := uint(0); me < width; me++ {
+				// Walk the architectural circular interval; independent of the two-edge
+				// shift implementation, including full-width, single-bit and wrap masks.
+				var want uint64
+				for bit := mb; ; bit = (bit + 1) % width {
+					want |= uint64(1) << (width - 1 - bit)
+					if bit == me {
+						break
+					}
+				}
+				if got := mask(mb, me, width); got != want {
+					t.Fatalf("width=%d mb=%d me=%d got=%x want=%x", width, mb, me, got, want)
+				}
+			}
+		}
+	}
+}
+
+-- population_test.go --
+package power64
+
+import "testing"
+
+func TestPopulationCountWidths(t *testing.T) {
+	c := CPU{}
+	c.GPR[3] = 0xff0180f001030000
+	for _, v := range []struct {
+		xo   uint32
+		want uint64
+	}{{506, 17}, {122, 0x0801010401020000}, {378, 0x0000000e00000003}} {
+		if e := c.execute(31<<26|3<<21|4<<16|v.xo<<1, 0); e != nil {
+			t.Fatal(e)
+		}
+		if c.GPR[4] != v.want {
+			t.Fatalf("XO%d got %x want %x", v.xo, c.GPR[4], v.want)
+		}
+	}
+}
+
+-- protection_test.go --
+package power64
+
+import (
+	rt "renvo.dev/internal/rfe/runtime"
+	"testing"
+)
+
+func TestProblemStatePrivilege(t *testing.T) {
+	for _, op := range []uint32{0x44000022, 0x4c000024, 31<<26 | 3<<21 | 83<<1, 31<<26 | 3<<21 | 178<<1, 31<<26 | 3<<21 | 467<<1 | 16<<16} {
+		c := CPU{MSR: MSRSF | MSRPR}
+		if e := c.execute(op, 0); e == nil {
+			t.Fatalf("problem-state privileged word %08x accepted", op)
+		} else if _, ok := e.(*exception); !ok {
+			t.Fatalf("privilege must raise program exception: %v", e)
+		}
+	}
+}
+func TestCrossPageTranslations(t *testing.T) {
+	m := memoryBus(make([]byte, 8192))
+	m[4095], m[0], m[1], m[2] = 0x11, 0x22, 0x33, 0x44
+	c := CPU{Bus: m, MSR: MSRLE}
+	c.Translate = func(c *CPU, a uint64, access rt.Access) (uint64, error) {
+		if a >= 4096 {
+			return a - 4096, nil
+		}
+		return a, nil
+	}
+	v, e := c.read(4095, 4, rt.Read)
+	if e != nil || v != 0x44332211 {
+		t.Fatalf("cross-page read=%x %v", v, e)
+	}
+	c.Translate = func(c *CPU, a uint64, access rt.Access) (uint64, error) {
+		if a >= 4096 {
+			return 0, TranslationMiss(a, access, false, false)
+		}
+		return a, nil
+	}
+	if e := c.write(4095, 4, 0xaabbccdd); e == nil {
+		t.Fatal("store accepted missing second page")
+	}
+	if m[4095] != 0x11 {
+		t.Fatal("faulting cross-page store changed first page")
+	}
+}
+
+-- reverse_test.go --
+package power64
+
+import "testing"
+
+func TestDoublewordByteReverse(t *testing.T) {
+	for _, le := range []bool{false, true} {
+		m := memoryBus(make([]byte, 256))
+		copy(m[128:], []byte{1, 2, 3, 4, 5, 6, 7, 8})
+		c := CPU{Bus: m, MSR: MSRSF}
+		if le {
+			c.MSR |= MSRLE
+		}
+		c.GPR[4] = 128
+		if e := c.execute(31<<26|3<<21|4<<16|532<<1, 0); e != nil {
+			t.Fatal(e)
+		}
+		want := uint64(0x0807060504030201)
+		if le {
+			want = 0x0102030405060708
+		}
+		if c.GPR[3] != want {
+			t.Fatalf("LE=%t value=%x", le, c.GPR[3])
+		}
+		c.GPR[4] = 136
+		if e := c.execute(31<<26|3<<21|4<<16|660<<1, 4); e != nil {
+			t.Fatal(e)
+		}
+		for i := 0; i < 8; i++ {
+			if m[136+i] != byte(i+1) {
+				t.Fatal("stdbrx bytes")
+			}
+		}
+	}
+}
+
+-- vector.go --
+package power64
+
+import rt "renvo.dev/internal/rfe/runtime"
+
+// lvx/stvx transfer an aligned quadword. In little-endian mode the entire
+// 16-byte value is reversed in memory, not just each doubleword independently.
+// Vector state stays in CPU across scalar native execution and slow fallbacks.
+func (c *CPU) vectorMemory(reg uint32, address uint64, store bool) error {
+	if c.MSR&MSRVEC == 0 {
+		return &exception{vector: 0xf20}
+	}
+	if c.MSR&MSRSF == 0 {
+		address = uint64(uint32(address))
+	}
+	address &^= 15
+	if !store {
+		first, err := c.read(address, 8, rt.Read)
+		if err != nil {
+			return err
+		}
+		second, err := c.read(address+8, 8, rt.Read)
+		if err != nil {
+			return err
+		}
+		if c.MSR&MSRLE != 0 {
+			first, second = second, first
+		}
+		var value [16]byte
+		for i := 0; i < 8; i++ {
+			value[i] = byte(first >> uint(56-8*i))
+			value[i+8] = byte(second >> uint(56-8*i))
+		}
+		c.VR[reg] = value
+		return nil
+	}
+
+	// Resolve both halves before writing. Translation faults cannot partially
+	// store the vector; a bus fault may follow an already successful half store,
+	// as for existing split scalar stores. The bus does not promise atomic 128-bit
+	// accesses, and aligned vector accesses never cross an architectural page.
+	var physical [2]uint64
+	for i := 0; i < 2; i++ {
+		p, err := c.physical(address+uint64(8*i), rt.Write)
+		if err != nil {
+			return err
+		}
+		physical[i] = p
+	}
+	var halves [2]uint64
+	for i := 0; i < 16; i++ {
+		index := i
+		if c.MSR&MSRLE != 0 {
+			index = 15 - i
+		}
+		halves[i/8] |= uint64(c.VR[reg][index]) << uint(8*(i%8))
+	}
+	for i := 0; i < 2; i++ {
+		if fault := c.Bus.Store(physical[i], 8, halves[i], c.Tick); fault != nil {
+			return fault
+		}
+		c.Reserved = false
+	}
+	return nil
+}
+
+-- vector_test.go --
+package power64_test
+
+import (
+	"bytes"
+	"encoding/binary"
+	"renvo.dev/emulators/power64"
+	rt "renvo.dev/internal/rfe/runtime"
+	"testing"
+)
+
+// These oracles use architectural byte numbering: vector byte zero contains
+// bits 0..7. lvx/stvx transfer a whole aligned quadword, so little-endian mode
+// reverses all sixteen bytes, including their doubleword positions.
+// Power ISA Book I, Vector Load/Store Instructions:
+// https://openpowerfoundation.org/specifications/isa/
+type vectorBus struct {
+	data        []byte
+	reads       int
+	writes      int
+	denyRead    bool
+	denyReadAt  uint64
+	denyWrite   bool
+	denyWriteAt uint64
+}
+
+func (m *vectorBus) Load(a uint64, w int, access rt.Access, tick uint64) (uint64, *rt.Fault) {
+	if access == rt.Read {
+		m.reads++
+	}
+	if a > uint64(len(m.data)) || w < 1 || w > 8 || uint64(w) > uint64(len(m.data))-a || access == rt.Read && m.denyRead && a == m.denyReadAt {
+		return 0, &rt.Fault{Kind: rt.Permission, Access: access, Address: a, Width: w}
+	}
+	var value uint64
+	for i := 0; i < w; i++ {
+		value |= uint64(m.data[a+uint64(i)]) << uint(i*8)
+	}
+	return value, nil
+}
+
+func (m *vectorBus) Store(a uint64, w int, value uint64, tick uint64) *rt.Fault {
+	m.writes++
+	if a > uint64(len(m.data)) || w < 1 || w > 8 || uint64(w) > uint64(len(m.data))-a {
+		return &rt.Fault{Kind: rt.Boundary, Access: rt.Write, Address: a, Width: w}
+	}
+	if m.denyWrite && a == m.denyWriteAt {
+		return &rt.Fault{Kind: rt.Permission, Access: rt.Write, Address: a, Width: w}
+	}
+	for i := 0; i < w; i++ {
+		m.data[a+uint64(i)] = byte(value >> uint(i*8))
+	}
+	return nil
+}
+
+func (m *vectorBus) Peek(a uint64, w int) (uint64, bool) {
+	value, fault := m.Load(a, w, rt.Execute, 0)
+	return value, fault == nil
+}
+
+func vectorWord(xo, vr, ra, rb uint32) uint32 {
+	return 31<<26 | vr<<21 | ra<<16 | rb<<11 | xo<<1
+}
+
+func vectorCPU(m *vectorBus, little bool) power64.CPU {
+	c := power64.CPU{Bus: m, PC: 0x2000, MSR: power64.MSRSF | power64.MSRVEC, Tick: 17, CR: 0xa5f01b3c, XER: 0xe0000000, LR: 0x12345678, CTR: 23}
+	if little {
+		c.MSR |= power64.MSRLE
+	}
+	for r := range c.GPR {
+		c.GPR[r] = 0x8000000000000000 | uint64(r*37)
+		for i := range c.VR[r] {
+			c.VR[r][i] = byte(r*23 + i*7)
+		}
+	}
+	return c
+}
+
+func TestVectorLoadStoreArchitecturalBytes(t *testing.T) {
+	for _, little := range []bool{false, true} {
+		for _, ra := range []uint32{0, 4} {
+			for _, vr := range []uint32{0, 7, 31} {
+				for offset := uint64(0); offset < 16; offset++ {
+					m := &vectorBus{data: make([]byte, 256)}
+					for i := range m.data {
+						m.data[i] = byte(i*19 + 3)
+					}
+					c := vectorCPU(m, little)
+					c.GPR[5] = 64 + offset
+					if ra != 0 {
+						c.GPR[4] = 29
+						c.GPR[5] -= 29
+					}
+					gpr, bank := c.GPR, c.VR
+					for i := 0; i < 16; i++ {
+						index := i
+						if little {
+							index = 15 - i
+						}
+						bank[vr][index] = m.data[64+i]
+					}
+					if err := c.Execute(vectorWord(103, vr, ra, 5)); err != nil {
+						t.Fatal(err)
+					}
+					if c.VR != bank || c.GPR != gpr || c.PC != 0x2004 || c.Tick != 18 || c.CR != 0xa5f01b3c || c.XER != 0xe0000000 || c.LR != 0x12345678 || c.CTR != 23 {
+						t.Fatalf("lvx little=%t ra=%d vr=%d offset=%d: vector=%x want=%x PC=%x tick=%d", little, ra, vr, offset, c.VR[vr], bank[vr], c.PC, c.Tick)
+					}
+					// Give stvx a separately constructed vector, so a matching
+					// incorrect load/store permutation cannot pass a roundtrip.
+					for i := 0; i < 16; i++ {
+						c.VR[vr][i] = byte(0xf1 - i*11)
+					}
+					bank = c.VR
+					want := bytes.Clone(m.data)
+					for i := 0; i < 16; i++ {
+						index := i
+						if little {
+							index = 15 - i
+						}
+						want[128+i] = byte(0xf1 - index*11)
+					}
+					c.GPR[5] += 64
+					gpr = c.GPR
+					if err := c.Execute(vectorWord(231, vr, ra, 5)); err != nil {
+						t.Fatal(err)
+					}
+					if !bytes.Equal(m.data, want) || c.VR != bank || c.GPR != gpr || c.PC != 0x2008 || c.Tick != 19 || c.CR != 0xa5f01b3c || c.XER != 0xe0000000 || c.LR != 0x12345678 || c.CTR != 23 {
+						t.Fatalf("stvx little=%t ra=%d vr=%d offset=%d: bytes=%x want=%x PC=%x tick=%d", little, ra, vr, offset, m.data[128:144], want[128:144], c.PC, c.Tick)
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestVectorEffectiveAddressWidthAndWrap(t *testing.T) {
+	for _, test := range []struct {
+		full64   bool
+		base, rb uint64
+		want     uint64
+	}{
+		{true, ^uint64(0) - 15, 0x53, 0x40},
+		{false, 0x10000003c, 9, 0x40},
+		{true, 0x123456780000003c, 9, 0x1234567800000040},
+	} {
+		for _, xo := range []uint32{103, 231} {
+			m := &vectorBus{data: make([]byte, 256)}
+			c := vectorCPU(m, true)
+			if !test.full64 {
+				c.MSR &^= power64.MSRSF
+			}
+			c.GPR[4], c.GPR[5] = test.base, test.rb
+			translations := 0
+			c.Translate = func(_ *power64.CPU, address uint64, access rt.Access) (uint64, error) {
+				translations++
+				wantAccess := rt.Read
+				if xo == 231 {
+					wantAccess = rt.Write
+				}
+				if address < test.want || address >= test.want+16 || access != wantAccess {
+					t.Fatalf("xo=%d translated address=%x access=%d, want aligned block=%x access=%d", xo, address, access, test.want, wantAccess)
+				}
+				return address & 255, nil
+			}
+			if err := c.Execute(vectorWord(xo, 31, 4, 5)); err != nil || c.Tick != 18 || translations == 0 {
+				t.Fatal("effective address", test, xo, err, c.Tick, translations)
+			}
+		}
+	}
+}
+
+func TestVectorUnavailablePrecedesMemory(t *testing.T) {
+	for _, xo := range []uint32{103, 231} {
+		for _, little := range []bool{false, true} {
+			m := &vectorBus{data: bytes.Repeat([]byte{0xa5}, 256)}
+			c := vectorCPU(m, little)
+			c.MSR &^= power64.MSRVEC
+			msr, gpr, bank := c.MSR, c.GPR, c.VR
+			c.Translate = func(_ *power64.CPU, address uint64, access rt.Access) (uint64, error) {
+				t.Fatal("unavailable vector instruction translated memory")
+				return 0, nil
+			}
+			if err := c.Execute(vectorWord(xo, 7, 4, 5)); err != nil {
+				t.Fatal(err)
+			}
+			if c.PC != 0xf20 || c.SPR[26] != 0x2000 || c.SPR[27] != msr || c.Tick != 17 || c.GPR != gpr || c.VR != bank || m.reads != 0 || m.writes != 0 || c.CR != 0xa5f01b3c || c.XER != 0xe0000000 {
+				t.Fatalf("unavailable xo=%d little=%t PC=%x SRR0=%x SRR1=%x tick=%d read=%d write=%d", xo, little, c.PC, c.SPR[26], c.SPR[27], c.Tick, m.reads, m.writes)
+			}
+		}
+	}
+}
+
+func TestVectorTranslationFaultIsPrecise(t *testing.T) {
+	for _, xo := range []uint32{103, 231} {
+		for _, little := range []bool{false, true} {
+			for _, denied := range []uint64{64, 72} {
+				m := &vectorBus{data: bytes.Repeat([]byte{0x5a}, 256)}
+				c := vectorCPU(m, little)
+				c.GPR[5] = 79 // Align down before either access or fault reporting.
+				msr, gpr, bank := c.MSR, c.GPR, c.VR
+				c.Translate = func(_ *power64.CPU, address uint64, access rt.Access) (uint64, error) {
+					if address == denied {
+						return 0, power64.TranslationMiss(address, access, false, true)
+					}
+					return address, nil
+				}
+				if err := c.Execute(vectorWord(xo, 7, 0, 5)); err != nil {
+					t.Fatal(err)
+				}
+				status := uint64(1 << 27)
+				if xo == 231 {
+					status |= 1 << 25
+				}
+				if c.PC != 0x300 || c.SPR[26] != 0x2000 || c.SPR[27] != msr || c.SPR[19] != denied || c.SPR[18] != status || c.Tick != 17 || c.GPR != gpr || c.VR != bank || m.writes != 0 || !bytes.Equal(m.data, bytes.Repeat([]byte{0x5a}, 256)) {
+					t.Fatalf("fault xo=%d little=%t denied=%x PC=%x DAR=%x DSISR=%x tick=%d writes=%d", xo, little, denied, c.PC, c.SPR[19], c.SPR[18], c.Tick, m.writes)
+				}
+			}
+		}
+	}
+}
+
+func TestVectorLoadBusFaultPreservesEntireDestination(t *testing.T) {
+	for _, little := range []bool{false, true} {
+		m := &vectorBus{data: bytes.Repeat([]byte{0x5a}, 256), denyRead: true, denyReadAt: 72}
+		c := vectorCPU(m, little)
+		c.GPR[5] = 64
+		bank := c.VR
+		if err := c.Execute(vectorWord(103, 7, 0, 5)); err == nil || c.Tick != 17 || c.VR != bank || m.reads != 2 {
+			t.Fatalf("second-half bus fault committed vector: little=%t err=%v tick=%d reads=%d vector=%x", little, err, c.Tick, m.reads, c.VR[7])
+		}
+	}
+}
+
+func TestVectorStoreBusFaultTracksWrittenBytesAndReservation(t *testing.T) {
+	for _, little := range []bool{false, true} {
+		for _, denied := range []uint64{64, 72} {
+			m := &vectorBus{data: bytes.Repeat([]byte{0x5a}, 256), denyWrite: true, denyWriteAt: denied}
+			c := vectorCPU(m, little)
+			c.GPR[5], c.Reservation, c.Reserved = 79, 64, true
+			for i := 0; i < 16; i++ {
+				c.VR[7][i] = byte(0xf1 - i*11)
+			}
+			gpr, bank := c.GPR, c.VR
+			want := bytes.Clone(m.data)
+			// The scalar bus has no transaction spanning both Store calls.
+			// A second-half bus fault retains the first eight bytes
+			// and must invalidate the reservation despite non-retirement.
+			for i := 0; i < int(denied-64); i++ {
+				index := i
+				if little {
+					index = 15 - i
+				}
+				want[64+i] = byte(0xf1 - index*11)
+			}
+			if err := c.Execute(vectorWord(231, 7, 0, 5)); err == nil || c.Tick != 17 || c.VR != bank || c.GPR != gpr || c.CR != 0xa5f01b3c || c.XER != 0xe0000000 || c.Reserved != (denied == 64) || m.writes != int((denied-64)/8)+1 || !bytes.Equal(m.data, want) {
+				t.Fatalf("store bus fault little=%t denied=%x err=%v tick=%d reserved=%t writes=%d bytes=%x want=%x", little, denied, err, c.Tick, c.Reserved, m.writes, m.data[64:80], want[64:80])
+			}
+		}
+	}
+}
+
+func TestVectorStateSurvivesScalarEngineTransitions(t *testing.T) {
+	for _, mode := range []string{"interpreter", "ir", "native"} {
+		for _, little := range []bool{false, true} {
+			m := &vectorBus{data: make([]byte, 256)}
+			var order binary.ByteOrder = binary.BigEndian
+			if little {
+				order = binary.LittleEndian
+			}
+			for i, op := range []uint32{vectorWord(103, 7, 0, 4), 14<<26 | 3<<21 | 3<<16 | 1, vectorWord(231, 7, 0, 5), 0x4bfffff4} {
+				order.PutUint32(m.data[i*4:], op)
+			}
+			for i := 0; i < 16; i++ {
+				m.data[64+i] = byte(i*13 + 7)
+			}
+			c := vectorCPU(m, little)
+			c.PC, c.Tick, c.GPR[3], c.GPR[4], c.GPR[5] = 0, 0, 0, 64, 128
+			bank := c.VR
+			for i := 0; i < 16; i++ {
+				index := i
+				if little {
+					index = 15 - i
+				}
+				bank[7][index] = byte(i*13 + 7)
+			}
+			config := power64.DefaultEngineConfig()
+			config.Mode, config.IRThreshold, config.NativeThreshold = mode, 1, 2
+			e, err := power64.NewEngine(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			adapter := power64.NewTierCPU(&c, nil)
+			for c.Tick < 160 {
+				before := c.Tick
+				if err := e.Step(adapter, 160-c.Tick); err != nil || c.Tick <= before || c.Tick > 160 {
+					e.Close()
+					t.Fatal("engine progress", mode, little, c.Tick, err)
+				}
+			}
+			adapter.Sync()
+			stats := e.Stats
+			if c.Tick != 160 || c.PC != 0 || c.GPR[3] != 40 || c.VR != bank || !bytes.Equal(m.data[128:144], m.data[64:80]) || mode == "ir" && stats.IR == 0 || mode == "native" && e.NativeAvailable() && stats.Native == 0 || stats.CompileFailures != 0 {
+				e.Close()
+				t.Fatal("scalar/vector adapter state", mode, little, c.Tick, c.PC, c.GPR[3], c.VR[7], bank[7], stats)
+			}
+			if err := e.Close(); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+}

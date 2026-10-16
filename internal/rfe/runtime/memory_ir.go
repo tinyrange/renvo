@@ -29,7 +29,16 @@ func (b *Builder) MemoryStore(address, value Value, size int) {
 	address = b.checkedAddress(address)
 	b.emit(Op{Kind: MemoryStore, A: address, B: value, Imm: uint64(size)})
 }
-func (b *Builder) Guard(condition Value) { b.emit(Op{Kind: Guard, A: condition}) }
+func (b *Builder) Guard(condition Value) {
+	if b.Ops[condition].Kind == Const && b.Ops[condition].Imm != 0 || b.guards[condition] {
+		return
+	}
+	if b.guards == nil {
+		b.guards = make(map[Value]bool)
+	}
+	b.guards[condition] = true
+	b.emit(Op{Kind: Guard, A: condition})
+}
 
 // Commit writes only dirty architectural slots in deterministic order. State
 // forwarding remains valid, but checkpoints are observable roots, not deferred
@@ -56,14 +65,14 @@ func memoryOperands(o Op) (bool, bool) {
 	switch o.Kind {
 	case Const, LoadState, Progress:
 		return false, false
-	case StoreState, Shl, Shr, MemoryLoad, Guard, RegionGuard, LoopContinue, PairHigh, NativeElapsed:
+	case StoreState, Shl, Shr, MemoryLoad, Guard, RegionGuard, LoopContinue, LoopCount, PairHigh, NativeElapsed:
 		return true, false
 	default:
 		return true, true
 	}
 }
 func effectOnly(k int) bool {
-	return k == MemoryPairStore || k == StoreState || k == MemoryStore || k == Progress || k == Guard || k == RegionGuard || k == LoopContinue
+	return k == MemoryPairStore || k == StoreState || k == MemoryStore || k == Progress || k == Guard || k == RegionGuard || k == LoopContinue || k == LoopCount
 }
 func (b *Builder) FinishMemory(words int) []Op {
 	b.Commit(words)
@@ -132,7 +141,7 @@ func ValidateMemory(ops []Op, words int) error {
 		if !validFlags(o) || !validRich(o) || !validDivision(o) {
 			return fmt.Errorf("invalid flags width")
 		}
-		if !pureOperation(o.Kind) && (o.Kind < MemoryLoad || o.Kind > Guard) && o.Kind != RegionGuard && o.Kind != LoopContinue && o.Kind != PairHigh && o.Kind != MemoryPairStore && o.Kind != NativeElapsed {
+		if !pureOperation(o.Kind) && (o.Kind < MemoryLoad || o.Kind > Guard) && o.Kind != RegionGuard && o.Kind != LoopContinue && o.Kind != PairHigh && o.Kind != MemoryPairStore && o.Kind != NativeElapsed && o.Kind != LoopCount {
 			return fmt.Errorf("invalid memory IR operation")
 		}
 		if o.Kind == SelectValue && (o.Imm >= uint64(i) || effectOnly(ops[o.Imm].Kind)) {
@@ -202,10 +211,10 @@ func (m *MemoryContext) Fill(number uint64, data *[4096]byte, permissions uint64
 		m.Forget(number)
 		return
 	}
-	m.Pages[number&63] = NativePage{number, data, permissions, epoch}
+	m.Pages[m.PageIndex(number)] = NativePage{number, data, permissions, epoch}
 }
 func (m *MemoryContext) Forget(number uint64) {
-	p := &m.Pages[number&63]
+	p := &m.Pages[m.PageIndex(number)]
 	if p.Number == number {
 		*p = NativePage{}
 	}

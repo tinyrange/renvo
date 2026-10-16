@@ -61,7 +61,7 @@ func TestEmulatorSourcePackages(t *testing.T) {
 		t.Fatal(err)
 	}
 	available := map[string][]byte{}
-	for _, name := range []string{"pdp11", "v7-user", "pdp11-machine", "aarch64", "linux-arm64-user", "amd64", "linux-amd64-user", "linux-arm64-machine", "linux-amd64-machine"} {
+	for _, name := range []string{"pdp11", "v7-user", "pdp11-machine", "aarch64", "linux-arm64-user", "amd64", "linux-amd64-user", "linux-arm64-machine", "linux-amd64-machine", "power64", "linux-power64-machine"} {
 		data, err := os.ReadFile(filepath.Join(root, "emulators", name+".rfe"))
 		if err != nil {
 			t.Fatal(err)
@@ -77,7 +77,7 @@ func TestEmulatorSourcePackages(t *testing.T) {
 		}
 		available[name] = data
 	}
-	source := testSource("test-suite", Dependency{Name: "v7-user"}, Dependency{Name: "pdp11-machine"}, Dependency{Name: "linux-arm64-user"}, Dependency{Name: "linux-amd64-user"}, Dependency{Name: "linux-arm64-machine"}, Dependency{Name: "linux-amd64-machine"})
+	source := testSource("test-suite", Dependency{Name: "v7-user"}, Dependency{Name: "pdp11-machine"}, Dependency{Name: "linux-arm64-user"}, Dependency{Name: "linux-amd64-user"}, Dependency{Name: "linux-arm64-machine"}, Dependency{Name: "linux-amd64-machine"}, Dependency{Name: "linux-power64-machine"})
 	packages, err := Resolve(source, mapLoader(available))
 	if err != nil {
 		t.Fatal(err)

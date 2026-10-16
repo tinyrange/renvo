@@ -19,8 +19,10 @@ type Native struct {
 	linkWords               int
 	linkPC                  int
 	linkCall                *runimage.LinkedCall
+	profileDispatch         bool
 	profileMu               sync.Mutex
 	profileCapture          func() error // opt-in cold snapshot, never used by native calls
+	profileLoopIR           func(entry, words, instructions int, records []int) error
 	profileCaptureAttempted bool
 }
 

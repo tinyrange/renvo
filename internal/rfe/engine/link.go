@@ -48,19 +48,31 @@ func (e *Engine) runLinked(c CPU, remaining uint64, first *compiledBlock, memory
 		return e.stepBlock(c, remaining, first)
 	}
 	pc := c.Registers()[e.arch.PC]
+	link := context.LookupLink(pc)
+	// A short scheduling tail may execute the original leaf, but it must
+	// not replace a warmed region publication with that leaf. Otherwise a
+	// transient budget restriction persists in later full native sessions.
+	if first.region && uint64(first.regionInstructions) > remaining && link != nil && link.Entry == uint64(first.regionEntry) && link.Instructions == uint64(first.regionInstructions) {
+		return e.stepBlock(c, remaining, first)
+	}
 	entry, instructions := first.entry, len(first.instructions)
 	region := first.region && uint64(first.regionInstructions) <= remaining
 	if region {
 		entry, instructions = first.regionEntry, first.regionInstructions
 	}
-	link := context.LookupLink(pc)
 	// A block entry and its prefix are immutable in the append-only arena.
 	// Avoid revalidating/copying a publication already in this exact context.
 	// The private proof table has its own bounded replacement order. A public
 	// descriptor surviving another context does not prove its private target
 	// is still resident. Refresh the selected immutable admission independently.
-	if err := e.native.PrepareTargetLink(pc, entry, e.arch.StateWords, instructions); err != nil {
-		return err
+	var admission error
+	if region && len(first.instructions) < instructions {
+		admission = e.native.PrepareTargetLinkWithTail(pc, entry, e.arch.StateWords, instructions, first.entry, len(first.instructions))
+	} else {
+		admission = e.native.PrepareTargetLink(pc, entry, e.arch.StateWords, instructions)
+	}
+	if admission != nil {
+		return admission
 	}
 	if link == nil || link.Entry != uint64(entry) || link.Instructions != uint64(instructions) {
 		if region {
@@ -77,7 +89,7 @@ func (e *Engine) runLinked(c CPU, remaining uint64, first *compiledBlock, memory
 	// promotion generation. Suppress per-quantum retries for an installed region;
 	// the next host-selected session may upgrade it after further promotions.
 	link.Reserved = e.Stats.Promotions
-	if first.region {
+	if region {
 		link.Reserved = ^uint64(0)
 	}
 	first.visits++
@@ -86,9 +98,17 @@ func (e *Engine) runLinked(c CPU, remaining uint64, first *compiledBlock, memory
 		budget = uint64(e.config.MaxNativeInstructions)
 	}
 	var err error
+	expired := false
 	if e.config.MaxNativeInstructions > 64 {
 		if owner, ok := memory.(NativeBackingMemory); ok && owner.NativeCodeVersions() {
-			err = e.native.RunLinkedBackingSession(c.Registers(), context, budget, owner.NativeBacking())
+			if timer, ok := c.(NativeDeadlineCPU); ok && timer.NativeDeadline() != 0 {
+				expired, err = e.native.RunLinkedBackingSessionUntil(c.Registers(), context, budget, owner.NativeBacking(), timer.NativeDeadline())
+				if expired {
+					timer.NativeDeadlineExpired()
+				}
+			} else {
+				err = e.native.RunLinkedBackingSession(c.Registers(), context, budget, owner.NativeBacking())
+			}
 		} else {
 			err = e.native.RunLinkedSession(c.Registers(), context, budget)
 		}
@@ -143,6 +163,9 @@ func (e *Engine) runLinked(c CPU, remaining uint64, first *compiledBlock, memory
 			memory.NativeRefill(context.Address)
 		}
 		return e.interpret(c)
+	}
+	if expired {
+		return nil
 	}
 	if context.Total == 0 {
 		if quanta != 1 {

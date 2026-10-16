@@ -19,7 +19,7 @@ func TestNativeAssociativeMixedCycle(t *testing.T) {
 	if err = n.PrepareLinks(3, 2); err != nil {
 		t.Fatal(err)
 	}
-	pcs := []uint64{0, 0x1004, 0x2008, 0x300c}
+	pcs := []uint64{0, 0x404, 0x808, 0xc0c}
 	entries := make([]int, 4)
 	for i, pc := range pcs {
 		if NativeLinkSlot(pc) != NativeLinkSlot(pcs[0]) {
@@ -225,7 +225,7 @@ func TestNativeSessionAliasedDescriptorCannotEnableCache(t *testing.T) {
 
 func TestNativeAssociativeEvictionFullTags(t *testing.T) {
 	m := new(MemoryContext)
-	pcs := []uint64{0, 0x1004, 0x2008, 0x300c, 0x4010}
+	pcs := []uint64{0, 0x404, 0x808, 0xc0c, 0x1010}
 	for i, pc := range pcs {
 		m.PublishLink(pc, i*16, 1, [17]uint8{})
 	}

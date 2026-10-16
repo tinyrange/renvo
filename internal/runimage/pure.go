@@ -16,24 +16,25 @@ import (
 // Installation, calls, and Close are serialized. Entries are offsets, so callers
 // cannot accidentally invoke an arbitrary host address.
 type CodeArena struct {
-	faults       []rfenativebridge.FaultSite
-	mu           sync.Mutex
-	base         uintptr
-	size, used   int
-	symbols      io.Writer
-	jitSymbols   JITCodeWriter
-	extents      []codeExtent // sorted exact extents, one per installed image
-	entries      []arenaEntry // one private admission record per 16-byte code offset
-	stack        []byte
-	broken       bool
-	linkedView   [4]uint64 // refreshed under mu after every successful installation
-	targetVictim uint64
-	targets      [1024]linkedTarget         // opaque prepared proofs; no executable pointers
-	sessionEpoch uint64                     // arena-serialized generation, never reused without clearing proofs
-	sessionImage *[sessionImageWords]uint64 // dedicated pointer-free foreign ABI storage
-	sparePins    *ownedSessionPins          // unpinned, cleared storage only; never a live pointer graph
-	ownedPins    *ownedSessionPins          // at most one owned pointer graph, refreshed before use
-	sessionState *[256]uint64               // independent of enclosing Go owner allocations
+	faults           []rfenativebridge.FaultSite
+	mu               sync.Mutex
+	base             uintptr
+	size, used       int
+	symbols          io.Writer
+	jitSymbols       JITCodeWriter
+	extents          []codeExtent // sorted exact extents, one per installed image
+	entries          []arenaEntry // one private admission record per 16-byte code offset
+	stack            []byte
+	broken           bool
+	linkedView       [4]uint64 // refreshed under mu after every successful installation
+	targetVictim     uint64
+	targets          [1024]linkedTarget         // opaque prepared proofs; no executable pointers
+	dispatchCounters [5]uint64                  // diagnostic lookup, empty, PC miss, epoch miss, hit
+	sessionEpoch     uint64                     // arena-serialized generation, never reused without clearing proofs
+	sessionImage     *[sessionImageWords]uint64 // dedicated pointer-free foreign ABI storage
+	sparePins        *ownedSessionPins          // unpinned, cleared storage only; never a live pointer graph
+	ownedPins        *ownedSessionPins          // at most one owned pointer graph, refreshed before use
+	sessionState     *[256]uint64               // independent of enclosing Go owner allocations
 }
 
 type codeExtent struct{ offset, length uint32 }
@@ -49,10 +50,10 @@ type arenaEntry struct {
 }
 
 func NewCodeArena(size int) (*CodeArena, error) {
-	if unsafe.Sizeof(linkedTarget{}) != 64 || unsafe.Offsetof(linkedTarget{}.CheckedSession) != 32 || unsafe.Offsetof(linkedTarget{}.DescriptorOffset) != 40 || unsafe.Offsetof(linkedTarget{}.BodyFlags) != 24 || unsafe.Sizeof(arenaEntry{}) != 16 || unsafe.Offsetof(arenaEntry{}.Linked) != 2 || unsafe.Offsetof(arenaEntry{}.Body) != 4 || unsafe.Offsetof(arenaEntry{}.Instructions) != 8 || unsafe.Offsetof(arenaEntry{}.AdmittedCount) != 12 {
+	if unsafe.Offsetof(CodeArena{}.dispatchCounters) != unsafe.Offsetof(CodeArena{}.targets)+65536 || unsafe.Sizeof(linkedTarget{}) != 64 || unsafe.Offsetof(linkedTarget{}.CheckedSession) != 32 || unsafe.Offsetof(linkedTarget{}.DescriptorOffset) != 40 || unsafe.Offsetof(linkedTarget{}.BodyFlags) != 24 || unsafe.Sizeof(arenaEntry{}) != 16 || unsafe.Offsetof(arenaEntry{}.Linked) != 2 || unsafe.Offsetof(arenaEntry{}.Body) != 4 || unsafe.Offsetof(arenaEntry{}.Instructions) != 8 || unsafe.Offsetof(arenaEntry{}.AdmittedCount) != 12 {
 		return nil, fmt.Errorf("unsupported native admission ABI")
 	}
-	if size < 4096 || size > 64<<20 {
+	if size < 4096 || size > 128<<20 {
 		return nil, fmt.Errorf("invalid code arena size")
 	}
 	size = (size + 16383) &^ 16383
@@ -90,7 +91,7 @@ func (a *CodeArena) InstallLoopBlock(code []byte, words, instructions int) (int,
 // has a compatibility entry and a private body returning retirement in RAX and
 // status in RDX with ZF iff status is zero. The private body preserves its
 // resident R11 state base and uses the dispatcher's shared context. Legacy and
-// signal-recovery entries must not use this tag.
+// legacy signal-recovery entries must not use this tag.
 func (a *CodeArena) InstallRegisterLoopBlock(code []byte, words, instructions int) (int, error) {
 	if runtime.GOARCH != "amd64" || words < 1 || words > 256 || instructions < 1 || instructions > 256 {
 		return 0, fmt.Errorf("invalid register-result loop dimensions or host")
@@ -130,6 +131,15 @@ func (a *CodeArena) InstallFaultLoopBlock(code []byte, words, instructions int, 
 		return 0, fmt.Errorf("invalid direct loop dimensions or unavailable fault recovery")
 	}
 	return a.installFaultRecord(code, uint16(words)|32768|8192, 0, instructions, faults)
+}
+
+// InstallFaultRegisterLoopBlock admits only compiler-emitted owned direct
+// loops whose recovery stubs return the same register result as successful code.
+func (a *CodeArena) InstallFaultRegisterLoopBlock(code []byte, words, instructions int, faults []int) (int, error) {
+	if runtime.GOARCH != "amd64" || words < 1 || words > 256 || instructions < 1 || instructions > 256 || len(faults)%3 != 0 || !rfenativebridge.EnableFaults() {
+		return 0, fmt.Errorf("invalid register-result direct loop")
+	}
+	return a.installFaultRecord(code, uint16(words)|32768|8192|512, 16, instructions, faults)
 }
 func (a *CodeArena) installFaultRecord(code []byte, words uint16, body, instructions int, faults []int) (int, error) {
 	a.mu.Lock()

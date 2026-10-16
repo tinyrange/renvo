@@ -25,10 +25,16 @@ func (a *CodeArena) borrowLinked(view *[4]uint64, targets *uint64) {
 		*targets = uint64(uintptr(unsafe.Pointer(&a.targets[0])))
 	}
 }
+func clearContextTimerBorrow(m *LinkedContextABI) {
+	if m != nil {
+		m.TimerFunction, m.TimerDeadline, m.TimerExpired = 0, 0, 0
+	}
+}
 func clearContextBorrow(m *LinkedContextABI) {
 	if m != nil {
 		clearLinkedBorrow(&m.CodeView, &m.PreparedTargets)
 		m.DescriptorBase, m.AdmissionEpoch = 0, 0
+		clearContextTimerBorrow(m)
 	}
 }
 
@@ -44,6 +50,8 @@ func (a *CodeArena) InstallLinkedDispatcher(code []byte, words int) (int, error)
 // serialization. One cleanup covers both the view and lock, including errors.
 // The specialized path avoids the generic leaf/context ABI branch per quantum.
 func (a *CodeArena) CallLinked(entry int, state []uint64, context unsafe.Pointer, view *[4]uint64) error {
+	clearContextTimerBorrow((*LinkedContextABI)(context))
+	defer clearContextTimerBorrow((*LinkedContextABI)(context))
 	a.mu.Lock()
 	defer func() {
 		clearLinkedBorrow(view, nil)
@@ -59,6 +67,7 @@ func (a *CodeArena) CallLinked(entry int, state []uint64, context unsafe.Pointer
 	a.borrowLinked(view, nil)
 	top := (uintptr(unsafe.Pointer(&a.stack[len(a.stack)-1])) + 1) &^ 15
 	(*LinkedContextABI)(context).AdmissionEpoch = 0
+	clearContextTimerBorrow((*LinkedContextABI)(context))
 	callContext(a.base+uintptr(entry), uintptr(unsafe.Pointer(&state[0])), uintptr(context), top)
 	runtime.KeepAlive(context)
 	runtime.KeepAlive(state)
@@ -134,6 +143,8 @@ func (c *LinkedCall) Call(state []uint64, context unsafe.Pointer, view *[4]uint6
 
 func (c *LinkedCall) CallWithTargets(state []uint64, context unsafe.Pointer, view *[4]uint64, targets *uint64) error {
 	clearLinkedBorrow(view, targets)
+	clearContextTimerBorrow((*LinkedContextABI)(context))
+	defer clearContextTimerBorrow((*LinkedContextABI)(context))
 	if c == nil || c.arena == nil {
 		return fmt.Errorf("invalid prepared native dispatcher")
 	}
@@ -148,6 +159,7 @@ func (c *LinkedCall) CallWithTargets(state []uint64, context unsafe.Pointer, vie
 	}
 	a.borrowLinked(view, targets)
 	(*LinkedContextABI)(context).AdmissionEpoch = 0
+	clearContextTimerBorrow((*LinkedContextABI)(context))
 	callContext(c.entry, uintptr(unsafe.Pointer(&state[0])), uintptr(context), c.top)
 	runtime.KeepAlive(context)
 	runtime.KeepAlive(state)
@@ -166,6 +178,8 @@ func (c *LinkedCall) CallBatch(state []uint64, context unsafe.Pointer, view *[4]
 
 func (c *LinkedCall) CallBatchWithTargets(state []uint64, context unsafe.Pointer, view *[4]uint64, targets *uint64, limit int, next func(int) (bool, error)) (completed int, err error) {
 	clearLinkedBorrow(view, targets)
+	clearContextTimerBorrow((*LinkedContextABI)(context))
+	defer clearContextTimerBorrow((*LinkedContextABI)(context))
 	if c == nil || c.arena == nil || limit < 1 || limit > 16 || next == nil {
 		return 0, fmt.Errorf("invalid prepared dispatcher batch")
 	}
@@ -188,6 +202,7 @@ func (c *LinkedCall) CallBatchWithTargets(state []uint64, context unsafe.Pointer
 			return completed, fmt.Errorf("prepared dispatcher batch limit exhausted")
 		}
 		(*LinkedContextABI)(context).AdmissionEpoch = 0
+		clearContextTimerBorrow((*LinkedContextABI)(context))
 		callContext(c.entry, uintptr(unsafe.Pointer(&state[0])), uintptr(context), c.top)
 		runtime.KeepAlive(context)
 		runtime.KeepAlive(state)
@@ -204,13 +219,20 @@ type linkedTarget struct {
 	PC, Entry, Instructions, BodyFlags uint64
 	CheckedSession                     uint64 // public descriptor checked only in this non-aliasing session
 	DescriptorOffset                   uint64 // checked public way, relative to the current descriptor base
-	SuccessorOffset                    uint64 // private predicted proof offset + 1, never admission authority
-	_                                  uint64 // power-of-two stride
+	SuccessorOffset                    uint64 // two private uint32 proof offsets + 1; hints, never authority
+	Tail                               uint64 // admitted original body32, family16, count16
 }
 
 // PrepareTarget is cold work, separate from execution. Replacing an indexed
 // proof cannot race a borrowed native view because both hold the arena lock.
 func (c *LinkedCall) PrepareTarget(pc uint64, entry, instructions int) error {
+	return c.PrepareTargetWithTail(pc, entry, instructions, -1, 0)
+}
+
+// PrepareTargetWithTail binds an independently admitted original leaf to a
+// wider region. A private foreign-session check selects it only when the
+// complete region cannot fit the remaining global instruction budget.
+func (c *LinkedCall) PrepareTargetWithTail(pc uint64, entry, instructions, tailEntry, tailInstructions int) error {
 	if c == nil || c.arena == nil || instructions < 1 || instructions > 256 {
 		return fmt.Errorf("invalid prepared target")
 	}
@@ -233,7 +255,22 @@ func (c *LinkedCall) PrepareTarget(pc uint64, entry, instructions int) error {
 		return fmt.Errorf("invalid prepared target body")
 	}
 	flags := uint64(r.Words & 41472)
-	base, slot := ((pc>>2)^(pc>>12))&255, uint64(0)
+	tail := uint64(0)
+	if tailEntry >= 0 {
+		if tailInstructions < 1 || tailInstructions > 16 || tailInstructions >= instructions || r.Words&8192 == 0 || tailEntry&15 != 0 || tailEntry >= a.used || tailEntry>>4 >= len(a.entries) {
+			return fmt.Errorf("invalid prepared original shape")
+		}
+		t := a.entries[tailEntry>>4]
+		if t.Linked == 0 || t.Linked&511 != key || int(t.AdmittedCount) != tailInstructions || int(t.Words&511) != c.words || t.Words&16384 != 0 || t.Words == 65535 || t.Words&8192 != 0 && int(t.Instructions) != tailInstructions {
+			return fmt.Errorf("invalid prepared original admission")
+		}
+		tailBody := uint64(tailEntry) + uint64(t.Body)
+		if tailBody >= uint64(a.used) || tailBody >= uint64(a.size) || tailBody > 0xffffffff {
+			return fmt.Errorf("invalid prepared original body")
+		}
+		tail = tailBody | uint64(t.Words&41472)<<32 | uint64(tailInstructions)<<48
+	}
+	base, slot := ((pc>>2)^(pc>>10))&255, uint64(0)
 	found := false
 	for way := uint64(0); way < 4; way++ {
 		i := base + way*256
@@ -255,6 +292,21 @@ func (c *LinkedCall) PrepareTarget(pc uint64, entry, instructions int) error {
 		slot = base + (a.targetVictim&3)*256
 		a.targetVictim++
 	}
-	a.targets[slot] = linkedTarget{PC: pc, Entry: uint64(entry), Instructions: uint64(instructions), BodyFlags: body | flags<<32}
+	proof := linkedTarget{PC: pc, Entry: uint64(entry), Instructions: uint64(instructions), BodyFlags: body | flags<<32, Tail: tail}
+	old := a.targets[slot]
+	if old.PC == proof.PC && old.Entry == proof.Entry && old.Instructions == proof.Instructions && old.BodyFlags == proof.BodyFlags && old.Tail == proof.Tail {
+		// Re-preparing the same immutable body is not a replacement. Keep the
+		// learned edges, but never carry descriptor admission into a new call.
+		proof.SuccessorOffset = old.SuccessorOffset
+	}
+	a.targets[slot] = proof
 	return nil
+}
+
+// DispatchCounters snapshots optional generated-code diagnostics. These counts
+// are never admission state and never affect scheduling or retirement.
+func (a *CodeArena) DispatchCounters() [5]uint64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.dispatchCounters
 }
