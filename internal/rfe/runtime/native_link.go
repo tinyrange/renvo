@@ -2,10 +2,11 @@ package runtime
 
 import "renvo.dev/internal/rfeabi"
 
-// NativeLinkSlot selects one of 256 four-way sets by mixing code-page identity
-// with the word offset. Full PC tags
-// remain authoritative; a hash match never grants execution admission.
-func NativeLinkSlot(pc uint64) uint64 { return ((pc >> 2) ^ (pc >> 12)) & 255 }
+// NativeLinkSlot folds adjacent eight-bit chunks of the word address into
+// 256 four-way sets. In particular bits 10 and 11 must participate: otherwise
+// distinct code entries spaced 1 KiB apart unnecessarily share one set. Full PC
+// tags remain authoritative; a hash match never grants execution admission.
+func NativeLinkSlot(pc uint64) uint64 { return ((pc >> 2) ^ (pc >> 10)) & 255 }
 
 // NativeLink is a full-PC-tagged entry in the bounded native dispatcher. Entry
 // is an arena offset, not an executable address. Instructions==0 means absent.

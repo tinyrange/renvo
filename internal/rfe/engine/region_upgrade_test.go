@@ -78,3 +78,64 @@ func TestRegionUpgradeAfterLateNeighborPromotion(t *testing.T) {
 		}
 	}
 }
+
+func TestShorterDiscoveredCycleReplacesOneShotRegion(t *testing.T) {
+	n, err := emu.NewNative(1 << 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer n.Close()
+	stamp := CodeStamp{Identity: new(CodeIdentity), Epoch: 1}
+	memory := &regionDiscoveryMemory{stamp: stamp}
+	c := stubCPU{memory: memory}
+	block := func(pc uint64, flow Successors, terminal bool) *compiledBlock {
+		return &compiledBlock{native: true, context: stamp, dependencies: []codeDependency{{0, stamp}}, instructions: []Instruction{{PC: pc, Length: 2, Bits: 0x101, Terminal: terminal, Flow: flow}}}
+	}
+	first := block(0, Successors{Known: true, Conditional: true, Next: 4, Alternate: 8}, false)
+	cycle := block(4, Successors{Known: true, Next: 0}, true)
+	cycle.native = false
+	arch := stubArchitecture()
+	lower := arch.Lower
+	arch.Lower = func(b *emu.Builder, ins Instruction, completed int) bool {
+		if !lower(b, ins, completed) {
+			return false
+		}
+		if ins.PC == 0 {
+			b.Store(1, b.Choose(b.Binary(emu.Less, b.Load(0), b.Constant(1000)), b.Constant(4), b.Constant(8)))
+		}
+		return true
+	}
+	cfg := DefaultEngineConfig()
+	cfg.MaxRegionInstructions = 3
+	e := Engine{arch: arch, config: cfg, native: n, blocks: map[uint64]*compiledBlock{0: first, 4: cycle, 8: block(8, Successors{Known: true, Next: 12}, false), 12: block(12, Successors{Next: 16}, false)}, edgeCounts: map[uint64][2]uint64{0: {1, 100}}}
+	e.Stats.Promotions = 1
+	e.prepareRegion(&c, first)
+	if !first.region || first.regionInstructions != 3 || e.Stats.Regions != 1 {
+		t.Fatal("initial one-shot", first.regionInstructions, e.Stats)
+	}
+	oldEntry := first.regionEntry
+	cycle.native = true
+	e.edgeCounts[0] = [2]uint64{100, 1}
+	e.Stats.Promotions++
+	e.prepareRegion(&c, first)
+	if first.regionInstructions != 2 || first.regionEntry == oldEntry || e.Stats.Regions != 2 {
+		t.Fatal("shorter cycle not installed", first.regionInstructions, first.regionEntry, oldEntry, e.Stats)
+	}
+	if err = n.PrepareLinks(2, 1); err != nil {
+		t.Fatal(err)
+	}
+	m := new(emu.MemoryContext)
+	m.ClaimLinks(n)
+	m.PublishLink(0, first.regionEntry, 2, [17]uint8{})
+	if err = n.CallLinked(c.Registers(), m, 64); err != nil {
+		t.Fatal(err)
+	}
+	if c.state != [2]uint64{32, 0} || m.Total != 64 || m.Remaining != 0 || m.LoopIterations != 32 || m.Status != 0 {
+		t.Fatal("cycle not exact", c.state, m.Total, m.Remaining, m.LoopIterations, m.Status)
+	}
+	e.Stats.Promotions++
+	e.prepareRegion(&c, first)
+	if e.Stats.Regions != 2 {
+		t.Fatal("same cycle recompiled", e.Stats)
+	}
+}

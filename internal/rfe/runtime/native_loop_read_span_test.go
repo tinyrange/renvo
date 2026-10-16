@@ -12,7 +12,25 @@ import (
 // not the native span recognizer or its range proof. Three guest checkpoints
 // let one compatibility quantum cross the sixteen-iteration fast boundary.
 func TestNativeLoopReadSpanSignedStateAndBoundaries(t *testing.T) {
+	for _, hash := range []uint64{0, 1} {
+		for _, wide := range []bool{false, true} {
+			for _, observeScaled := range []bool{false, true} {
+				testNativeLoopReadSpanSignedStateAndBoundaries(t, hash, wide, observeScaled)
+			}
+		}
+	}
+}
+func testNativeLoopReadSpanSignedStateAndBoundaries(t *testing.T, hash uint64, wide, observeScaled bool) {
 	const words = 11
+	prefix := 0
+	if observeScaled {
+		prefix = 1
+	}
+	instructions := 3 + prefix
+	bias := uint64(0)
+	if hash != 0 {
+		bias = 64 * 4096
+	}
 	n, err := NewNative(1 << 20)
 	if err != nil {
 		t.Fatal(err)
@@ -27,21 +45,36 @@ func TestNativeLoopReadSpanSignedStateAndBoundaries(t *testing.T) {
 	ix, jx := b.Binary(And, i, mask), b.Binary(And, j, mask)
 	a := b.Binary(Add, b.Load(6), b.Shift(Shl, ix, 1))
 	z := b.Binary(Add, b.Load(7), b.Shift(Shl, jx, 1))
+	if observeScaled {
+		// These scaled indices remain architecturally observable if the first
+		// or second read faults. They cannot be eliminated into address LEAs.
+		b.Store(3, b.Shift(Shl, ix, 1))
+		b.Store(4, b.Shift(Shl, jx, 1))
+		b.Store(10, b.Constant(2))
+		b.Checkpoint(words, prefix)
+	}
 	signed := func(address Value) Value {
 		v := b.MemoryLoad(address, 2)
 		return b.Binary(And, b.Binary(Sub, b.Binary(Xor, v, b.Constant(32768)), b.Constant(32768)), mask)
 	}
 	left := signed(a)
 	next := b.Binary(And, b.Binary(Add, ix, b.Constant(1)), mask)
+	if wide {
+		next = b.Binary(Add, i, b.Constant(1))
+	}
 	b.Store(3, left)
 	b.Store(0, next)
 	b.Store(10, b.Constant(4))
-	b.Checkpoint(words, 1)
+	b.Checkpoint(words, 1+prefix)
 	right := signed(z)
 	b.Store(4, right)
-	b.Store(1, b.Binary(And, b.Binary(Add, jx, b.Load(8)), mask))
+	if wide {
+		b.Store(1, b.Binary(Add, j, b.Load(8)))
+	} else {
+		b.Store(1, b.Binary(And, b.Binary(Add, jx, b.Load(8)), mask))
+	}
 	b.Store(10, b.Constant(8))
-	b.Checkpoint(words, 2)
+	b.Checkpoint(words, 2+prefix)
 	b.Store(2, b.Binary(And, b.Binary(Add, b.Load(2), b.Binary(Mul, left, right)), mask))
 	flags := b.ArithmeticFlags(b.Load(9), next, 32, true)
 	b.Store(5, flags)
@@ -50,9 +83,9 @@ func TestNativeLoopReadSpanSignedStateAndBoundaries(t *testing.T) {
 		t.Fatal("condition")
 	}
 	b.Store(10, b.Choose(condition, b.Constant(0), b.Constant(12)))
-	b.Checkpoint(words, 3)
+	b.Checkpoint(words, 3+prefix)
 	b.LoopContinue(condition)
-	entry, err := n.CompileLoop(b.FinishMemory(words), words, 3)
+	entry, err := n.CompileLoop(b.FinishMemory(words), words, instructions)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,21 +117,28 @@ func TestNativeLoopReadSpanSignedStateAndBoundaries(t *testing.T) {
 		for _, limit := range []uint64{1, 15, 16, 17, 19, 100} {
 			for budget := uint64(1); budget <= 64; budget++ {
 				m := new(MemoryContext)
+				m.HashPages = hash
 				epoch := uint64(1)
-				m.Fill(1, pages[0], 1, &epoch)
-				m.Fill(2, pages[1], trial.permissions, &epoch)
+				m.Fill(1+bias/4096, pages[0], 1, &epoch)
+				m.Fill(2+bias/4096, pages[1], trial.permissions, &epoch)
 				m.ClaimLinks(n)
-				m.PublishLink(0, entry, 3, [17]uint8{})
-				baseA := trial.offA - 2*uint64(uint32(trial.start))
-				baseB := trial.offB - 2*uint64(uint32(trial.start))
+				m.PublishLink(0, entry, instructions, [17]uint8{})
+				baseA := trial.offA + bias - 2*uint64(uint32(trial.start))
+				baseB := trial.offB + bias - 2*uint64(uint32(trial.start))
 				state := []uint64{trial.start, trial.start, 0xfffffff1, 0xaabbccdd, 0x99887766, 0xf0000000, baseA, baseB, trial.stride, uint64(uint32(trial.start + limit)), 0}
 				want := append([]uint64(nil), state...)
 				var retired, memories, iterations, exits, status, fault uint64
-				for retired+3 <= budget {
+				for retired+uint64(instructions) <= budget {
+					if observeScaled {
+						want[3] = 2 * uint64(uint32(want[0]))
+						want[4] = 2 * uint64(uint32(want[1]))
+						want[10] = 2
+						retired++
+					}
 					failed := false
 					for stream := 0; stream < 2; stream++ {
 						address := want[6+stream] + 2*uint64(uint32(want[stream]))
-						page, off := address/4096, address%4096
+						page, off := address/4096-bias/4096, address%4096
 						if page < 1 || page > 2 || off > 4094 || page == 2 && trial.permissions&1 == 0 {
 							status, fault, failed = 1, address, true
 							break
@@ -109,7 +149,11 @@ func TestNativeLoopReadSpanSignedStateAndBoundaries(t *testing.T) {
 						if stream == 1 {
 							step = want[8]
 						}
-						want[stream] = uint64(uint32(want[stream] + step))
+						if wide {
+							want[stream] += step
+						} else {
+							want[stream] = uint64(uint32(want[stream] + step))
+						}
 						want[10] = uint64(4 + stream*4)
 						retired++
 						memories++

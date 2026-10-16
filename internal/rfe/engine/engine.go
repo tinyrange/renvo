@@ -47,8 +47,10 @@ type compiledBlock struct {
 	cacheSlot                       int
 	recent                          uint8
 	regionAttempted, region         bool
+	regionDiamond                   bool
 	regionGeneration                uint64 // retry only after another native promotion
 	regionEntry, regionInstructions int
+	regionCyclic                    bool
 	regionPrefix                    [17]uint8
 	dependencies                    []codeDependency
 	context                         CodeStamp
@@ -109,7 +111,7 @@ func New(config EngineConfig, arch Architecture) (*Engine, error) {
 	if config.MaxRegionInstructions < 1 || config.MaxRegionInstructions > 256 || config.MaxNativeInstructions < 1 || config.MaxNativeInstructions > emu.NativeSessionLimit {
 		return nil, fmt.Errorf("invalid execution slice configuration")
 	}
-	if config.IRThreshold == 0 || config.NativeThreshold < config.IRThreshold || config.MaxBlocks < 1 || config.MaxBlocks > 65536 || config.MaxInstructions < 1 || config.MaxInstructions > 16 || config.NativeBytes < 4096 || config.NativeBytes > 64<<20 {
+	if config.IRThreshold == 0 || config.NativeThreshold < config.IRThreshold || config.MaxBlocks < 1 || config.MaxBlocks > 65536 || config.MaxInstructions < 1 || config.MaxInstructions > 16 || config.NativeBytes < 4096 || config.NativeBytes > 128<<20 {
 		return nil, fmt.Errorf("invalid engine budget")
 	}
 	e := &Engine{arch: arch, config: config, blocks: map[uint64]*compiledBlock{}}

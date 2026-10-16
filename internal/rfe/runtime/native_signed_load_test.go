@@ -5,6 +5,11 @@ package runtime
 import "testing"
 
 func TestNativeSignedLoadWidthsAndObservableIntermediate(t *testing.T) {
+	for _, shifted := range []bool{false, true} {
+		testNativeSignedLoadWidthsAndObservableIntermediate(t, shifted)
+	}
+}
+func testNativeSignedLoadWidthsAndObservableIntermediate(t *testing.T, shifted bool) {
 	for _, size := range []int{1, 2, 4} {
 		for _, width := range []int{32, 64} {
 			for _, observeRaw := range []bool{false, true} {
@@ -23,6 +28,9 @@ func TestNativeSignedLoadWidthsAndObservableIntermediate(t *testing.T) {
 				}
 				sign := b.Constant(uint64(1) << (size*8 - 1))
 				value := b.Binary(Sub, b.Binary(Xor, raw, sign), sign)
+				if shifted {
+					value = b.VariableShift(ArithmeticShr, b.Shift(Shl, raw, uint64(64-size*8)), b.Constant(uint64(64-size*8)), 64)
+				}
 				if width == 32 {
 					value = b.Binary(And, value, b.Constant(0xffffffff))
 				}

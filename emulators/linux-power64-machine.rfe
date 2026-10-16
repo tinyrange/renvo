@@ -266,6 +266,7 @@ func run(args []string) error {
 	cpuProfile := f.String("cpuprofile", "", "write a Go CPU profile of guest execution")
 	engineMode := f.String("engine", "native", "execution tier: interpreter, ir or native")
 	stats := f.Bool("stats", false, "print recompiler retirement, memory, link and region counters")
+	jitProfile := f.Bool("jit-profile", false, "emit native JIT profiling symbols (diagnostic only)")
 	clockMode := f.String("clock", "deterministic", "timebase/decrementer clock: deterministic or realtime")
 	cmdline := f.String("append", "console=hvc0 earlycon=hvc_pseries rdinit=/init nokaslr maxcpus=1", "kernel command line")
 	progress := f.Uint64("progress", 0, "diagnostic interval")
@@ -325,6 +326,7 @@ func run(args []string) error {
 		return fmt.Errorf("clock must be deterministic or realtime")
 	}
 	if *engineMode != "interpreter" {
+		m.ProfileJIT = *jitProfile
 		if e = m.EnableJIT(*engineMode); e != nil {
 			return e
 		}
@@ -559,9 +561,45 @@ type coremarkResult struct {
 }
 
 func coremarkReports(serial string, markers []string, times []time.Time, iterations uint64) ([2]coremarkResult, error) {
+	return coremarkReportsForRelease(serial, markers, times, iterations, "6.6.1")
+}
+
+func validateLinuxRelease(release string) error {
+	if release == "" || len(release) > 64 {
+		return fmt.Errorf("RENVO_POWER_LINUX_RELEASE must be a nonempty kernel release of at most 64 bytes")
+	}
+	for _, c := range release {
+		if c <= ' ' || c > '~' {
+			return fmt.Errorf("RENVO_POWER_LINUX_RELEASE must be one printable ASCII token")
+		}
+	}
+	return nil
+}
+
+func linuxFixtureRelease() (string, error) {
+	release, explicit := os.LookupEnv("RENVO_POWER_LINUX_RELEASE")
+	if !explicit {
+		release = "6.6.1"
+	}
+	return release, validateLinuxRelease(release)
+}
+
+func coremarkReportsForRelease(serial string, markers []string, times []time.Time, iterations uint64, release string) ([2]coremarkResult, error) {
 	var result [2]coremarkResult
+	if err := validateLinuxRelease(release); err != nil {
+		return result, err
+	}
 	serial = strings.ReplaceAll(serial, "\r\n", "\n")
-	if strings.Count(serial, "RENVO-POWER-COREMARK: INIT\n") != 1 || strings.Count(serial, "RENVO-POWER-COREMARK: PASS\n") != 1 || !strings.Contains(serial, "Guest: Linux 6.6.1 ppc64le\n") || strings.Contains(serial, "ERROR") || strings.Contains(serial, "Errors detected") || strings.Contains(serial, "RENVO-POWER-COREMARK: FAIL") {
+	guestReports := 0
+	for _, line := range strings.Split(serial, "\n") {
+		if strings.Contains(line, "Guest:") {
+			guestReports++
+			if line != "Guest: Linux "+release+" ppc64le" {
+				return result, fmt.Errorf("guest uname does not match explicit kernel release %q", release)
+			}
+		}
+	}
+	if strings.Count(serial, "RENVO-POWER-COREMARK: INIT\n") != 1 || strings.Count(serial, "RENVO-POWER-COREMARK: PASS\n") != 1 || guestReports != 1 || strings.Contains(serial, "ERROR") || strings.Contains(serial, "Errors detected") || strings.Contains(serial, "RENVO-POWER-COREMARK: FAIL") {
 		return result, fmt.Errorf("incomplete or failed guest validation")
 	}
 	expectedMarkers := []string{"RENVO-POWER-COREMARK: START", "RENVO-POWER-COREMARK: STOP", "RENVO-POWER-COREMARK: START", "RENVO-POWER-COREMARK: STOP"}
@@ -589,8 +627,11 @@ func coremarkReports(serial string, markers []string, times []time.Time, iterati
 	case 20000:
 		// Independent QEMU POWER8 control, identical scalar ELF.
 		known[0][4], known[1][4] = "382f", "d304"
+	case 80000:
+		// Independent POWER8 QEMU run of the identical scalar 80000 ELF.
+		known[0][4], known[1][4] = "cc42", "35f3"
 	default:
-		return result, fmt.Errorf("no independent CRC reference for %d iterations (use 1000, 2000 or 20000)", iterations)
+		return result, fmt.Errorf("no independent CRC reference for %d iterations (use 1000, 2000, 20000 or 80000)", iterations)
 	}
 	for i := 0; i < 2; i++ {
 		body := strings.SplitN(sections[i+1], "RENVO-POWER-COREMARK: START", 2)[0]
@@ -655,8 +696,28 @@ func TestLinuxCoreMarkPerformance(t *testing.T) {
 	}
 	testLinuxCoreMark(t, kernel, benchmark, 20000, 16000000000, 1000)
 }
+
+// Select a longer workload explicitly when faster execution makes the original
+// 20000-iteration duration invalid. Neither existing fixture ceiling changes;
+// this separate proof keeps the same attempts per iteration and requires 4000/s.
+func TestLinuxCoreMarkExtendedPerformance(t *testing.T) {
+	benchmark := os.Getenv("RENVO_POWER_COREMARK_EXTENDED_ELF")
+	if benchmark == "" {
+		t.Skip("set explicit 80000-iteration performance ELF")
+	}
+	kernel := os.Getenv("RENVO_POWER_LINUX_KERNEL")
+	if kernel == "" || os.Getenv("RENVO_POWER_ENGINE") != "native" {
+		t.Fatal("extended proof requires explicit kernel and native engine")
+	}
+	testLinuxCoreMark(t, kernel, benchmark, 80000, 64000000000, 4000)
+}
+
 func testLinuxCoreMark(t *testing.T, kernel, benchmark string, iterations, budget uint64, minimumScore float64) {
 	t.Helper()
+	release, e := linuxFixtureRelease()
+	if e != nil {
+		t.Fatal(e)
+	}
 	k, e := os.ReadFile(kernel)
 	if e != nil {
 		t.Fatal(e)
@@ -699,21 +760,24 @@ func testLinuxCoreMark(t *testing.T, kernel, benchmark string, iterations, budge
 		if s.Native == 0 || s.NativeMemory == 0 || s.Linked == 0 || s.Regions == 0 || s.LoopIterations == 0 || s.CompileFailures != 0 {
 			t.Fatalf("incomplete native fixture proof: %+v", s)
 		}
+		if s.ArenaResets != 0 {
+			t.Logf("WARNING: native JIT arena reset %d time(s); elapsed timings include cache recycling", s.ArenaResets)
+		}
 		t.Logf("native fixture stats=%+v", s)
 	}
 	if !m.Done {
 		t.Fatalf("benchmark did not power off: %s", out.String())
 	}
-	reports, e := coremarkReports(out.String(), out.markers, out.times, iterations)
+	reports, e := coremarkReportsForRelease(out.String(), out.markers, out.times, iterations, release)
 	if e != nil {
 		t.Fatalf("%v\n%s", e, out.String())
 	}
+	t.Logf("CoreMark iterations=%d PERF=%+v VALID=%+v instructions=%d", iterations, reports[0], reports[1], m.Instructions)
 	for i, report := range reports {
 		if report.IterationsPerSecond < minimumScore {
 			t.Fatalf("seed %d score %.3f below required %.3f", i, report.IterationsPerSecond, minimumScore)
 		}
 	}
-	t.Logf("CoreMark iterations=%d PERF=%+v VALID=%+v instructions=%d", iterations, reports[0], reports[1], m.Instructions)
 }
 func syntheticCoremark() (string, []string, []time.Time) {
 	serial := "RENVO-POWER-COREMARK: INIT\nGuest: Linux 6.6.1 ppc64le\n"
@@ -744,6 +808,78 @@ func TestCoreMarkReference2000(t *testing.T) {
 	}
 	if _, e := coremarkReports(serial, markers, times, 2001); e == nil {
 		t.Fatal("unverified iteration profile accepted")
+	}
+}
+
+func TestCoreMarkExplicitLinuxRelease(t *testing.T) {
+	const release = "6.6.142-0-virt"
+	serial, markers, times := syntheticCoremark()
+	uname := "Guest: Linux " + release + " ppc64le\n"
+	serial = strings.Replace(serial, "Guest: Linux 6.6.1 ppc64le\n", uname, 1)
+	for _, valid := range []string{serial, strings.ReplaceAll(serial, "\n", "\r\n")} {
+		if _, err := coremarkReportsForRelease(valid, markers, times, 1000, release); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := coremarkReports(serial, markers, times, 1000); err == nil {
+		t.Fatal("default kernel identity silently changed")
+	}
+	for _, wrong := range []string{"", " ", "6.6.1", release + " ", " " + release, release + "\t", release + "\n", release + "\r", release + "\x00", release + "\u00a0", strings.Repeat("x", 65)} {
+		if _, err := coremarkReportsForRelease(serial, markers, times, 1000, wrong); err == nil {
+			t.Fatalf("invalid expected release accepted: %q", wrong)
+		}
+	}
+	for _, bad := range []string{
+		strings.Replace(serial, uname, "", 1),
+		strings.Replace(serial, uname, "forged "+uname, 1),
+		strings.Replace(serial, uname, strings.TrimSuffix(uname, "\n")+" forged\n", 1),
+		strings.Replace(serial, uname, "Guest: Linux 6.6.1 ppc64le\n", 1),
+		strings.Replace(serial, uname, "Guest: Linux "+release+" ppc64\n", 1),
+		serial + uname,
+		serial + "Guest: Linux 6.6.1 ppc64le\n",
+	} {
+		if _, err := coremarkReportsForRelease(bad, markers, times, 1000, release); err == nil {
+			t.Fatal("missing, forged, wrong or duplicate guest uname accepted")
+		}
+	}
+}
+
+func TestLinuxFixtureReleaseSelection(t *testing.T) {
+	t.Setenv("RENVO_POWER_LINUX_RELEASE", "6.6.142-0-virt")
+	if release, err := linuxFixtureRelease(); err != nil || release != "6.6.142-0-virt" {
+		t.Fatal("explicit fixture identity", release, err)
+	}
+	for _, invalid := range []string{"", " ", "6.6.142-0-virt\n"} {
+		t.Setenv("RENVO_POWER_LINUX_RELEASE", invalid)
+		if _, err := linuxFixtureRelease(); err == nil {
+			t.Fatalf("invalid explicit environment accepted: %q", invalid)
+		}
+	}
+	if err := os.Unsetenv("RENVO_POWER_LINUX_RELEASE"); err != nil {
+		t.Fatal(err)
+	}
+	if release, err := linuxFixtureRelease(); err != nil || release != "6.6.1" {
+		t.Fatal("default fixture identity", release, err)
+	}
+}
+
+func TestCoreMarkReference80000(t *testing.T) {
+	serial, markers, times := syntheticCoremark()
+	serial = strings.ReplaceAll(serial, "Iterations       : 1000", "Iterations       : 80000")
+	serial = strings.ReplaceAll(serial, "0xd340", "0xcc42")
+	serial = strings.ReplaceAll(serial, "0x26c2", "0x35f3")
+	if _, err := coremarkReports(serial, markers, times, 80000); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{strings.Replace(serial, "0xcc42", "0x382f", 1), strings.Replace(serial, "0x35f3", "0xd304", 1), strings.Replace(serial, "12000000", "9999999", 1), strings.Replace(serial, "80000", "20000", 1)} {
+		if _, err := coremarkReports(bad, markers, times, 80000); err == nil {
+			t.Fatal("invalid extended reference accepted")
+		}
+	}
+	short := append([]time.Time(nil), times...)
+	short[1] = short[0].Add(9 * time.Second)
+	if _, err := coremarkReports(serial, markers, short, 80000); err == nil {
+		t.Fatal("short extended host duration accepted")
 	}
 }
 
@@ -1008,9 +1144,6 @@ func (m *Machine) nativeSpace() uint64 {
 	return m.nativeBank<<32 | (m.CPU.MSR & (power64.MSRSF | power64.MSRIR | power64.MSRDR | power64.MSRPR))
 }
 func (m *Machine) nativeAddress(key uint64) uint64 {
-	if !m.nativeDirect {
-		key = systemmemory.UnfoldPageCacheAddress(key)
-	}
 	return key | m.nativeBank<<48
 }
 func (m *Machine) nativeMapping(a uint64, execute bool) (uint64, bool, error) {
@@ -1059,9 +1192,15 @@ func (m *Machine) checkNativeMappings() {
 	}
 }
 func (m *Machine) EnableJIT(mode string) error {
-	m.kernelThreshold = 4096
+	// Keep cold kernel initialization from filling the bounded native arena.
+	// Its original IR tier still runs every instruction; genuinely hot kernel
+	// loops promote after demonstrating sustained reuse.
+	m.kernelThreshold = 65536
 	config := engine.DefaultEngineConfig()
 	config.Mode = mode
+	config.NativeBytes = 128 << 20
+	config.ProfileNative = m.ProfileJIT
+	config.ProfileNativeMonotonic = m.ProfileJIT
 	config.EvictCold, config.RecycleNative = true, true
 	config.DiscoveryThreshold = 32
 	// Regions larger than the unchanged 64-attempt scheduling window cannot
@@ -1076,6 +1215,10 @@ func (m *Machine) configureJIT(config engine.EngineConfig) error {
 	if m.NativeRAM == nil {
 		m.NativeRAM = systemmemory.New(m.RAM, m.nativeActive, m.nativeMapping)
 	}
+	// nativeSpace includes bank, privilege and translation mode. HPT/SLB
+	// mutations use the global mapping barrier above, including inactive roots.
+	m.NativeRAM.RetainRootData = true
+	m.NativeRAM.FoldPageSlots = true
 	m.NativeRAM.ReadGuest, m.NativeRAM.WriteGuest = m.CPU.Read, m.CPU.Write
 	m.NativeRAM.Domain, m.NativeRAM.AddressSpace, m.NativeRAM.NativeAddress = m.nativeDomain, m.nativeSpace, m.nativeAddress
 	arch := power64.Architecture()
@@ -1107,17 +1250,19 @@ func (m *Machine) configureJIT(config engine.EngineConfig) error {
 				address = b.Binary(emu.And, address, b.Constant(0x0fffffffffffffff))
 				bank &= 0x0fff
 			}
-			b.Guard(b.Binary(emu.Equal, b.Shift(emu.Shr, address, 48), b.Constant(bank)))
+			// Bank zero needs no redundant guard: raw memory admission checks all
+			// upper bits before any access. Nonzero banks still need the exact
+			// bank proof before masking and reconstructing the native key.
+			if bank != 0 {
+				b.Guard(b.Binary(emu.Equal, b.Shift(emu.Shr, address, 48), b.Constant(bank)))
+			}
 			key := address
 			// A successful zero-bank guard already proves the full 48-bit key.
 			// Other banks still need their guarded high bits removed.
 			if bank != 0 {
 				key = b.Binary(emu.And, address, b.Constant(0x0000ffffffffffff))
 			}
-			if m.nativeDirect {
-				return key
-			}
-			return systemmemory.PageCacheAddress(b, key)
+			return key
 		}
 		return power64.LowerInstruction(b, ins, completed)
 	}
@@ -1661,6 +1806,7 @@ package powermachine
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -1675,6 +1821,10 @@ func TestLinuxBoot(t *testing.T) {
 	}
 	if kernel == "" || init == "" {
 		t.Fatal("both explicit Linux fixture paths are required")
+	}
+	release, e := linuxFixtureRelease()
+	if e != nil {
+		t.Fatal(e)
 	}
 	k, e := os.ReadFile(kernel)
 	if e != nil {
@@ -1715,13 +1865,58 @@ func TestLinuxBoot(t *testing.T) {
 		if s.Native == 0 || s.NativeMemory == 0 || s.Linked == 0 || s.Regions == 0 || s.LoopIterations == 0 || s.CompileFailures != 0 {
 			t.Fatalf("incomplete native fixture proof: %+v", s)
 		}
+		if s.ArenaResets != 0 {
+			t.Logf("WARNING: native JIT arena reset %d time(s); elapsed timings include cache recycling", s.ArenaResets)
+		}
 		t.Logf("native fixture stats=%+v", s)
 	}
 	text := out.String()
-	if !m.Done || !strings.Contains(text, "RENVO-POWER-LINUX: INIT") || !strings.Contains(text, "RENVO-POWER-LINUX: PASS") || !strings.Contains(text, "ppc64le") {
+	if !m.Done || linuxBootReport(text, release) != nil {
 		t.Fatalf("Linux guest did not complete smoke (instructions=%d PC=%#x done=%t):\n%s", m.Instructions, m.CPU.PC, m.Done, text)
 	}
 	t.Logf("Linux guest completed after %d instructions", m.Instructions)
+}
+
+func linuxBootReport(serial, release string) error {
+	if err := validateLinuxRelease(release); err != nil {
+		return err
+	}
+	serial = strings.ReplaceAll(serial, "\r\n", "\n")
+	const init = "RENVO-POWER-LINUX: INIT\n"
+	const pass = "RENVO-POWER-LINUX: PASS\n"
+	if strings.Count(serial, init) != 1 || strings.Count(serial, pass) != 1 || strings.Contains(serial, "RENVO-POWER-LINUX: UNAME FAIL") {
+		return fmt.Errorf("incomplete or duplicate Linux smoke report")
+	}
+	uname := "Linux " + release + " ppc64le"
+	unameReports := 0
+	for _, line := range strings.Split(serial, "\n") {
+		if line == uname {
+			unameReports++
+		}
+	}
+	afterInit := strings.SplitN(serial, init, 2)[1]
+	parts := strings.SplitN(afterInit, pass, 2)
+	if len(parts) != 2 || parts[0] != uname+"\n" || unameReports != 1 {
+		return fmt.Errorf("Linux smoke uname does not match explicit kernel release %q", release)
+	}
+	return nil
+}
+
+func TestLinuxBootReportIdentity(t *testing.T) {
+	for _, release := range []string{"6.6.1", "6.6.142-0-virt"} {
+		uname := "Linux " + release + " ppc64le\n"
+		serial := "Linux version fixture\nRENVO-POWER-LINUX: INIT\n" + uname + "RENVO-POWER-LINUX: PASS\nreboot: Power down\n"
+		for _, valid := range []string{serial, strings.ReplaceAll(serial, "\n", "\r\n")} {
+			if err := linuxBootReport(valid, release); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, bad := range []string{strings.Replace(serial, uname, "Linux wrong ppc64le\n", 1), strings.Replace(serial, uname, "forged "+uname, 1), strings.Replace(serial, uname, uname+uname, 1), strings.Replace(serial, uname, "", 1), serial + uname, serial + "RENVO-POWER-LINUX: PASS\n"} {
+			if err := linuxBootReport(bad, release); err == nil {
+				t.Fatal("wrong, forged, duplicate or missing Linux smoke identity accepted")
+			}
+		}
+	}
 }
 
 -- machine.go --
@@ -1767,6 +1962,7 @@ type Machine struct {
 	clock                              *systemclock.Clock
 	clockLast                          uint64
 	JIT                                *engine.Engine
+	ProfileJIT                         bool // opt-in diagnostic perf symbols/JIT dump; disabled for scoring
 	NativeRAM                          *systemmemory.RAM
 	adapter                            nativeCPU
 	kernelThreshold                    uint64

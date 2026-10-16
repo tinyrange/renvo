@@ -105,6 +105,25 @@ func (n *Native) compileLoopMode(ops []Op, words, instructions int, direct bool,
 	if ops[len(ops)-1].Kind != LoopContinue {
 		return 0, fmt.Errorf("missing loop terminator")
 	}
+	variable := -1
+	for i, op := range ops {
+		if op.Kind == LoopCount {
+			if variable >= 0 || i != len(ops)-2 || !boundedLoopCount(ops, op.A, instructions) {
+				return 0, fmt.Errorf("invalid pure-loop count")
+			}
+			variable = i
+		}
+	}
+	if variable >= 0 {
+		if runtime.GOARCH != "amd64" || direct {
+			return 0, fmt.Errorf("variable pure loop unsupported on this host")
+		}
+		for _, op := range ops {
+			if !pureOperation(op.Kind) && op.Kind != LoadState && op.Kind != StoreState && op.Kind != Progress && op.Kind != RegionGuard && op.Kind != Guard && op.Kind != LoopCount && op.Kind != LoopContinue {
+				return 0, fmt.Errorf("effect in variable pure loop")
+			}
+		}
+	}
 	records := nativeRecords(ops)
 	var code []byte
 	var faults []int
@@ -144,6 +163,16 @@ func (n *Native) compileLoopMode(ops []Op, words, instructions int, direct bool,
 			n.codeVersionedContexts[codeVersions] = true
 		}
 		n.Bytes += len(code)
+		n.profileMu.Lock()
+		if n.profileLoopIR != nil {
+			if e := n.profileLoopIR(entry, words, instructions, records); e != nil {
+				n.SymbolErrors++
+			}
+		}
+		n.profileMu.Unlock()
 	}
 	return entry, err
 }
+
+// NativeVariablePureLoopsAvailable reports only the implemented host lowering.
+func NativeVariablePureLoopsAvailable() bool { return runtime.GOARCH == "amd64" }

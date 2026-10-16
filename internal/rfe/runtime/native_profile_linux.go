@@ -38,6 +38,7 @@ func (n *Native) EnablePerfMap(monotonic ...bool) error {
 		return perfSymbols.err
 	}
 	n.arena.SetSymbolWriter(perfSymbols.file)
+	n.profileDispatch = true
 	if os.Getenv("RENVO_RFE_JITDUMP") == "1" {
 		if !perfSymbols.jitAttempted {
 			perfSymbols.jitAttempted = true
@@ -77,18 +78,42 @@ func (n *Native) EnablePerfMap(monotonic ...bool) error {
 			n.SymbolErrors++
 			return err
 		}
+		ir, err := os.OpenFile("native-loop.ir", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		if err != nil {
+			code.Close()
+			metadata.Close()
+			n.SymbolErrors++
+			return err
+		}
+		// A bounded numeric snapshot of immutable lowered IR, keyed by the same
+		// arena-relative entry as the exact code snapshot. Never used to execute.
+		irBytes := 0
+		n.profileLoopIR = func(entry, words, instructions int, records []int) error {
+			line := fmt.Sprintf("%d %d %d %v\n", entry, words, instructions, records)
+			if len(line) > (16<<20)-irBytes {
+				return fmt.Errorf("native IR profile full")
+			}
+			written, e := io.WriteString(ir, line)
+			irBytes += written
+			return e
+		}
 		n.arena.SetSymbolWriter(io.MultiWriter(perfSymbols.file, metadata))
 		n.profileCapture = func() error {
 			err := n.arena.WriteCodeSnapshot(code, metadata)
 			codeErr := code.Close()
 			metadataErr := metadata.Close()
+			irErr := ir.Close()
+			n.profileLoopIR = nil
 			if err != nil {
 				return err
 			}
 			if codeErr != nil {
 				return codeErr
 			}
-			return metadataErr
+			if metadataErr != nil {
+				return metadataErr
+			}
+			return irErr
 		}
 	}
 	return nil

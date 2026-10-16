@@ -32,4 +32,6 @@ type Context struct {
 	DirectGuest, DirectHost, DirectSize uint64
 	// Host-bound monotonic poll; never accepted from the public context.
 	TimerFunction, TimerDeadline, TimerExpired uint64
+	// Nonzero selects folded slot bits while retaining raw full page tags.
+	HashPages uint64
 }

@@ -129,9 +129,15 @@ func (e *Engine) prepareRegion(c CPU, block *compiledBlock) {
 	if !block.native || e.native == nil || block.regionAttempted && block.regionGeneration == e.Stats.Promotions {
 		return
 	}
+	if block.regionDiamond {
+		return
+	}
 	defer pauseTranslationClock(c)()
 	block.regionAttempted = true
 	block.regionGeneration = e.Stats.Promotions
+	if e.preparePureDiamondRegion(c, block) {
+		return
+	}
 	parts := e.regionParts(c, block)
 	if len(parts) == 0 {
 		return
@@ -140,7 +146,13 @@ func (e *Engine) prepareRegion(c CPU, block *compiledBlock) {
 	for _, part := range parts {
 		count += len(part.block.instructions)
 	}
-	if count > e.config.MaxRegionInstructions || block.region && count <= block.regionInstructions {
+	lastPart := parts[len(parts)-1]
+	flow := lastPart.block.instructions[len(lastPart.block.instructions)-1].Flow
+	oneShot := !flow.Known || flow.Next != c.Registers()[e.arch.PC] && (!flow.Conditional || flow.Alternate != c.Registers()[e.arch.PC])
+	// A newly closed cycle removes repeated dispatcher transitions even
+	// when it is shorter than the previously discovered one-shot trace.
+	// This one-time upgrade preserves every admission and static bound.
+	if count > e.config.MaxRegionInstructions || block.region && count <= block.regionInstructions && (oneShot || block.regionCyclic) {
 		return
 	}
 	b := emu.Builder{MemoryInstructionProgress: true}
@@ -170,9 +182,6 @@ func (e *Engine) prepareRegion(c CPU, block *compiledBlock) {
 	// Direct cycles stay in the bounded body. An unknown indirect successor
 	// executes exactly once and returns to the same checked dispatcher, even
 	// when its dynamic target happens to equal the root; no target is guessed.
-	lastPart := parts[len(parts)-1]
-	flow := lastPart.block.instructions[len(lastPart.block.instructions)-1].Flow
-	oneShot := !flow.Known || flow.Next != pc && (!flow.Conditional || flow.Alternate != pc)
 	if oneShot {
 		b.LoopContinue(b.Constant(0))
 	} else {
@@ -218,6 +227,7 @@ func (e *Engine) prepareRegion(c CPU, block *compiledBlock) {
 	}
 	block.dependencies = dependencies
 	block.regionEntry, block.regionInstructions, block.region = entry, count, true
+	block.regionCyclic = !oneShot
 	block.regionPrefix = prefix
 	e.Stats.Regions++
 	e.Stats.NativeBytes = e.native.Bytes

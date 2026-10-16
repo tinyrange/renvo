@@ -29,6 +29,7 @@ const (
 	sessionMemoryWord      = unsafe.Offsetof(LinkedContextABI{}.MemoryTotal) / 8
 	sessionDirectWord      = unsafe.Offsetof(LinkedContextABI{}.DirectGuest) / 8
 	sessionTimerWord       = unsafe.Offsetof(LinkedContextABI{}.TimerFunction) / 8
+	sessionHashWord        = unsafe.Offsetof(LinkedContextABI{}.HashPages) / 8
 )
 
 func ForeignSessionsAvailable() bool { return rfenativebridge.Available }
@@ -57,7 +58,7 @@ func (c *LinkedCall) CallOwnedBackingSession(state []uint64, m *LinkedContextABI
 }
 
 // CallOwnedBackingSessionUntil keeps the same admitted graph resident across
-// <=64-instruction timer polls. Only the host-owned, non-aliasing foreign path
+// bounded native timer polls (currently 4096 instructions). Only the host-owned, non-aliasing foreign path
 // can batch. Compatibility calls retain the original scheduling boundary.
 func (c *LinkedCall) CallOwnedBackingSessionUntil(state []uint64, m *LinkedContextABI, budget uint64, backing []byte, deadline uint64) (bool, error) {
 	expired := false
@@ -133,6 +134,7 @@ func (c *LinkedCall) callSession(state []uint64, m *LinkedContextABI, budget uin
 		copy(image[:sessionPrefixWords], unsafe.Slice((*uint64)(unsafe.Pointer(m)), sessionPrefixWords))
 		image[sessionExitsWord], image[sessionIterationsWord] = 0, 0
 		image[sessionDirectWord], image[sessionDirectWord+1], image[sessionDirectWord+2] = m.DirectGuest, m.DirectHost, m.DirectSize
+		image[sessionHashWord] = m.HashPages
 		clear(image[sessionTimerWord : sessionTimerWord+3])
 		if deadline != 0 && owned && len(backing) != 0 {
 			image[sessionTimerWord], image[sessionTimerWord+1] = rfenativebridge.TimerFunction(), deadline
@@ -141,6 +143,7 @@ func (c *LinkedCall) callSession(state []uint64, m *LinkedContextABI, budget uin
 			clear(image[:sessionPrefixWords])
 			clear(image[sessionDirectWord : sessionDirectWord+3])
 			clear(image[sessionTimerWord : sessionTimerWord+3])
+			image[sessionHashWord] = 0
 			image[sessionTargetsWord], image[sessionDescriptorsWord], image[sessionEpochWord] = 0, 0, 0
 		}() // integer addresses must not outlive their pins
 		if owned {
@@ -333,6 +336,7 @@ func clearSessionPinBorrow(image *[sessionImageWords]uint64) {
 	clear(image[:sessionPrefixWords])
 	clear(image[sessionDirectWord : sessionDirectWord+3])
 	clear(image[sessionTimerWord : sessionTimerWord+3])
+	image[sessionHashWord] = 0
 	image[sessionTargetsWord], image[sessionDescriptorsWord], image[sessionEpochWord] = 0, 0, 0
 }
 

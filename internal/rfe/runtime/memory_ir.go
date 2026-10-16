@@ -65,14 +65,14 @@ func memoryOperands(o Op) (bool, bool) {
 	switch o.Kind {
 	case Const, LoadState, Progress:
 		return false, false
-	case StoreState, Shl, Shr, MemoryLoad, Guard, RegionGuard, LoopContinue, PairHigh, NativeElapsed:
+	case StoreState, Shl, Shr, MemoryLoad, Guard, RegionGuard, LoopContinue, LoopCount, PairHigh, NativeElapsed:
 		return true, false
 	default:
 		return true, true
 	}
 }
 func effectOnly(k int) bool {
-	return k == MemoryPairStore || k == StoreState || k == MemoryStore || k == Progress || k == Guard || k == RegionGuard || k == LoopContinue
+	return k == MemoryPairStore || k == StoreState || k == MemoryStore || k == Progress || k == Guard || k == RegionGuard || k == LoopContinue || k == LoopCount
 }
 func (b *Builder) FinishMemory(words int) []Op {
 	b.Commit(words)
@@ -141,7 +141,7 @@ func ValidateMemory(ops []Op, words int) error {
 		if !validFlags(o) || !validRich(o) || !validDivision(o) {
 			return fmt.Errorf("invalid flags width")
 		}
-		if !pureOperation(o.Kind) && (o.Kind < MemoryLoad || o.Kind > Guard) && o.Kind != RegionGuard && o.Kind != LoopContinue && o.Kind != PairHigh && o.Kind != MemoryPairStore && o.Kind != NativeElapsed {
+		if !pureOperation(o.Kind) && (o.Kind < MemoryLoad || o.Kind > Guard) && o.Kind != RegionGuard && o.Kind != LoopContinue && o.Kind != PairHigh && o.Kind != MemoryPairStore && o.Kind != NativeElapsed && o.Kind != LoopCount {
 			return fmt.Errorf("invalid memory IR operation")
 		}
 		if o.Kind == SelectValue && (o.Imm >= uint64(i) || effectOnly(ops[o.Imm].Kind)) {
@@ -211,10 +211,10 @@ func (m *MemoryContext) Fill(number uint64, data *[4096]byte, permissions uint64
 		m.Forget(number)
 		return
 	}
-	m.Pages[number&63] = NativePage{number, data, permissions, epoch}
+	m.Pages[m.PageIndex(number)] = NativePage{number, data, permissions, epoch}
 }
 func (m *MemoryContext) Forget(number uint64) {
-	p := &m.Pages[number&63]
+	p := &m.Pages[m.PageIndex(number)]
 	if p.Number == number {
 		*p = NativePage{}
 	}

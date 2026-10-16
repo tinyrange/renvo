@@ -86,7 +86,7 @@ func NewEngine(config engine.EngineConfig) (*engine.Engine, error) {
 }
 
 -- cpu.go --
-// POWER Book III-S integer interpreter. No host byte order is assumed.
+// POWER Book III-S interpreter. No host byte order is assumed.
 package power64
 
 import (
@@ -96,20 +96,23 @@ import (
 )
 
 const (
-	MSRSF uint64 = 1 << 63
-	MSREE uint64 = 1 << 15
-	MSRPR uint64 = 1 << 14
-	MSRIR uint64 = 1 << 5
-	MSRDR uint64 = 1 << 4
-	MSRLE uint64 = 1
-	XERSO uint64 = 1 << 31
-	XEROV uint64 = 1 << 30
-	XERCA uint64 = 1 << 29
+	MSRSF  uint64 = 1 << 63
+	MSRVEC uint64 = 1 << 25
+	MSREE  uint64 = 1 << 15
+	MSRPR  uint64 = 1 << 14
+	MSRIR  uint64 = 1 << 5
+	MSRDR  uint64 = 1 << 4
+	MSRLE  uint64 = 1
+	XERSO  uint64 = 1 << 31
+	XEROV  uint64 = 1 << 30
+	XERCA  uint64 = 1 << 29
 )
 
 type SLB struct{ ESID, VSID uint64 }
 type CPU struct {
-	GPR                   [32]uint64
+	GPR [32]uint64
+	// VR bytes use architectural order: byte 0 contains bits 0..7 (the MSB).
+	VR                    [32][16]byte
 	PC, LR, CTR, MSR, XER uint64
 	CR                    uint32
 	SPR                   [1024]uint64
@@ -794,6 +797,105 @@ func TestReservationInvalidatedByStore(t *testing.T) {
 	}
 }
 
+-- direct_link_test.go --
+package power64
+
+import (
+	"fmt"
+	"renvo.dev/internal/rfe/engine"
+	emu "renvo.dev/internal/rfe/runtime"
+	"testing"
+)
+
+type directFlowWord uint32
+
+func (w directFlowWord) Read(address uint64, size int, execute bool) (uint64, error) {
+	if size != 4 || !execute {
+		return 0, fmt.Errorf("non-fetch access")
+	}
+	return uint64(w), nil
+}
+func (w directFlowWord) Write(address uint64, size int, value uint64) error {
+	return fmt.Errorf("unexpected write")
+}
+
+// Direct linked branches retain their LR update on both taken and untaken
+// paths. A guarded multi-block body must commit only the scalar call prefix
+// when its conditional target is not selected; it cannot execute the callee.
+func TestDirectLinkedBranchRegionPrefixes(t *testing.T) {
+	if !nativeHost() {
+		t.Skip("native host unavailable")
+	}
+	n, err := emu.NewNative(1 << 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer n.Close()
+	if err = n.PrepareLinks(StateWords, StatePC); err != nil {
+		t.Fatal(err)
+	}
+	for _, word := range []uint32{18<<26 | 0x1001, 18<<26 | 0x2003, 16<<26 | 12<<21 | 2<<16 | 0x1001, 16<<26 | 12<<21 | 2<<16 | 0x2003} {
+		ins, err := fetchPower(directFlowWord(word), 0x1000)
+		if err != nil || !ins.Terminal || !ins.Flow.Known || ins.Flow.Next != 0x2000 {
+			t.Fatal("immediate linked flow", word, ins, err)
+		}
+		var b emu.Builder
+		b.Store(StatePC, b.Constant(0x1000))
+		if !LowerInstruction(&b, ins, 0) {
+			t.Fatal("call lowering")
+		}
+		b.Checkpoint(StateWords, 1)
+		b.RegionGuard(b.Binary(emu.Equal, b.Load(StatePC), b.Constant(0x2000)))
+		b.Store(StatePC, b.Constant(0x2000))
+		add := uint32(14<<26 | 3<<21 | 3<<16 | 7)
+		if !LowerInstruction(&b, engine.Instruction{PC: 0x2000, Bits: uint64(add), Length: 4}, 1) {
+			t.Fatal("callee lowering")
+		}
+		b.Checkpoint(StateWords, 2)
+		b.LoopContinue(b.Constant(0))
+		entry, err := n.CompileLoop(b.FinishMemory(StateWords), StateWords, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, cr := range []uint32{0, 1 << 29} {
+			for _, budget := range []uint64{1, 2, 3, 64} {
+				cpu := CPU{PC: 0x1000, MSR: MSRSF | MSRLE, LR: 0xdeadbeef, CTR: 9, CR: cr, XER: 0xe0000000}
+				cpu.GPR[3] = ^uint64(2)
+				initial := NewTierCPU(&cpu, nil).State
+				retired := uint64(0)
+				if budget >= 2 {
+					if err := cpu.Execute(word); err != nil {
+						t.Fatal(err)
+					}
+					retired++
+					if cpu.PC == 0x2000 {
+						if err := cpu.Execute(add); err != nil {
+							t.Fatal(err)
+						}
+						retired++
+					}
+				}
+				want := NewTierCPU(&cpu, nil).State
+				m := new(emu.MemoryContext)
+				m.ClaimLinks(n)
+				m.PublishLink(0x1000, entry, 2, [17]uint8{})
+				if err := n.CallLinked(initial[:], m, budget); err != nil {
+					t.Fatal(err)
+				}
+				if initial != want || m.Total != retired || m.Remaining != budget-retired || m.Status != 0 || m.MemoryTotal != 0 {
+					t.Fatal("linked branch prefix", word, cr, budget, initial, want, m.Total, m.Remaining, m.Status)
+				}
+			}
+		}
+	}
+	for _, word := range []uint32{0x4e800020, 0x4e800021, 0x4e800420, 0x4e800421} {
+		ins, err := fetchPower(directFlowWord(word), 0x1000)
+		if err != nil || !ins.Terminal || ins.Flow.Known {
+			t.Fatal("guessed indirect successor", word, ins, err)
+		}
+	}
+}
+
 -- extended.go --
 package power64
 
@@ -821,6 +923,8 @@ func (c *CPU) extended(op uint32, pc uint64) error {
 	writeRT, writeRA, record := false, false, op&1 != 0
 	address := c.base(ra) + b
 	switch xo {
+	case 103, 231: // lvx/stvx
+		return c.vectorMemory(rs, address, xo == 231)
 	case 0, 32:
 		lhs, rhs := a, b
 		if op&(1<<21) == 0 {
@@ -1408,6 +1512,8 @@ func lowerable(op uint32) (memory, ok bool) {
 		}
 	case 31:
 		switch x {
+		case 103, 231: // vector memory retains precise slow execution
+			return true, false
 		case 0, 32, 19, 144, 24, 536, 27, 539, 26, 58, 28, 60, 124, 284, 316, 412, 444, 476, 922, 954, 986, 792, 824, 794, 826, 827, 506, 122, 378, 508, 659, 595:
 			return false, true
 		case 339, 371, 467:
@@ -1440,14 +1546,16 @@ func fetchPower(memory engine.Memory, pc uint64) (engine.Instruction, error) {
 		}
 		ins.Terminal = true
 		ins.Flow.Next = target
-		ins.Flow.Known = op&1 == 0
+		// The link bit writes LR but does not make this immediate target
+		// dynamic. Region lowering retains the LR write and full-PC guard.
+		ins.Flow.Known = true
 	case 16:
 		target := sext(uint64(op&0xfffc), 16)
 		if op&2 == 0 {
 			target += pc
 		}
 		ins.Terminal = true
-		ins.Flow = engine.Successors{Next: target, Alternate: pc + 4, Conditional: true, Known: op&1 == 0}
+		ins.Flow = engine.Successors{Next: target, Alternate: pc + 4, Conditional: true, Known: true}
 	case 19:
 		if x := op >> 1 & 1023; x == 16 || x == 528 {
 			ins.Terminal = true
@@ -2334,6 +2442,383 @@ func TestDoublewordByteReverse(t *testing.T) {
 		for i := 0; i < 8; i++ {
 			if m[136+i] != byte(i+1) {
 				t.Fatal("stdbrx bytes")
+			}
+		}
+	}
+}
+
+-- vector.go --
+package power64
+
+import rt "renvo.dev/internal/rfe/runtime"
+
+// lvx/stvx transfer an aligned quadword. In little-endian mode the entire
+// 16-byte value is reversed in memory, not just each doubleword independently.
+// Vector state stays in CPU across scalar native execution and slow fallbacks.
+func (c *CPU) vectorMemory(reg uint32, address uint64, store bool) error {
+	if c.MSR&MSRVEC == 0 {
+		return &exception{vector: 0xf20}
+	}
+	if c.MSR&MSRSF == 0 {
+		address = uint64(uint32(address))
+	}
+	address &^= 15
+	if !store {
+		first, err := c.read(address, 8, rt.Read)
+		if err != nil {
+			return err
+		}
+		second, err := c.read(address+8, 8, rt.Read)
+		if err != nil {
+			return err
+		}
+		if c.MSR&MSRLE != 0 {
+			first, second = second, first
+		}
+		var value [16]byte
+		for i := 0; i < 8; i++ {
+			value[i] = byte(first >> uint(56-8*i))
+			value[i+8] = byte(second >> uint(56-8*i))
+		}
+		c.VR[reg] = value
+		return nil
+	}
+
+	// Resolve both halves before writing. Translation faults cannot partially
+	// store the vector; a bus fault may follow an already successful half store,
+	// as for existing split scalar stores. The bus does not promise atomic 128-bit
+	// accesses, and aligned vector accesses never cross an architectural page.
+	var physical [2]uint64
+	for i := 0; i < 2; i++ {
+		p, err := c.physical(address+uint64(8*i), rt.Write)
+		if err != nil {
+			return err
+		}
+		physical[i] = p
+	}
+	var halves [2]uint64
+	for i := 0; i < 16; i++ {
+		index := i
+		if c.MSR&MSRLE != 0 {
+			index = 15 - i
+		}
+		halves[i/8] |= uint64(c.VR[reg][index]) << uint(8*(i%8))
+	}
+	for i := 0; i < 2; i++ {
+		if fault := c.Bus.Store(physical[i], 8, halves[i], c.Tick); fault != nil {
+			return fault
+		}
+		c.Reserved = false
+	}
+	return nil
+}
+
+-- vector_test.go --
+package power64_test
+
+import (
+	"bytes"
+	"encoding/binary"
+	"renvo.dev/emulators/power64"
+	rt "renvo.dev/internal/rfe/runtime"
+	"testing"
+)
+
+// These oracles use architectural byte numbering: vector byte zero contains
+// bits 0..7. lvx/stvx transfer a whole aligned quadword, so little-endian mode
+// reverses all sixteen bytes, including their doubleword positions.
+// Power ISA Book I, Vector Load/Store Instructions:
+// https://openpowerfoundation.org/specifications/isa/
+type vectorBus struct {
+	data        []byte
+	reads       int
+	writes      int
+	denyRead    bool
+	denyReadAt  uint64
+	denyWrite   bool
+	denyWriteAt uint64
+}
+
+func (m *vectorBus) Load(a uint64, w int, access rt.Access, tick uint64) (uint64, *rt.Fault) {
+	if access == rt.Read {
+		m.reads++
+	}
+	if a > uint64(len(m.data)) || w < 1 || w > 8 || uint64(w) > uint64(len(m.data))-a || access == rt.Read && m.denyRead && a == m.denyReadAt {
+		return 0, &rt.Fault{Kind: rt.Permission, Access: access, Address: a, Width: w}
+	}
+	var value uint64
+	for i := 0; i < w; i++ {
+		value |= uint64(m.data[a+uint64(i)]) << uint(i*8)
+	}
+	return value, nil
+}
+
+func (m *vectorBus) Store(a uint64, w int, value uint64, tick uint64) *rt.Fault {
+	m.writes++
+	if a > uint64(len(m.data)) || w < 1 || w > 8 || uint64(w) > uint64(len(m.data))-a {
+		return &rt.Fault{Kind: rt.Boundary, Access: rt.Write, Address: a, Width: w}
+	}
+	if m.denyWrite && a == m.denyWriteAt {
+		return &rt.Fault{Kind: rt.Permission, Access: rt.Write, Address: a, Width: w}
+	}
+	for i := 0; i < w; i++ {
+		m.data[a+uint64(i)] = byte(value >> uint(i*8))
+	}
+	return nil
+}
+
+func (m *vectorBus) Peek(a uint64, w int) (uint64, bool) {
+	value, fault := m.Load(a, w, rt.Execute, 0)
+	return value, fault == nil
+}
+
+func vectorWord(xo, vr, ra, rb uint32) uint32 {
+	return 31<<26 | vr<<21 | ra<<16 | rb<<11 | xo<<1
+}
+
+func vectorCPU(m *vectorBus, little bool) power64.CPU {
+	c := power64.CPU{Bus: m, PC: 0x2000, MSR: power64.MSRSF | power64.MSRVEC, Tick: 17, CR: 0xa5f01b3c, XER: 0xe0000000, LR: 0x12345678, CTR: 23}
+	if little {
+		c.MSR |= power64.MSRLE
+	}
+	for r := range c.GPR {
+		c.GPR[r] = 0x8000000000000000 | uint64(r*37)
+		for i := range c.VR[r] {
+			c.VR[r][i] = byte(r*23 + i*7)
+		}
+	}
+	return c
+}
+
+func TestVectorLoadStoreArchitecturalBytes(t *testing.T) {
+	for _, little := range []bool{false, true} {
+		for _, ra := range []uint32{0, 4} {
+			for _, vr := range []uint32{0, 7, 31} {
+				for offset := uint64(0); offset < 16; offset++ {
+					m := &vectorBus{data: make([]byte, 256)}
+					for i := range m.data {
+						m.data[i] = byte(i*19 + 3)
+					}
+					c := vectorCPU(m, little)
+					c.GPR[5] = 64 + offset
+					if ra != 0 {
+						c.GPR[4] = 29
+						c.GPR[5] -= 29
+					}
+					gpr, bank := c.GPR, c.VR
+					for i := 0; i < 16; i++ {
+						index := i
+						if little {
+							index = 15 - i
+						}
+						bank[vr][index] = m.data[64+i]
+					}
+					if err := c.Execute(vectorWord(103, vr, ra, 5)); err != nil {
+						t.Fatal(err)
+					}
+					if c.VR != bank || c.GPR != gpr || c.PC != 0x2004 || c.Tick != 18 || c.CR != 0xa5f01b3c || c.XER != 0xe0000000 || c.LR != 0x12345678 || c.CTR != 23 {
+						t.Fatalf("lvx little=%t ra=%d vr=%d offset=%d: vector=%x want=%x PC=%x tick=%d", little, ra, vr, offset, c.VR[vr], bank[vr], c.PC, c.Tick)
+					}
+					// Give stvx a separately constructed vector, so a matching
+					// incorrect load/store permutation cannot pass a roundtrip.
+					for i := 0; i < 16; i++ {
+						c.VR[vr][i] = byte(0xf1 - i*11)
+					}
+					bank = c.VR
+					want := bytes.Clone(m.data)
+					for i := 0; i < 16; i++ {
+						index := i
+						if little {
+							index = 15 - i
+						}
+						want[128+i] = byte(0xf1 - index*11)
+					}
+					c.GPR[5] += 64
+					gpr = c.GPR
+					if err := c.Execute(vectorWord(231, vr, ra, 5)); err != nil {
+						t.Fatal(err)
+					}
+					if !bytes.Equal(m.data, want) || c.VR != bank || c.GPR != gpr || c.PC != 0x2008 || c.Tick != 19 || c.CR != 0xa5f01b3c || c.XER != 0xe0000000 || c.LR != 0x12345678 || c.CTR != 23 {
+						t.Fatalf("stvx little=%t ra=%d vr=%d offset=%d: bytes=%x want=%x PC=%x tick=%d", little, ra, vr, offset, m.data[128:144], want[128:144], c.PC, c.Tick)
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestVectorEffectiveAddressWidthAndWrap(t *testing.T) {
+	for _, test := range []struct {
+		full64   bool
+		base, rb uint64
+		want     uint64
+	}{
+		{true, ^uint64(0) - 15, 0x53, 0x40},
+		{false, 0x10000003c, 9, 0x40},
+		{true, 0x123456780000003c, 9, 0x1234567800000040},
+	} {
+		for _, xo := range []uint32{103, 231} {
+			m := &vectorBus{data: make([]byte, 256)}
+			c := vectorCPU(m, true)
+			if !test.full64 {
+				c.MSR &^= power64.MSRSF
+			}
+			c.GPR[4], c.GPR[5] = test.base, test.rb
+			translations := 0
+			c.Translate = func(_ *power64.CPU, address uint64, access rt.Access) (uint64, error) {
+				translations++
+				wantAccess := rt.Read
+				if xo == 231 {
+					wantAccess = rt.Write
+				}
+				if address < test.want || address >= test.want+16 || access != wantAccess {
+					t.Fatalf("xo=%d translated address=%x access=%d, want aligned block=%x access=%d", xo, address, access, test.want, wantAccess)
+				}
+				return address & 255, nil
+			}
+			if err := c.Execute(vectorWord(xo, 31, 4, 5)); err != nil || c.Tick != 18 || translations == 0 {
+				t.Fatal("effective address", test, xo, err, c.Tick, translations)
+			}
+		}
+	}
+}
+
+func TestVectorUnavailablePrecedesMemory(t *testing.T) {
+	for _, xo := range []uint32{103, 231} {
+		for _, little := range []bool{false, true} {
+			m := &vectorBus{data: bytes.Repeat([]byte{0xa5}, 256)}
+			c := vectorCPU(m, little)
+			c.MSR &^= power64.MSRVEC
+			msr, gpr, bank := c.MSR, c.GPR, c.VR
+			c.Translate = func(_ *power64.CPU, address uint64, access rt.Access) (uint64, error) {
+				t.Fatal("unavailable vector instruction translated memory")
+				return 0, nil
+			}
+			if err := c.Execute(vectorWord(xo, 7, 4, 5)); err != nil {
+				t.Fatal(err)
+			}
+			if c.PC != 0xf20 || c.SPR[26] != 0x2000 || c.SPR[27] != msr || c.Tick != 17 || c.GPR != gpr || c.VR != bank || m.reads != 0 || m.writes != 0 || c.CR != 0xa5f01b3c || c.XER != 0xe0000000 {
+				t.Fatalf("unavailable xo=%d little=%t PC=%x SRR0=%x SRR1=%x tick=%d read=%d write=%d", xo, little, c.PC, c.SPR[26], c.SPR[27], c.Tick, m.reads, m.writes)
+			}
+		}
+	}
+}
+
+func TestVectorTranslationFaultIsPrecise(t *testing.T) {
+	for _, xo := range []uint32{103, 231} {
+		for _, little := range []bool{false, true} {
+			for _, denied := range []uint64{64, 72} {
+				m := &vectorBus{data: bytes.Repeat([]byte{0x5a}, 256)}
+				c := vectorCPU(m, little)
+				c.GPR[5] = 79 // Align down before either access or fault reporting.
+				msr, gpr, bank := c.MSR, c.GPR, c.VR
+				c.Translate = func(_ *power64.CPU, address uint64, access rt.Access) (uint64, error) {
+					if address == denied {
+						return 0, power64.TranslationMiss(address, access, false, true)
+					}
+					return address, nil
+				}
+				if err := c.Execute(vectorWord(xo, 7, 0, 5)); err != nil {
+					t.Fatal(err)
+				}
+				status := uint64(1 << 27)
+				if xo == 231 {
+					status |= 1 << 25
+				}
+				if c.PC != 0x300 || c.SPR[26] != 0x2000 || c.SPR[27] != msr || c.SPR[19] != denied || c.SPR[18] != status || c.Tick != 17 || c.GPR != gpr || c.VR != bank || m.writes != 0 || !bytes.Equal(m.data, bytes.Repeat([]byte{0x5a}, 256)) {
+					t.Fatalf("fault xo=%d little=%t denied=%x PC=%x DAR=%x DSISR=%x tick=%d writes=%d", xo, little, denied, c.PC, c.SPR[19], c.SPR[18], c.Tick, m.writes)
+				}
+			}
+		}
+	}
+}
+
+func TestVectorLoadBusFaultPreservesEntireDestination(t *testing.T) {
+	for _, little := range []bool{false, true} {
+		m := &vectorBus{data: bytes.Repeat([]byte{0x5a}, 256), denyRead: true, denyReadAt: 72}
+		c := vectorCPU(m, little)
+		c.GPR[5] = 64
+		bank := c.VR
+		if err := c.Execute(vectorWord(103, 7, 0, 5)); err == nil || c.Tick != 17 || c.VR != bank || m.reads != 2 {
+			t.Fatalf("second-half bus fault committed vector: little=%t err=%v tick=%d reads=%d vector=%x", little, err, c.Tick, m.reads, c.VR[7])
+		}
+	}
+}
+
+func TestVectorStoreBusFaultTracksWrittenBytesAndReservation(t *testing.T) {
+	for _, little := range []bool{false, true} {
+		for _, denied := range []uint64{64, 72} {
+			m := &vectorBus{data: bytes.Repeat([]byte{0x5a}, 256), denyWrite: true, denyWriteAt: denied}
+			c := vectorCPU(m, little)
+			c.GPR[5], c.Reservation, c.Reserved = 79, 64, true
+			for i := 0; i < 16; i++ {
+				c.VR[7][i] = byte(0xf1 - i*11)
+			}
+			gpr, bank := c.GPR, c.VR
+			want := bytes.Clone(m.data)
+			// The scalar bus has no transaction spanning both Store calls.
+			// A second-half bus fault retains the first eight bytes
+			// and must invalidate the reservation despite non-retirement.
+			for i := 0; i < int(denied-64); i++ {
+				index := i
+				if little {
+					index = 15 - i
+				}
+				want[64+i] = byte(0xf1 - index*11)
+			}
+			if err := c.Execute(vectorWord(231, 7, 0, 5)); err == nil || c.Tick != 17 || c.VR != bank || c.GPR != gpr || c.CR != 0xa5f01b3c || c.XER != 0xe0000000 || c.Reserved != (denied == 64) || m.writes != int((denied-64)/8)+1 || !bytes.Equal(m.data, want) {
+				t.Fatalf("store bus fault little=%t denied=%x err=%v tick=%d reserved=%t writes=%d bytes=%x want=%x", little, denied, err, c.Tick, c.Reserved, m.writes, m.data[64:80], want[64:80])
+			}
+		}
+	}
+}
+
+func TestVectorStateSurvivesScalarEngineTransitions(t *testing.T) {
+	for _, mode := range []string{"interpreter", "ir", "native"} {
+		for _, little := range []bool{false, true} {
+			m := &vectorBus{data: make([]byte, 256)}
+			var order binary.ByteOrder = binary.BigEndian
+			if little {
+				order = binary.LittleEndian
+			}
+			for i, op := range []uint32{vectorWord(103, 7, 0, 4), 14<<26 | 3<<21 | 3<<16 | 1, vectorWord(231, 7, 0, 5), 0x4bfffff4} {
+				order.PutUint32(m.data[i*4:], op)
+			}
+			for i := 0; i < 16; i++ {
+				m.data[64+i] = byte(i*13 + 7)
+			}
+			c := vectorCPU(m, little)
+			c.PC, c.Tick, c.GPR[3], c.GPR[4], c.GPR[5] = 0, 0, 0, 64, 128
+			bank := c.VR
+			for i := 0; i < 16; i++ {
+				index := i
+				if little {
+					index = 15 - i
+				}
+				bank[7][index] = byte(i*13 + 7)
+			}
+			config := power64.DefaultEngineConfig()
+			config.Mode, config.IRThreshold, config.NativeThreshold = mode, 1, 2
+			e, err := power64.NewEngine(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			adapter := power64.NewTierCPU(&c, nil)
+			for c.Tick < 160 {
+				before := c.Tick
+				if err := e.Step(adapter, 160-c.Tick); err != nil || c.Tick <= before || c.Tick > 160 {
+					e.Close()
+					t.Fatal("engine progress", mode, little, c.Tick, err)
+				}
+			}
+			adapter.Sync()
+			stats := e.Stats
+			if c.Tick != 160 || c.PC != 0 || c.GPR[3] != 40 || c.VR != bank || !bytes.Equal(m.data[128:144], m.data[64:80]) || mode == "ir" && stats.IR == 0 || mode == "native" && e.NativeAvailable() && stats.Native == 0 || stats.CompileFailures != 0 {
+				e.Close()
+				t.Fatal("scalar/vector adapter state", mode, little, c.Tick, c.PC, c.GPR[3], c.VR[7], bank[7], stats)
+			}
+			if err := e.Close(); err != nil {
+				t.Fatal(err)
 			}
 		}
 	}

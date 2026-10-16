@@ -69,7 +69,7 @@ func (c *LinkedCall) CallQuanta(state []uint64, m *LinkedContextABI, pcSlot, lim
 		}
 		pc := state[pcSlot]
 		var link *LinkedDescriptorABI
-		base := ((pc >> 2) ^ (pc >> 12)) & 255
+		base := ((pc >> 2) ^ (pc >> 10)) & 255
 		for way := uint64(0); way < 4; way++ {
 			candidate := &m.Blocks[base+way*256]
 			if candidate.PC == pc && candidate.Instructions != 0 {

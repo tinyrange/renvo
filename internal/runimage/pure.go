@@ -16,24 +16,25 @@ import (
 // Installation, calls, and Close are serialized. Entries are offsets, so callers
 // cannot accidentally invoke an arbitrary host address.
 type CodeArena struct {
-	faults       []rfenativebridge.FaultSite
-	mu           sync.Mutex
-	base         uintptr
-	size, used   int
-	symbols      io.Writer
-	jitSymbols   JITCodeWriter
-	extents      []codeExtent // sorted exact extents, one per installed image
-	entries      []arenaEntry // one private admission record per 16-byte code offset
-	stack        []byte
-	broken       bool
-	linkedView   [4]uint64 // refreshed under mu after every successful installation
-	targetVictim uint64
-	targets      [1024]linkedTarget         // opaque prepared proofs; no executable pointers
-	sessionEpoch uint64                     // arena-serialized generation, never reused without clearing proofs
-	sessionImage *[sessionImageWords]uint64 // dedicated pointer-free foreign ABI storage
-	sparePins    *ownedSessionPins          // unpinned, cleared storage only; never a live pointer graph
-	ownedPins    *ownedSessionPins          // at most one owned pointer graph, refreshed before use
-	sessionState *[256]uint64               // independent of enclosing Go owner allocations
+	faults           []rfenativebridge.FaultSite
+	mu               sync.Mutex
+	base             uintptr
+	size, used       int
+	symbols          io.Writer
+	jitSymbols       JITCodeWriter
+	extents          []codeExtent // sorted exact extents, one per installed image
+	entries          []arenaEntry // one private admission record per 16-byte code offset
+	stack            []byte
+	broken           bool
+	linkedView       [4]uint64 // refreshed under mu after every successful installation
+	targetVictim     uint64
+	targets          [1024]linkedTarget         // opaque prepared proofs; no executable pointers
+	dispatchCounters [5]uint64                  // diagnostic lookup, empty, PC miss, epoch miss, hit
+	sessionEpoch     uint64                     // arena-serialized generation, never reused without clearing proofs
+	sessionImage     *[sessionImageWords]uint64 // dedicated pointer-free foreign ABI storage
+	sparePins        *ownedSessionPins          // unpinned, cleared storage only; never a live pointer graph
+	ownedPins        *ownedSessionPins          // at most one owned pointer graph, refreshed before use
+	sessionState     *[256]uint64               // independent of enclosing Go owner allocations
 }
 
 type codeExtent struct{ offset, length uint32 }
@@ -49,10 +50,10 @@ type arenaEntry struct {
 }
 
 func NewCodeArena(size int) (*CodeArena, error) {
-	if unsafe.Sizeof(linkedTarget{}) != 64 || unsafe.Offsetof(linkedTarget{}.CheckedSession) != 32 || unsafe.Offsetof(linkedTarget{}.DescriptorOffset) != 40 || unsafe.Offsetof(linkedTarget{}.BodyFlags) != 24 || unsafe.Sizeof(arenaEntry{}) != 16 || unsafe.Offsetof(arenaEntry{}.Linked) != 2 || unsafe.Offsetof(arenaEntry{}.Body) != 4 || unsafe.Offsetof(arenaEntry{}.Instructions) != 8 || unsafe.Offsetof(arenaEntry{}.AdmittedCount) != 12 {
+	if unsafe.Offsetof(CodeArena{}.dispatchCounters) != unsafe.Offsetof(CodeArena{}.targets)+65536 || unsafe.Sizeof(linkedTarget{}) != 64 || unsafe.Offsetof(linkedTarget{}.CheckedSession) != 32 || unsafe.Offsetof(linkedTarget{}.DescriptorOffset) != 40 || unsafe.Offsetof(linkedTarget{}.BodyFlags) != 24 || unsafe.Sizeof(arenaEntry{}) != 16 || unsafe.Offsetof(arenaEntry{}.Linked) != 2 || unsafe.Offsetof(arenaEntry{}.Body) != 4 || unsafe.Offsetof(arenaEntry{}.Instructions) != 8 || unsafe.Offsetof(arenaEntry{}.AdmittedCount) != 12 {
 		return nil, fmt.Errorf("unsupported native admission ABI")
 	}
-	if size < 4096 || size > 64<<20 {
+	if size < 4096 || size > 128<<20 {
 		return nil, fmt.Errorf("invalid code arena size")
 	}
 	size = (size + 16383) &^ 16383

@@ -14,10 +14,17 @@ import (
 type Resolve func(address uint64, execute bool) (offset uint64, writable bool, err error)
 
 type RAM struct {
-	direct           directMemory
-	Data             []byte
-	Profile          bool // bounded host diagnostics only; no guest semantic effects
-	profileMapping   [4]uint64
+	direct         directMemory
+	Data           []byte
+	Profile        bool // bounded host diagnostics only; no guest semantic effects
+	profileMapping [4]uint64
+	// RetainRootData permits checked page views to survive exact root/domain
+	// selection. Configure before use, provide AddressSpace, and invalidate all
+	// mapping/permission changes even for inactive roots. Physical code/table
+	// watches and bounded root-slot replacement still revoke every view.
+	// Protection-backed direct windows retain conservative revocation.
+	RetainRootData   bool
+	FoldPageSlots    bool // opt-in raw page tags; configure before native fills
 	MultipleArenas   bool // per-domain executable watches have distinct owners
 	codeOwners       []byte
 	Active           func() bool
@@ -67,7 +74,7 @@ func (m *RAM) checkDomain() {
 		space = m.AddressSpace()
 	}
 	if domain != m.lastDomain || !m.spaceValid || space != m.lastSpace {
-		m.ForgetData()
+		m.forgetSelection()
 		m.lastDomain = domain
 		m.lastSpace, m.spaceValid = space, true
 	}
@@ -80,6 +87,11 @@ func (m *RAM) Read(a uint64, n int, x bool) (uint64, error) {
 	return m.ReadGuest(a, n, x)
 }
 func (m *RAM) Write(a uint64, n int, v uint64) error { return m.WriteGuest(a, n, v) }
+func (m *RAM) forgetSelection() {
+	if !m.RetainRootData || m.AddressSpace == nil || m.direct != nil {
+		m.ForgetData()
+	}
+}
 func (m *RAM) ForgetData() {
 	if m.direct != nil {
 		for i := range m.native {
@@ -226,6 +238,10 @@ func (m *RAM) NativeContext() *emu.MemoryContext {
 	}
 	context := &m.native[m.domain()][m.contextSlot()]
 	context.Clock = &m.clock
+	context.HashPages = 0
+	if m.FoldPageSlots {
+		context.HashPages = 1
+	}
 	if m.direct != nil && m.domain() == 0 {
 		context.DirectGuest, context.DirectHost, context.DirectSize = m.direct.window()
 	}

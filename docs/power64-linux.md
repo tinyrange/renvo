@@ -3,10 +3,11 @@
 `emulators/power64.rfe` supplies the architectural CPU and the POWER adapter
 for the shared recompiler: cached interpretation, scalar IR, native code,
 checked native memory, linked dispatch and cyclic regions. It is shared by the
-`linux-power64-machine.rfe` single-vCPU PAPR-style partition. The verified
-configuration boots a PPC64le Linux kernel with the hashed MMU, 4 KiB pages,
-and a freestanding ELFv2 PID 1. The CPU retains explicit big- and little-endian
-state; a big-endian Linux boot is not yet verified.
+`linux-power64-machine.rfe` single-vCPU PAPR-style partition. Verified PPC64le
+boots include Linux 6.6.1 with 4 KiB logical pages and the stock Alpine kernel
+below with 64 KiB logical pages. Both use the hashed MMU with 4 KiB hardware
+page-table entries and a freestanding ELFv2 PID 1. The CPU retains explicit
+big- and little-endian state; a big-endian Linux boot is not yet verified.
 
 No QEMU execution is hidden behind the RFE. QEMU is an independent reference
 for the boot inputs only. The partition constructs the device tree, firmware
@@ -30,7 +31,35 @@ The original interpreter boot remains a correctness control. A separate fresh
 native-engine boot and real Linux/CoreMark run now pass the full-stack gates
 below. There is no QEMU delegation in either RFE execution.
 
-## Build the development fixture
+### Stock Alpine fixture
+
+Alpine v3.20's `main/ppc64le` package `linux-virt-6.6.142-r0` provides an
+unmodified POWER8 kernel with release `6.6.142-0-virt`:
+
+- APK: <https://dl-cdn.alpinelinux.org/alpine/v3.20/main/ppc64le/linux-virt-6.6.142-r0.apk>
+- APK SHA-256: `095e93ea6cbe6f89688fcf77c0af6e0a18bfeb0d3aa08f800bed759f066a6f5c`
+- Payload: `boot/vmlinuz-virt`, a direct ELF64 little-endian POWER executable.
+- Payload SHA-256: `a6ccc1e0f23b37c637df7aa486e95d1d1a1311721eaeb2afae2b29490870d35e`
+
+TinyRangeX's native APK reader supplies this payload directly in memory.
+Its 64 KiB Linux logical pages use the partition's advertised 4 KiB hash
+page-table entries. The kernel enables AltiVec; its `copypage_power7` path
+needs `lvx` and `stvx` when loading the larger CoreMark ELF. These instructions
+retain architectural vector registers in the CPU and execute through the
+checked memory bus. The scalar native ABI remains 38 words.
+
+This stock kernel passed the RFE tiny-init boot and poweroff proof with zero
+compilation failures or arena resets. The same kernel and 80,000-iteration
+CoreMark ELF passed independent QEMU POWER8 reference validation for both
+seeds and all ten CRCs, then powered off. A fresh strict RFE 80,000-iteration
+run also passed the CRCs, host/guest duration checks and poweroff with zero
+compilation failures or arena resets. It failed the performance requirement:
+the first seed scored 1,737.602 iterations/s against the required 4,000. These
+observations use a new GCC 11.2.1 fixture and Alpine/Go 1.25.10 environment;
+they do not replace the historical Linux 6.6.1 results below. Normal tests
+still require explicitly supplied fixtures and do not download packages.
+
+## Build the Linux 6.6.1 development fixture
 
 Normal tests do not download or build an operating system. Build this fixture
 explicitly with a POWER cross toolchain and the ordinary Linux build tools.
@@ -84,6 +113,56 @@ The guest smoke must print `RENVO-POWER-LINUX: INIT`, report the real kernel's
 `uname` results, print `RENVO-POWER-LINUX: PASS`, and power off through Linux
 and RTAS. A banner, timeout, unsupported instruction, or panic is not a pass.
 
+## Current native result: above 4,000 iterations/s
+
+At the stopping point, a fresh, unprofiled strict run with the stock Alpine
+kernel and unchanged **80,000-iteration** scalar GCC 11.2.1 ELF measured:
+
+| Seed | Guest seconds | Host marker interval | Iterations/second | Final CRC |
+|---|---:|---:|---:|---|
+| Performance | 17.268410 | 17.271804123 | **4,632.737** | `cc42` |
+| Validation | 17.139243 | 17.142491030 | **4,667.651** | `35f3` |
+
+Both complete CRC sets, minimum ten-second durations, host/guest time
+agreement, actual native execution and orderly Linux poweroff passed.
+Compilation failures and arena resets were zero. The unchanged extended gate
+requires at least 4,000 iterations/second for each seed and passed; the
+subsequent **6,000 iterations/second goal was not reached**.
+
+These measurements use a one-vCPU Linux/amd64 Alpine workbench with Go
+1.25.10, a 256 MiB POWER guest, 65,536-instruction native sessions,
+4,096-instruction monotonic clock polling, 64-instruction static regions and
+the explicitly configured 128 MiB POWER native-code cache. They are not a
+same-resource comparison with the historical 8 MiB/64-instruction polling
+measurements below. Checked memory remains the default. Profiling was disabled
+for the strict proof; sampled diagnostic runs are not performance results.
+
+The guest ELF SHA-256 is
+`318e506bf767aa8f5cb44d7fcc0ea2395228a0c38cd585cb376b42d3b888cbbe`.
+The kernel hash and pinned upstream CoreMark revision are recorded above and
+below. No workload, clock accounting, CRC reference, minimum duration or gate
+threshold was changed during the final optimization pass.
+
+Reproduce with explicitly supplied fixtures (normal tests do not download them):
+
+```sh
+RENVO_POWER_ENGINE=native \
+RENVO_POWER_LINUX_KERNEL=/absolute/path/to/alpine-vmlinux \
+RENVO_POWER_LINUX_RELEASE=6.6.142-0-virt \
+RENVO_POWER_COREMARK_EXTENDED_ELF=/absolute/path/to/coremark80000.elf \
+  go run ./cmd/renvoemu test -run '^TestLinuxCoreMarkExtendedPerformance$' \
+  emulators/linux-power64-machine.rfe
+```
+
+The final pass reduces checked successor dispatch and translation overhead,
+preserves warmed regions at short scheduling tails, admits bounded pure
+conditional regions, and simplifies scalar/condition lowering. Countdown loops
+reuse exact arithmetic zero flags and derive completed iterations from the
+original instruction budget only after architectural state restoration.
+Regression coverage includes full-width predicates, raw private-body progress,
+permissions, root changes, fault prefixes, timer expiry, exact budgets and
+mixed leaf/region transitions.
+
 ## Tests and diagnostics
 
 ```sh
@@ -95,11 +174,26 @@ RENVO_POWER_LINUX_INIT=/absolute/path/to/init \
   go run ./cmd/renvoemu test -run TestLinuxBoot emulators/linux-power64-machine.rfe
 ```
 
+Fixture tests expect the exact kernel release `6.6.1` by default. When selecting
+another explicitly supplied kernel, set `RENVO_POWER_LINUX_RELEASE` to its exact
+`uname -r` value, for example `6.6.142-0-virt` for the Alpine kernel fixture.
+This applies to `TestLinuxBoot` and every Linux CoreMark gate. An explicitly
+empty value is rejected; the release must be one printable ASCII token of at
+most 64 bytes. The guest must print exactly one matching uname report. Changing
+the expected release does not change CRC references, timing checks, required
+scores, instruction limits or native resources. Native fixture proofs require
+zero compilation failures. Arena resets emit a warning and remain visible in
+the native statistics; recycling costs remain part of the measured runtime.
+
 `-steps` bounds execution. `-progress N` emits a compact diagnostic every N
 instructions. `-trace-after N -trace-count M` enables a bounded trace on
 stderr, not an unbounded trace file. An unsupported instruction stops with PC,
 MSR, and the actual instruction word. It must be implemented from architecture
 semantics, not skipped or identified by a guest address.
+
+`-jit-profile` explicitly enables native symbol maps and monotonic JIT-dump
+support for diagnostic sampling. It is disabled by default and independent of
+`-stats`; profiled timings are not performance proofs.
 
 ## CoreMark inside Linux
 
@@ -220,18 +314,21 @@ not authorize arbitrary unnotified changes to public backing arrays.
 
 On Linux/amd64 with the supported foreign boundary, native state and validated
 pins stay resident for at most **65,536 instructions**, while real monotonic
-timer deadlines are still checked between native dispatches of at most **64
-instructions**. The deadline is the earlier of DEC expiry and a 1 ms host
+timer deadlines are checked before entry and at intervals of at most **4,096
+retired guest instructions** inside admitted native sessions. This polling
+cadence is independent of the static region width and exact retirement ledger.
+The deadline is the earlier of DEC expiry and a 1 ms host
 refresh boundary. This avoids millions of Go/cgo re-entries without making the
 clock retirement-based. Custom clocks, aliases and unsupported hosts retain
 the original short boundary. Slow instructions, exceptions and bank
 transitions synchronize immediately. Deterministic slices stop at decrementer
 expiry. Realtime counter accesses and cede remain synchronous, and the POWER
 oscillator includes host compilation time rather than pausing it out of scores.
-Regions remain bounded to a 64-instruction inner scheduling slice; cold kernel
-native admission is conservative. The original default instruction, executable
-arena and duration budgets are unchanged. The separately selected performance
-input has its own explicit resource profile, not a larger legacy/default limit.
+Regions retain their 64-instruction static size bound; cold kernel native
+admission is conservative. The POWER machine explicitly configures a **128 MiB
+native-code cache**. The shared engine default remains 8 MiB; instruction,
+session, frame, guest RAM and duration budgets are unchanged. The separately
+selected performance input has its own explicit resource profile, not a larger legacy/default limit.
 
 Use the explicit fixtures above to require actual full-stack execution:
 
@@ -311,10 +408,10 @@ regressions, formatting and Renvo preflight. Full validation remains with CI.
 These are hosted native-emulation measurements, not physical POWER hardware,
 EEMBC certification or an ARM64/x86 throughput-parity claim.
 
-### Follow-up toward 4,000 iterations/s
+### Historical 20,000-iteration follow-up
 
-The next optimization pass **has not reached 4,000 iterations/s**. Its final
-fresh, unprofiled strict 20,000-iteration gate measured:
+The earlier timer-frame optimization pass did not reach 4,000 iterations/s.
+Its fresh, unprofiled strict 20,000-iteration gate measured:
 
 | Seed | Guest realtime | Host marker interval | Iterations/s from ticks |
 | --- | ---: | ---: | ---: |
