@@ -10,7 +10,7 @@ import (
 	"renvo.dev/internal/targetinfo"
 )
 
-func TestBrowserCProjectCompilesWithEveryAdvertisedBackend(t *testing.T) {
+func TestBrowserCProjectPolicyForEveryAdvertisedBackend(t *testing.T) {
 	root := repoRoot(t)
 	project := t.TempDir()
 	if err := os.WriteFile(filepath.Join(project, "main.c"), []byte(`#include <stdio.h>
@@ -33,6 +33,21 @@ int main(void) {
 				t.Fatalf("C browser frontend failed: %#v", built)
 			}
 			compiled := (backendcompiled.Backend{}).CompileUnitWithArena(built.Unit, target.Backend, true, false, 64*1024*1024)
+			if targetinfo.MemoryStrategy(target.Name) == "desktop" {
+				// Managed profiles currently support Go process executables only.
+				// Exercise rejection, rather than silently omitting these targets.
+				if compiled.Ok || len(compiled.Binary) != 0 || compiled.Diagnostic.Phase != "backend" || compiled.Diagnostic.Code != "RENVO-BACKEND-001" {
+					t.Fatalf("managed C compilation should fail without an artifact: %#v", compiled)
+				}
+				// A broken backend must not satisfy the negative C assertion.
+				goBinary, goOK := backendcompiled.RenvoCompileSourceToBytesWithOptions(
+					[]byte("package main; func appMain() int { return 0 }"), target.Backend,
+					backendcompiled.RenvoCompileOptions{ArenaSize: 64 * 1024 * 1024})
+				if !goOK || len(goBinary) == 0 {
+					t.Fatalf("managed Go executable failed: success=%v, bytes=%d", goOK, len(goBinary))
+				}
+				return
+			}
 			if !compiled.Ok || len(compiled.Binary) == 0 {
 				t.Fatalf("C browser backend failed: %#v", compiled.Diagnostic)
 			}
