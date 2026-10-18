@@ -470,13 +470,66 @@ func frontendSource(descriptors []sourceDescriptor) []byte {
 	return out.Bytes()
 }
 
+// Descriptors are immutable generated data. Store their fields in a compact
+// length-prefixed record rather than emitting a separate constructor (including
+// every slice element and fingerprint byte) for each target in every compiler.
 func writeFrontendDescriptor(out *bytes.Buffer, descriptor sourceDescriptor) {
-	fmt.Fprintf(out, "Descriptor{Name:%q, Backend:%q, Aliases:%#v, Family:%q, OS:%q, ISA:%q, WordBits:%d, PointerBits:%d, CodePointerBits:%d, FunctionPointerBits:%d, MaxAlign:%d, Endian:%q, ABI:%q, Image:%q, Runtime:%#v, Tags:%#v, Capabilities:%#v, Definition:%#v, DescriptorVersion:%d, Advertised:%t, Virtual:%t, DefaultArena:%d, ReleaseArtifact:%q, IDE:%t}",
-		descriptor.Name, descriptor.Backend, descriptor.Aliases, descriptor.Family, descriptor.OS, descriptor.ISA, descriptor.WordBits,
-		descriptor.PointerBits, descriptor.CodePointerBits, descriptor.FunctionPointerBits, descriptor.MaxAlign,
-		descriptor.Endian, descriptor.ABI, descriptor.Image, descriptor.Runtime, descriptor.Tags,
-		descriptor.Capabilities, descriptor.Definition, descriptor.Descriptor, descriptor.Advertised,
-		descriptor.Virtual, descriptor.DefaultArena, descriptor.ReleaseArtifact, descriptor.IDE)
+	var record bytes.Buffer
+	text := func(value string) {
+		writeDescriptorNumber(&record, len(value))
+		record.WriteString(value)
+	}
+	list := func(values []string) {
+		if values == nil {
+			writeDescriptorNumber(&record, 0)
+			return
+		}
+		writeDescriptorNumber(&record, len(values)+1)
+		for _, value := range values {
+			text(value)
+		}
+	}
+	text(descriptor.Name)
+	text(descriptor.Backend)
+	list(descriptor.Aliases)
+	text(descriptor.Family)
+	text(descriptor.OS)
+	text(descriptor.ISA)
+	for _, value := range []int{descriptor.WordBits, descriptor.PointerBits,
+		descriptor.CodePointerBits, descriptor.FunctionPointerBits, descriptor.MaxAlign} {
+		writeDescriptorNumber(&record, value)
+	}
+	text(descriptor.Endian)
+	text(descriptor.ABI)
+	text(descriptor.Image)
+	list(descriptor.Runtime)
+	list(descriptor.Tags)
+	list(descriptor.Capabilities)
+	record.Write(descriptor.Definition[:])
+	writeDescriptorNumber(&record, descriptor.Descriptor)
+	flags := 0
+	if descriptor.Advertised {
+		flags |= 1
+	}
+	if descriptor.Virtual {
+		flags |= 2
+	}
+	if descriptor.IDE {
+		flags |= 4
+	}
+	writeDescriptorNumber(&record, flags)
+	writeDescriptorNumber(&record, descriptor.DefaultArena)
+	text(descriptor.ReleaseArtifact)
+	fmt.Fprintf(out, "decodeDescriptor(%q)", record.String())
+}
+
+func writeDescriptorNumber(out *bytes.Buffer, value int) {
+	if value < 0 || uint64(value) > 0x7fffffff {
+		panic("target descriptor value does not fit a nonnegative 32-bit int")
+	}
+	for shift := 0; shift < 32; shift += 8 {
+		out.WriteByte(byte(uint32(value) >> shift))
+	}
 }
 
 func backendSource(descriptors []sourceDescriptor) []byte {
