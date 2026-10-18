@@ -127,17 +127,19 @@ go backend {
 
 	func asmFrameStart(a *RTGEmitter) int {
 		at := a.Len()
-		asmEmit(a, 0xe3009000) // movw r9, #0
+		asmEmit(a, 0xe3009000) // movw r9, #frame_low
+		asmEmit(a, 0xe3409000) // movt r9, #frame_high
 		asmEmit(a, 0xe04dd009) // sub sp, sp, r9
 		return at
 	}
 
 	func asmPatchFrame(a *RTGEmitter, at int, stackUsed int) {
 		frame := (stackUsed + 7) & -8
-		if frame > 65528 {
-			frame = 65528
-		}
-		a.PatchUint32(at, 0xe3009000|((frame&0xf000)<<4)|(frame&0x0fff))
+		// Do not silently clamp a large authored frame: locals would overlap
+		// subsequent call frames. Reserve both immediate halves in the prologue.
+		low, high := frame&65535, (frame>>16)&65535
+		a.PatchUint32(at, 0xe3009000|((low&0xf000)<<4)|(low&0x0fff))
+		a.PatchUint32(at+4, 0xe3409000|((high&0xf000)<<4)|(high&0x0fff))
 	}
 
 	func asmAddRegSmallImm(a *RTGEmitter, dst int, src int, imm int) {

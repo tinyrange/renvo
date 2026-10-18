@@ -63,11 +63,18 @@ func lowerFunctionValueDefers(program *unit.Program, signatures []functionValueS
 			}
 			replacement += "if " + callee + ".kind == " + functionValueDecimal(i+1) + " { defer "
 			if impl.method != "" {
-				replacement += callee + ".data.(*" + impl.environmentType + ").value." + impl.method + "(" + args + ")"
+				receiver := callee + ".data.(*" + impl.environmentType + ")"
+				if functionValueEnvironmentType(sig) != "interface{}" {
+					receiver = callee + ".data"
+				}
+				replacement += receiver + ".value." + impl.method + "(" + args + ")"
 			} else {
 				callArgs := args
 				if impl.environmentType != "" {
 					callArgs = callee + ".data.(" + impl.receiverType + ")"
+					if functionValueEnvironmentType(sig) != "interface{}" {
+						callArgs = callee + ".data"
+					}
 					if args != "" {
 						callArgs += ", " + args
 					}

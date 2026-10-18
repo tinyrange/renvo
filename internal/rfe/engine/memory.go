@@ -45,6 +45,9 @@ func (e *Engine) accountMemory(c CPU, block *compiledBlock, memory NativeMemory,
 		}
 		if context.Status == 1 {
 			memory.NativeRefill(context.Address)
+			if e.memoryRetryAllowed && !e.memoryRetry && !e.inNativeBatch && retired < uint64(len(block.instructions)) && refillReady(context) {
+				return e.retryMemory(c, uint64(len(block.instructions))-retired)
+			}
 		}
 		return e.interpret(c)
 	}
@@ -56,31 +59,42 @@ func (e *Engine) prepareMemoryBlock(c CPU, block *compiledBlock) bool {
 	if block.attempted {
 		return true
 	}
-	defer pauseTranslationClock(c)()
+	if clock := pauseTranslationClock(c); clock != nil {
+		defer resumeTranslationClock(clock)
+	}
 	if !block.attempted {
 		block.attempted = true
-		var b emu.Builder
 		pc := c.Registers()[e.arch.PC]
-		b.Store(e.arch.PC, b.Constant(pc))
-		for i, ins := range block.instructions {
-			if !e.arch.Lower(&b, ins, i) {
-				e.Stats.CompileFailures++
-				e.discard(pc)
-				return false
-			}
+		if block.ops != nil {
+			e.reuseTranslation(block)
 		}
-		b.Checkpoint(e.arch.StateWords, len(block.instructions))
-		block.ops = b.FinishMemory(e.arch.StateWords)
+		if block.ops == nil {
+			// Linked dispatch accounts guest memory instructions, not the number
+			// of accesses (an x86 RMW or MOVS can issue several in one instruction).
+			b, low, high := e.beginTranslation(true)
+			b.Store(e.arch.PC, b.Constant(pc))
+			for i, ins := range block.instructions {
+				if !e.arch.Lower(b, ins, i) {
+					e.endTranslation(low, high)
+					e.Stats.CompileFailures++
+					e.discard(pc)
+					return false
+				}
+			}
+			b.Checkpoint(e.arch.StateWords, len(block.instructions))
+			block.ops = e.publishTranslation(block, e.finishTranslation(b, true, low, high))
+		}
 		entry, err := e.native.CompileMemory(block.ops, e.arch.StateWords)
 		if err != nil {
 			e.Stats.CompileFailures++
 		} else {
 			block.entry, block.native = entry, true
-			_ = e.native.NameEntry(entry, fmt.Sprintf("%s_%x_memory_%d_ops", e.arch.Name, pc, len(block.ops)))
+			e.nameEntry(entry, pc, len(block.ops), "memory")
 			e.Stats.ProfileErrors = e.native.SymbolErrors
 			e.Stats.Promotions++
 		}
 		e.Stats.NativeBytes = e.native.Bytes
+		e.releaseTranslation(block)
 	}
 	return true
 }

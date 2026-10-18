@@ -375,9 +375,17 @@ func ordinaryBuiltinExprType(program *unit.Program, before int, start int, end i
 	if end-start >= 3 && functionValueTokenCharIs(program, end-2, '.') && program.Tokens[end-1].KindLine&255 == unit.TokenIdent {
 		owner := ordinaryBuiltinExprType(program, before, start, end-2)
 		if owner != "" {
-			if field := functionValueStructFieldType(program, functionValueBareType(owner), functionValueTokenText(program, end-1)); field != "" {
+			name := functionValueTokenText(program, end-1)
+			if field := functionValueStructFieldType(program, functionValueBareType(owner), name); field != "" {
 				return field
 			}
+			if field := ordinaryPromotedFieldType(program, owner, name); field != "" {
+				return field
+			}
+			if sig, ok := functionValueInferredBoundMethod(program, before, start, end); ok {
+				return functionValueSignatureText(sig)
+			}
+			return ""
 		}
 	}
 	for open := start + 1; open < end; open++ {

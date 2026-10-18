@@ -840,6 +840,14 @@ func renvoEmitArbitrarySyscall(g *renvoLinearGen, ep *renvoExprParse, idx int) b
 			return false
 		}
 		syscallNumber = number.value
+	} else {
+		// Optional site metadata may specialize a target-defined host extension.
+		// Dynamic selectors retain the original register-word protocol. All
+		// arguments are still evaluated and passed below, in the same order.
+		number := renvoEvalConstExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg))
+		if number.ok {
+			syscallNumber = number.value
+		}
 	}
 	for i := e.argCount - 1; i >= 0; i-- {
 		argIndex := renvo_runtime_UnsafeIntAt(ep.args, e.firstArg+i)

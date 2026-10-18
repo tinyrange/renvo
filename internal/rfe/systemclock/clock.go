@@ -2,28 +2,22 @@
 // Retirement is an execution/resource counter, never a wall-clock timebase.
 package systemclock
 
-import "time"
-
 // Clock is owned by the machine execution thread. Counter values have the
 // device's advertised frequency, independent of instruction tier or throughput.
 type Clock struct {
 	frequency  uint64
-	now        func() time.Duration
-	sleep      func(time.Duration)
+	now        func() int64
+	sleep      func(int64)
 	last       uint64
 	pauseDepth int
-	pauseStart time.Duration
-	withheld   time.Duration
+	pauseStart int64
+	withheld   int64
 }
 
-func New(frequency uint64) *Clock {
-	start := time.Now()
-	return WithSource(frequency, func() time.Duration { return time.Since(start) }, time.Sleep)
-}
-
-// WithSource permits a controlled monotonic source and waiter, notably for
-// tests that must verify time/retirement separation without sleeping.
-func WithSource(frequency uint64, now func() time.Duration, sleep func(time.Duration)) *Clock {
+// WithNanosecondSource is the portable oscillator core. Browser hosts can
+// provide monotonic nanoseconds and an appropriate waiter without importing
+// a desktop time package. The interpreter-only browser machine uses nil Clock.
+func WithNanosecondSource(frequency uint64, now func() int64, sleep func(int64)) *Clock {
 	if frequency == 0 || frequency > 1000000000 || now == nil || sleep == nil {
 		panic("invalid system clock source or frequency")
 	}
@@ -63,7 +57,7 @@ func (c *Clock) WaitUntil(target uint64) {
 			ticks = c.frequency
 		}
 		ns := (ticks*1000000000 + c.frequency - 1) / c.frequency
-		c.sleep(time.Duration(ns))
+		c.sleep(int64(ns))
 	}
 }
 
@@ -89,7 +83,7 @@ func (c *Clock) Resume() {
 }
 
 // PausedDuration reports host time excluded while the vCPU was stopped.
-func (c *Clock) PausedDuration() time.Duration {
+func (c *Clock) pausedNanoseconds() int64 {
 	paused := c.withheld
 	if c.pauseDepth != 0 {
 		if d := c.now() - c.pauseStart; d > 0 {

@@ -116,6 +116,21 @@ func appendSpecInitializerComposites(composites []CompositeExpr, file *syntax.Fi
 
 func appendExprIndexes(indexes []IndexExpr, file *syntax.File, start int, end int) []IndexExpr {
 	for i := start; i < end && i < len(file.Tokens); i++ {
+		// Function literal/type parameter lists contain array types, not value
+		// indexes. Keep scanning the body so captured-array indexes are checked.
+		if file.Tokens[i].KindLine&255 == syntax.TokenFunc && tokCharIs(file, i+1, '(') {
+			finish := findTypeMatching(file, i+1, '(', ')')
+			if finish > i+1 && finish <= end {
+				i = finish - 1
+				if tokCharIs(file, finish, '(') {
+					resultEnd := findTypeMatching(file, finish, '(', ')')
+					if resultEnd > finish && resultEnd <= end {
+						i = resultEnd - 1
+					}
+				}
+				continue
+			}
+		}
 		if file.Tokens[i].KindLine>>syntax.TokenOperatorCharShift&syntax.TokenOperatorCharMask != int('[') {
 			continue
 		}

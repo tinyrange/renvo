@@ -3227,7 +3227,7 @@ func renvoAsmSyscallFromStack(a *renvoAsm, wordCount int, syscallNumber int) boo
 renvoNonNil(a)
 renvoCompilerSelector := a.c
 renvoNonNil(renvoCompilerSelector)
-if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 {
 if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
 renvoAsmPopPrimary(a)
 		if wordCount > 1 {
@@ -3282,26 +3282,6 @@ if wordCount > 7 {
 			renvoAsmSyscall(a)
 			renvoAsmEmit8(a, 0x5d)
 			return true
-		}
-} else if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
-renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRax)
-		if wordCount > 1 {
-			renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRdi)
-		}
-		if wordCount > 2 {
-			renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRsi)
-		}
-		if wordCount > 3 {
-			renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRdx)
-		}
-		if wordCount > 4 {
-			renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRcx)
-		}
-		if wordCount > 5 {
-			renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegR8)
-		}
-		if wordCount > 6 {
-			renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegR9)
 		}
 }
 renvoAsmSyscall(a)
@@ -3365,6 +3345,33 @@ renvoArmAsmPopReg(a, renvoArmRegSys)
 			renvoArmAsmPopReg(a, 5)
 		}
 		renvoArmAsmEmit(a, 0xef000000)
+		return true
+}
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRax)
+		if wordCount > 1 {
+			renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRdi)
+		}
+		if wordCount > 2 {
+			renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRsi)
+		}
+		if wordCount > 3 {
+			renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRdx)
+		}
+		if wordCount > 4 {
+			renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegRcx)
+		}
+		if wordCount > 5 {
+			renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegR8)
+		}
+		if wordCount > 6 {
+			renvoWasm32EmitReg(a, renvoWasm32OpPopReg, renvoWasm32RegR9)
+		}
+		if syscallNumber == 0x524645 && wordCount == 6 && a.c.renvoTarget != renvoTargetVM32 {
+			renvoAsmEmit8(a, renvoWasm32OpHostInvoke)
+		} else {
+			renvoAsmSyscall(a)
+		}
 		return true
 }
 a.patchFailed = true
@@ -6211,7 +6218,7 @@ if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 // A later scalar may reuse an aggregate temporary's frame range.
 		// Keep memory requirements after lexical locals have been discarded.
 		if g.c.renvoTarget != renvoTargetVM32 &&
-			(size != renvoBackendValueSlotSize || captureOff != 0 || renvoTypeSize(g.meta, typ) > g.c.renvoNativeIntSize) {
+			(renvoWasm32LocalPromotionKind(g, typ, size, captureOff) == 0) {
 			g.wasmMemoryRanges = append(g.wasmMemoryRanges, offset, size)
 		}
 return
@@ -8276,6 +8283,11 @@ if renvoFixedTarget == 0 && renvoIsCdeclObject(g.c) && g.c.code16 {
 			renvoAsmLoadPrimaryBss(&g.asm, g.mainThreadStateOff+stateOffset)
 			return
 		}
+} else if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+if g.c.renvoTarget != renvoTargetVM32 {
+			renvoWasm32EmitThreadAccess(g, renvoWasm32OpThreadLoad, stateOffset)
+			return
+		}
 }
 renvoAsmPushSecondary(&g.asm)
 		renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
@@ -8302,6 +8314,12 @@ if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
 		return
 }
 if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+if g.c.renvoTarget != renvoTargetVM32 {
+			renvoWasm32EmitThreadAccess(g, renvoWasm32OpThreadStore, stateOffset)
+			return
+		}
+}
 renvoAsmPushSecondary(&g.asm)
 		renvoAsmPushPrimary(&g.asm)
 		renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
@@ -8310,7 +8328,6 @@ renvoAsmPushSecondary(&g.asm)
 		renvoAsmStorePrimaryMemSecondaryDisp(&g.asm, stateOffset)
 		renvoAsmPopSecondary(&g.asm)
 return
-
 }
 g.asm.patchFailed = true
 }
@@ -14400,7 +14417,7 @@ renvoNonNil(g, ep)
 			}
 			renvoAsmPushPrimary(a)
 			renvoAsmPushSecondary(a)
-			if !renvoEmitIntExpr(g, ep, e.right) {
+			if !renvoEmitIndexValuePrimary(g, ep, e.right) {
 				return false
 			}
 			renvoAsmPopTertiary(a)
@@ -14587,7 +14604,7 @@ renvoNonNil(g, ep)
 		}
 		renvoAsmPushPrimary(a)
 		renvoAsmPushTertiary(a)
-		if !renvoEmitIntExpr(g, ep, indexExpr.right) {
+		if !renvoEmitIndexValuePrimary(g, ep, indexExpr.right) {
 			return false
 		}
 		if g.boundedIndexLocal > 0 && baseExpr.kind == renvoExprIdent &&

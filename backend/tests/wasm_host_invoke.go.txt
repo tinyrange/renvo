@@ -1,0 +1,15 @@
+package main
+
+// Fixture for the custom host-table ABI; not a standalone WASI application.
+// The compiler test supplies its private gate table, just as the browser does.
+//renvo:intrinsic renvo_runtime_Syscall
+func hostCall(number, a0, a1, a2, a3, a4 int) int { return -1 }
+
+func appMain() int {
+	for i := 0; i < 3; i++ {
+		if hostCall(0x524645, 65537, 32, 64, 3, 128) != 65764 { return 11 }
+		if hostCall(0x524645, 65538, 32, 64, 3, 128) != -1 { return 12 }
+	}
+	print("PASS\n")
+	return 0
+}

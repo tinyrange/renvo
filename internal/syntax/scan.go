@@ -18,8 +18,17 @@ func scanTokens(src []byte) ([]Token, bool) {
 }
 
 func scanTokensMode(src []byte, linked bool) ([]Token, bool, bool) {
+	return scanTokensModeCapacity(src, linked, scanTokenCapacity(src))
+}
+func scanTokensModeCapacity(src []byte, linked bool, capacity int) ([]Token, bool, bool) {
+	if capacity < 1 {
+		capacity = scanTokenCapacity(src)
+	}
+	if capacity > len(src)+1 {
+		capacity = len(src) + 1
+	}
 	interfaceCandidates := false
-	tokens := make([]Token, 0, scanTokenCapacity(src))
+	tokens := make([]Token, 0, capacity)
 	if !validSourceEncoding(src) {
 		return tokens, false, false
 	}

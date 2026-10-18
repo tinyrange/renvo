@@ -52,7 +52,9 @@ func fetchInstruction(memory engine.Memory, pc uint64) (engine.Instruction, erro
 	case 0:
 		ins.Flow.Next = pc + 4
 	case 1:
-		ins.Flow.Known = op>>31 == 0 // calls are not region edges
+		ins.Flow.Known = op>>31 == 0 // calls are not ordinary region edges
+		ins.Flow.Call = op>>31 != 0
+		ins.Flow.Continuation = pc + 4
 		ins.Flow.Next = pc + uint64(signed(uint64(op&0x3ffffff), 26)*4)
 	case 2, 3:
 		ins.Flow.Next = pc + uint64(signed(uint64(op>>5&0x7ffff), 19)*4)
@@ -62,6 +64,11 @@ func fetchInstruction(memory engine.Memory, pc uint64) (engine.Instruction, erro
 		ins.Flow.Alternate, ins.Flow.Conditional = pc+4, true
 	default:
 		ins.Flow.Known = false
+		ins.Flow.Return = op&0xfffffc1f == 0xd65f0000
+		ins.Flow.IndirectCall = op&0xfffffc1f == 0xd63f0000
+		if ins.Flow.IndirectCall {
+			ins.Flow.Continuation = pc + 4
+		}
 	}
 	return ins, nil
 }
@@ -476,6 +483,168 @@ func TestBranchBlockBudgetInvalidationAndTargetFault(t *testing.T) {
 	}
 }
 
+-- browser_pair_probe.go --
+//go:build renvo && browser
+
+package aarch64
+
+import (
+	"fmt"
+	emu "renvo.dev/internal/rfe/runtime"
+)
+
+// Exercise non-temporal lowering through actual emitted WASM, including a
+// base/destination overlap and exits before either half of a pair changes.
+func browserNonTemporalPairProbe(n *emu.Native) error {
+	for _, size := range []int{4, 8} {
+		for _, load := range []bool{false, true} {
+			op := uint32(0x28000820 | (16/size)<<15) // STNP W0,W2,[X1,#16]
+			if load {
+				op = uint32(0x28400821 | ((-16/size)&127)<<15) // LDNP W1,W2,[X1,#-16]
+			}
+			if size == 8 {
+				op |= 1 << 31
+			}
+			var b emu.Builder
+			if !lowerPair(&b, op, 0x1000, 0) {
+				return fmt.Errorf("browser non-temporal pair lowering")
+			}
+			b.Checkpoint(StateWords, 1)
+			entry, err := n.CompileMemory(b.FinishMemory(StateWords), StateWords)
+			if err != nil {
+				return err
+			}
+			for _, mode := range []int{0, 1, 2} {
+				page := new([4096]byte)
+				for i := range page {
+					page[i] = byte(i*37 + 129)
+				}
+				original := *page
+				clock, epoch := uint64(1), uint64(1)
+				m := &emu.MemoryContext{}
+				m.Clock = &clock
+				permissions := uint64(3)
+				if mode == 1 {
+					permissions = 1
+					if load {
+						permissions = 2
+					}
+				}
+				m.Fill(0, page, permissions, &epoch)
+				var state [StateWords]uint64
+				state[0], state[1], state[2], state[PC] = 0xfedcba9876543210, 48, 0x8877665544332211, 0x1000
+				if mode == 2 {
+					state[1] = 4080
+					if load {
+						state[1] = 4112
+					}
+				}
+				want := state
+				if err := n.CallMemory(entry, state[:], m); err != nil {
+					return err
+				}
+				if mode != 0 {
+					if m.Status == 0 || m.Retired != 0 || state != want || *page != original || clock != 1 || epoch != 1 {
+						return fmt.Errorf("browser non-temporal pair partial fault")
+					}
+					continue
+				}
+				want[PC] += 4
+				if load {
+					want[1], want[2] = 0, 0
+					for i := 0; i < size; i++ {
+						want[1] |= uint64(original[32+i]) << uint(8*i)
+						want[2] |= uint64(original[32+size+i]) << uint(8*i)
+					}
+				} else {
+					for i := 0; i < size; i++ {
+						original[64+i] = byte(want[0] >> uint(8*i))
+						original[64+size+i] = byte(want[2] >> uint(8*i))
+					}
+				}
+				generation := uint64(1)
+				if !load {
+					generation++
+				}
+				if m.Status != 0 || m.Retired != 1 || state != want || *page != original || clock != generation || epoch != generation {
+					return fmt.Errorf("browser non-temporal pair result")
+				}
+			}
+		}
+	}
+	return nil
+}
+
+-- browser_probe.go --
+//go:build renvo && browser
+
+package aarch64
+
+import (
+	"fmt"
+	emu "renvo.dev/internal/rfe/runtime"
+)
+
+func BrowserArchitectureProbe() error {
+	n, err := emu.NewNative(1 << 20)
+	if err != nil {
+		return err
+	}
+	defer n.Close()
+	var constantProbe emu.Builder
+	one := constantProbe.Constant(1)
+	zero := constantProbe.Constant(0)
+	again := constantProbe.Constant(1)
+	if one == zero || one != again {
+		return fmt.Errorf("constant interning mismatch")
+	}
+	sequences := [][]uint32{{0xd2800000, 0xd2800001, 0xd2800002, 0xd2800003, 0xd2800004, 0xd2800005}, {0x91031800}, {0xaa1503e0}, {0x910043ff, 0xb10007ff, 0xb24003ff, 0xaa0103e0}, {0x529fffe0, 0x12800000, 0xf2b579a0}, {0x937ffc20, 0x53017c20, 0xd378dc20}, {0x10000000, 0xf0ffffe1, 0x91000400}}
+	for _, sf := range []uint32{0, 1 << 31} {
+		for _, base := range []uint32{0x0b000000, 0x2b000000, 0x4b000000, 0x6b000000, 0x0a000000, 0x2a000000, 0x4a000000, 0x6a000000} {
+			for _, sh := range []uint32{0, 1, 2} {
+				sequences = append(sequences, []uint32{sf | base | sh<<22 | 2<<16 | 7<<10 | 1<<5, sf | 0x11000400})
+			}
+		}
+	}
+	for index, sequence := range sequences {
+		var b emu.Builder
+		for _, op := range sequence {
+			if !Lower(&b, op) {
+				return fmt.Errorf("browser architecture lowering rejected")
+			}
+		}
+		entry, e := n.Compile(b.Finish(StateWords), StateWords)
+		if e != nil {
+			return e
+		}
+		for _, seed := range []uint64{0, 0xffffffffff5fe000, 0xffff800080000000, 0x8877665544332211, ^uint64(0)} {
+			var c CPU
+			for i := range c.State {
+				c.State[i] = seed + uint64(i)
+			}
+			c.State[PC] = 0xffff800080ca3a9c
+			c.State[SP] = seed &^ 15
+			c.State[NZCV] = 0x80000000
+			state := append([]uint64(nil), c.State[:]...)
+			for _, op := range sequence {
+				if e := c.Execute(op); e != nil {
+					return e
+				}
+			}
+			if e := n.Call(entry, state); e != nil {
+				return e
+			}
+			for i, v := range state {
+				if v != c.State[i] {
+					println("architecture mismatch", index, i, "got", uint32(v), uint32(v>>32), "want", uint32(c.State[i]), uint32(c.State[i]>>32))
+					return fmt.Errorf("browser architecture mismatch")
+				}
+			}
+		}
+	}
+	return browserNonTemporalPairProbe(n)
+}
+
 -- cached_test.go --
 package aarch64
 
@@ -603,9 +772,10 @@ type Memory interface {
 }
 
 type CPU struct {
-	State   [StateWords]uint64 // X0-X30, SP, PC, architectural NZCV bits
-	Memory  Memory
-	Retired uint64
+	State       [StateWords]uint64 // X0-X30, SP, PC, architectural NZCV bits
+	Memory      Memory
+	Retired     uint64
+	decodeCache [1024]decodedOpcode
 }
 
 type Exception struct {
@@ -727,6 +897,14 @@ const (
 	divide
 	selectCondition
 )
+
+// Decode caching depends only on instruction bits, never on a guest address.
+// Exact opcode tags preserve self-modifying code and collision correctness.
+type decodedOpcode struct {
+	opcode      uint32
+	valid, pure bool
+	instruction instruction
+}
 
 type instruction struct {
 	kind, width, rd, rn, rm, ra, operation, shift, amount, cond int
@@ -958,16 +1136,20 @@ func (c *CPU) Step() error {
 // that returns a structured exception to the user personality.
 func (c *CPU) Execute(op uint32) error {
 	pc, next := c.State[PC], c.State[PC]+4
-	fail := func(kind string, err error) error { return &Exception{Kind: kind, PC: pc, Opcode: op, Cause: err} }
-	if d, ok := decodePure(op); ok {
-		c.executePure(d)
+	cached := &c.decodeCache[(op^(op>>16))&uint32(len(c.decodeCache)-1)]
+	if !cached.valid || cached.opcode != op {
+		cached.instruction, cached.pure = decodePure(op)
+		cached.opcode, cached.valid = op, true
+	}
+	if cached.pure {
+		c.executePure(cached.instruction)
 	} else {
 		switch {
 		case op == 0xd503201f: // NOP
 		case op&0xffe0001f == 0xd4000001:
 			c.State[PC] = next
 			c.Retired++
-			return fail("svc", nil)
+			return instructionException(pc, op, "svc", nil)
 		case op&0x7c000000 == 0x14000000:
 			next = pc + uint64(signed(uint64(op&0x3ffffff), 26)*4)
 			if op>>31 != 0 {
@@ -999,16 +1181,16 @@ func (c *CPU) Execute(op uint32) error {
 			}
 		case op&0x3e000000 == 0x28000000:
 			if err := c.pairMemory(op); err != nil {
-				return fail("memory", err)
+				return instructionException(pc, op, "memory", err)
 			}
 		case op&0x3f000000 == 0x39000000 || op&0x3f200000 == 0x38000000 || op&0x3f200c00 == 0x38200800:
 			if err := c.singleMemory(op); err != nil {
-				return fail("memory", err)
+				return instructionException(pc, op, "memory", err)
 			}
 		case op&0x3f000000 == 0x18000000:
 			opc, rd := int(op>>30), int(op&31)
 			if opc == 3 {
-				return fail("unsupported", nil)
+				return instructionException(pc, op, "unsupported", nil)
 			}
 			size := 4
 			if opc == 1 {
@@ -1016,11 +1198,11 @@ func (c *CPU) Execute(op uint32) error {
 			}
 			addr := pc + uint64(signed(uint64(op>>5&0x7ffff), 19)*4)
 			if c.Memory == nil {
-				return fail("memory", fmt.Errorf("no memory"))
+				return instructionException(pc, op, "memory", fmt.Errorf("no memory"))
 			}
 			value, err := c.Memory.Read(addr, size, false)
 			if err != nil {
-				return fail("memory", err)
+				return instructionException(pc, op, "memory", err)
 			}
 			width := 32
 			if opc != 0 {
@@ -1031,12 +1213,16 @@ func (c *CPU) Execute(op uint32) error {
 			}
 			c.put(rd, false, value, width)
 		default:
-			return fail("unsupported", nil)
+			return instructionException(pc, op, "unsupported", nil)
 		}
 	}
 	c.State[PC] = next
 	c.Retired++
 	return nil
+}
+
+func instructionException(pc uint64, op uint32, kind string, err error) error {
+	return &Exception{Kind: kind, PC: pc, Opcode: op, Cause: err}
 }
 
 func (c *CPU) singleMemory(op uint32) error {
@@ -1418,6 +1604,34 @@ func TestTieringInvalidationAndBudget(t *testing.T) {
 				t.Fatal("tier retirement accounting")
 			}
 		})
+	}
+}
+
+-- demand_call_test.go --
+package aarch64
+
+import (
+	"encoding/binary"
+	"testing"
+)
+
+func TestDemandCallAndReturnMetadata(t *testing.T) {
+	for _, op := range []uint32{0x94000002, 0x14000002, 0xd65f03c0, 0xd65f0200, 0xd61f0200, 0xd63f0200} {
+		m := &testMemory{data: make([]byte, 16), executable: true}
+		binary.LittleEndian.PutUint32(m.data[8:], op)
+		ins, err := fetchInstruction(m, 8)
+		if err != nil {
+			t.Fatal(err)
+		}
+		call := op&0xfc000000 == 0x94000000
+		ret := op&0xfffffc1f == 0xd65f0000
+		indirect := op&0xfffffc1f == 0xd63f0000
+		if ins.Flow.IndirectCall != indirect || indirect && (ins.Flow.Known || ins.Flow.Call || ins.Flow.Continuation != 12) {
+			t.Fatalf("indirect opcode %#x flow %+v", op, ins.Flow)
+		}
+		if ins.Flow.Call != call || ins.Flow.Return != ret || call && (ins.Flow.Known || ins.Flow.Next != 16 || ins.Flow.Continuation != 12) {
+			t.Fatalf("opcode %#x flow %+v", op, ins.Flow)
+		}
 	}
 }
 
@@ -2594,16 +2808,15 @@ func (c *CPU) pairMemory(op uint32) error {
 	opc, mode := int(op>>30), int(op>>23&3)
 	load := op>>22&1 != 0
 	rn, first, second := int(op>>5&31), int(op&31), int(op>>10&31)
-	if opc == 3 || opc == 1 && !load {
+	// Non-temporal scalar pairs (mode 0) use signed offset addressing with
+	// no writeback. Their cache hint does not change this memory model.
+	if opc == 3 || opc == 1 && (!load || mode == 0) {
 		return fmt.Errorf("reserved pair encoding")
-	}
-	if mode == 0 {
-		return fmt.Errorf("non-temporal pair unsupported")
 	}
 	if load && first == second {
 		return fmt.Errorf("constrained load overlap")
 	}
-	if mode != 2 && rn != SP && (rn == first || rn == second) {
+	if mode&1 != 0 && rn != SP && (rn == first || rn == second) {
 		return fmt.Errorf("constrained pair writeback overlap")
 	}
 	if c.Memory == nil {
@@ -2640,7 +2853,7 @@ func (c *CPU) pairMemory(op uint32) error {
 			return err
 		}
 	}
-	if mode != 2 {
+	if mode&1 != 0 {
 		c.State[rn] = updated
 	}
 	return nil
@@ -2662,7 +2875,7 @@ func nativePair(op uint32) bool {
 	opc, mode := int(op>>30), int(op>>23&3)
 	load := op>>22&1 != 0
 	rn, first, second := int(op>>5&31), int(op&31), int(op>>10&31)
-	return (opc == 0 || opc == 2 || opc == 1 && load) && mode != 0 && !(load && first == second) && !(mode != 2 && rn != SP && (rn == first || rn == second))
+	return (opc == 0 || opc == 2 || opc == 1 && load && mode != 0) && !(load && first == second) && !(mode&1 != 0 && rn != SP && (rn == first || rn == second))
 }
 
 func lowerPair(b *emu.Builder, op uint32, pc uint64, completed int) bool {
@@ -2723,7 +2936,7 @@ func lowerPair(b *emu.Builder, op uint32, pc uint64, completed int) bool {
 		}
 		b.MemoryStore(address, b.Binary(emu.Or, a, c), 8)
 	}
-	if mode != 2 {
+	if mode&1 != 0 {
 		b.Store(rn, updated)
 	}
 	b.Store(PC, b.Constant(pc+4))
@@ -2745,7 +2958,7 @@ func TestNativeWordPairsAgreeAndExitAtomically(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer n.Close()
-	for _, op := range []uint32{0xa9000820, 0xa9810820, 0xa8810820, 0xa9007c3f, 0xa9400820, 0xa8c10820, 0xa9c10820, 0xa9408c02, 0xa9401065, 0x29400820, 0x29000820, 0x69400820, 0x28c10820, 0x29810820, 0x29400be0, 0x29007c3f} {
+	for _, op := range []uint32{0xa9000820, 0xa9810820, 0xa8810820, 0xa9007c3f, 0xa9400820, 0xa8c10820, 0xa9c10820, 0xa9408c02, 0xa9401065, 0x29400820, 0x29000820, 0x69400820, 0x28c10820, 0x29810820, 0x29400be0, 0x29007c3f, 0xa8000820, 0xa8010820, 0xa83f0820, 0xa8007c3f, 0xa8400820, 0xa8410820, 0xa87f0820, 0xa8400821, 0x28000820, 0x28400820, 0x28400be0, 0x28007c3f} {
 		var b emu.Builder
 		if !lowerPair(&b, op, 0x1000, 0) {
 			t.Fatalf("supported pair rejected %08x", op)
@@ -2796,10 +3009,83 @@ func TestNativeWordPairsAgreeAndExitAtomically(t *testing.T) {
 			}
 		}
 	}
-	for _, op := range []uint32{0xe9000820, 0x28400820, 0x29400020, 0x28c10420, 0x68000820} {
+	for _, op := range []uint32{0xe9000820, 0x28400020, 0x29400020, 0x28c10420, 0x68000820, 0x68400820, 0xe8000820, 0xe8400820} {
 		var b emu.Builder
 		if lowerPair(&b, op, 0x1000, 0) || len(b.Ops) != 0 {
 			t.Fatalf("unsupported pair mutated builder %08x", op)
+		}
+	}
+}
+
+-- pair_nontemporal_test.go --
+package aarch64
+
+import (
+	"bytes"
+	"encoding/binary"
+	"testing"
+)
+
+func TestNonTemporalPairsOffsetWithoutWriteback(t *testing.T) {
+	for _, size := range []int{4, 8} {
+		for _, offset := range []int{-64, -2, 0, 2, 63} {
+			for _, baseRegister := range []int{0, 1, SP} {
+				m := &testMemory{data: make([]byte, 2048), executable: true}
+				c := CPU{Memory: m}
+				c.State[PC], c.State[0], c.State[2] = 8, 0xfedcba9876543210, 0x8877665544332211
+				c.State[baseRegister] = 1024
+				op := uint32(0x28000800 | baseRegister<<5 | (offset&127)<<15)
+				if size == 8 {
+					op |= 1 << 31
+				}
+				binary.LittleEndian.PutUint32(m.data[8:], op)
+				ins, err := fetchInstruction(m, 8)
+				if err != nil || ins.InterpretOnly || !ins.Memory || ins.Class != 2 {
+					t.Fatalf("non-temporal pair not native eligible: %08x %v", op, err)
+				}
+				before := c.State
+				if err := c.ExecuteInstruction(ins); err != nil {
+					t.Fatal(err)
+				}
+				address := uint64(1024 + offset*size)
+				a, b, err := m.ReadPair(address, size)
+				mask := ^uint64(0)
+				if size == 4 {
+					mask = 0xffffffff
+				}
+				want := before
+				want[PC] += 4
+				if err != nil || a != before[0]&mask || b != before[2]&mask || c.State != want || c.Retired != 1 {
+					t.Fatalf("STNP offset/writeback op=%08x state=%x want=%x data=%x/%x", op, c.State, want, a, b)
+				}
+				// A load may overwrite its base register because there is no
+				// writeback; both operands must use the original address.
+				a, b = 0x1122334455667788&mask, 0x99aabbccddeeff00&mask
+				if err := m.WritePair(address, size, a, b); err != nil {
+					t.Fatal(err)
+				}
+				load := op | 1<<22
+				want[PC] += 4
+				want[0], want[2] = a, b
+				if err := c.Execute(load); err != nil || c.State != want || c.Retired != 2 {
+					t.Fatalf("LDNP offset/overlap op=%08x state=%x want=%x err=%v", load, c.State, want, err)
+				}
+			}
+		}
+	}
+}
+
+func TestNonTemporalPairsFaultsAndReservedEncodings(t *testing.T) {
+	for _, op := range []uint32{0x28000820, 0x28400820, 0xa8000820, 0xa8400820, 0x68000820, 0x68400820, 0xe8000820, 0xe8400820, 0xa8400020} {
+		m := &testMemory{data: make([]byte, 64), executable: true}
+		for i := range m.data {
+			m.data[i] = byte(i)
+		}
+		c := CPU{Memory: m}
+		c.State[0], c.State[1], c.State[2] = 123, 60, 456
+		before, memory := c.State, append([]byte(nil), m.data...)
+		if err := c.Execute(op); err == nil || c.State != before || c.Retired != 0 || !bytes.Equal(memory, m.data) {
+			t.Fatalf("pair fault changed state: op=%08x err=%v", op, err)
 		}
 	}
 }

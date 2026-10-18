@@ -342,8 +342,9 @@ func (c *sourceCollector) collectPackage(ref load.PackageRef) {
 					imports[j] = loaded
 				}
 			}
-			_, required := longestModuleRequirement(c.config.Requires, imports[j].ImportPath)
-			dependencyShadowsOwner := required && imports[j].Kind == load.PackageInModule
+			requirement, required := longestModuleRequirement(c.config.Requires, imports[j].ImportPath)
+			// A required parent cannot shadow a more-specific owning module.
+			dependencyShadowsOwner := required && imports[j].Kind == load.PackageInModule && len(requirement.Path) > len(owner.Path)
 			if !imports[j].Ok || dependencyShadowsOwner {
 				resolved := c.resolveDependency(imports[j].ImportPath)
 				if !resolved.Ok {

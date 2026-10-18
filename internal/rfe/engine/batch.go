@@ -13,7 +13,10 @@ func (e *Engine) Run(c CPU, remaining uint64) error {
 // RunQuanta selects the configured native scheduling slice when supported.
 // Conservative hosts retain separate short calls; Step is still single-block.
 func (e *Engine) RunQuanta(c CPU, remaining uint64) error {
-	return e.run(c, remaining, 16)
+	e.memoryRetryAllowed = true
+	err := e.run(c, remaining, 16)
+	e.memoryRetryAllowed = false
+	return err
 }
 
 func (e *Engine) run(c CPU, remaining uint64, quanta int) error {
@@ -29,6 +32,9 @@ func (e *Engine) run(c CPU, remaining uint64, quanta int) error {
 	if e.native == nil || remaining == 0 {
 		return e.Step(c, remaining)
 	}
+	if first, memory, context := e.linkedSnapshot(c, remaining); first != nil {
+		return e.runLinked(c, remaining, first, memory, context, first.context, quanta)
+	}
 	first := e.block(c)
 	if first == nil || !first.native || first.instructions[0].ScheduleBoundary || uint64(len(first.instructions)) > remaining {
 		return e.stepBlock(c, remaining, first)
@@ -41,6 +47,12 @@ func (e *Engine) run(c CPU, remaining uint64, quanta int) error {
 			}
 		}
 	}
+	return e.runUnlinked(c, remaining, first)
+}
+
+// Isolate callback captures from the normal linked dispatcher path. Renvo's
+// escape-preserving closure cells are needed only by this fallback batch.
+func (e *Engine) runUnlinked(c CPU, remaining uint64, first *compiledBlock) error {
 	budget := remaining
 	if budget > 64 {
 		budget = 64
@@ -101,10 +113,12 @@ func (e *Engine) run(c CPU, remaining uint64, quanta int) error {
 		return 0, false, nil
 	}
 	var err error
+	e.inNativeBatch = true // accountMemory callback must not recursively enter this arena
 	if context == nil {
 		_, err = e.native.CallBatch(c.Registers(), 64, selectBlock)
 	} else {
 		_, err = e.native.CallBatchMemory(c.Registers(), context, 64, selectBlock)
 	}
+	e.inNativeBatch = false
 	return err
 }

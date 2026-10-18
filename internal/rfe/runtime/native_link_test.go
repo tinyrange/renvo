@@ -160,3 +160,23 @@ func TestNativeLinkedInvalidProgressAndClosure(t *testing.T) {
 		t.Fatal("closed arena retained executable view")
 	}
 }
+
+func TestPublicationReturnsRevocableFullPCDescriptor(t *testing.T) {
+	m := new(MemoryContext)
+	for i := 0; i < 6; i++ {
+		pc := uint64(i) << 32 // same set, distinct full-PC tags; forces replacement
+		link := m.PublishLink(pc, 16, 1, [17]uint8{})
+		if link == nil || link != m.LookupLink(pc) || link.PC != pc || link.Entry != 16 || link.Instructions != 1 {
+			t.Fatal("publication did not return its exact descriptor", i)
+		}
+		before := *link
+		if m.PublishLink(pc, 17, 1, [17]uint8{}) != nil || m.PublishLink(pc, 16, 1, [17]uint8{0, 2}) != nil || *link != before {
+			t.Fatal("rejected publication modified a valid descriptor")
+		}
+	}
+	link := m.LookupLink(5 << 32)
+	m.ClearLinks()
+	if link.Instructions != 0 || m.LookupLink(5<<32) != nil {
+		t.Fatal("returned pointer retained occupancy after revocation")
+	}
+}

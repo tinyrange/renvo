@@ -1744,34 +1744,71 @@ func renvoWasm32RangesOverlap(aOffset int, aSize int, bOffset int, bSize int) bo
 	return aStart < bOffset && bStart < aOffset
 }
 
+// Promotion must agree across every lifetime reusing a frame slot. Captures and
+// aggregates keep memory identity; primitive wide values can use a raw i64 local.
+func renvoWasm32LocalPromotionKind(g *renvoLinearGen, typ int, size int, captureOff int) int {
+	if size != renvoBackendValueSlotSize || captureOff != 0 {
+		return 0
+	}
+	if renvoTypeSize(g.meta, typ) <= g.c.renvoNativeIntSize {
+		return 1
+	}
+	kind := renvoResolveType(g.meta, typ).kind
+	if kind == renvoTypeInt64 || kind == renvoTypeUint64 || kind == renvoTypeFloat64 {
+		return 2
+	}
+	return 0
+}
+
 func renvoWasm32RecordDirectLocals(g *renvoLinearGen, functionPC int) {
 	a := &g.asm
+	// Infer frame-word use from the completed routine, including unnamed scalar
+	// temporaries and lexical lifetimes no longer present in g.locals. A slot is
+	// a raw eight-byte cell, not a source variable; mixed primitive lifetimes
+	// may safely share its representation when no address can observe it.
 	candidates := make([]int, 0, g.localCount)
-	for i := 0; i < g.localCount; i++ {
-		local := &g.locals[i]
-		if local.size != renvoBackendValueSlotSize || local.captureOff != 0 || renvoTypeSize(g.meta, local.typ) > g.c.renvoNativeIntSize {
-			continue
-		}
-		found := false
-		for j := 0; j < len(candidates); j++ {
-			if candidates[j] == local.offset {
-				found = true
-				break
+	wide := make([]bool, 0, g.localCount)
+	for pc := functionPC; pc < len(a.code); pc += int(renvoWasm32InstructionSizes[int(renvo_runtime_UnsafeByteAt(a.code, pc))]) {
+		op := int(renvo_runtime_UnsafeByteAt(a.code, pc))
+		fields := make([]int, 0, 3)
+		if op == renvoWasm32OpLoadStack || op == renvoWasm32OpStoreStack {
+			fields = append(fields, 2)
+		} else if op == renvoWasm32OpPanicCompare {
+			fields = append(fields, 5)
+		} else if op == renvoWasm32OpWideBinary || op == renvoWasm32OpWideCompare {
+			last := 5
+			if op == renvoWasm32OpWideBinary {
+				last = 9
+			}
+			for field := 1; field <= last; field += 4 {
+				fields = append(fields, field)
 			}
 		}
-		if !found {
-			candidates = append(candidates, local.offset)
+		for _, field := range fields {
+			offset := renvoWasm32GetS32(a.code, pc+field)
+			if offset <= 0 || offset%4 != 0 {
+				continue
+			}
+			base := renvoAlignValue(offset, renvoBackendValueSlotSize)
+			isWide := op == renvoWasm32OpWideBinary || op == renvoWasm32OpWideCompare || offset != base
+			found := false
+			for i := 0; i < len(candidates); i++ {
+				if candidates[i] == base {
+					wide[i] = wide[i] || isWide
+					found = true
+					break
+				}
+			}
+			if !found {
+				candidates = append(candidates, base)
+				wide = append(wide, isWide)
+			}
 		}
 	}
 	for i := 0; i < g.localCount; i++ {
 		local := &g.locals[i]
-		direct := local.size == renvoBackendValueSlotSize && local.captureOff == 0 && renvoTypeSize(g.meta, local.typ) <= g.c.renvoNativeIntSize
 		for j := 0; j < len(candidates); j++ {
-			candidate := candidates[j]
-			if candidate != 0 && renvoWasm32RangesOverlap(candidate, renvoBackendValueSlotSize, local.offset, local.size) && (!direct || candidate != local.offset) {
-				candidates[j] = 0
-			}
-			if candidate != 0 && local.captureOff > 0 && renvoWasm32RangesOverlap(candidate, renvoBackendValueSlotSize, local.captureOff, renvoBackendValueSlotSize) {
+			if candidates[j] != 0 && local.captureOff > 0 && renvoWasm32RangesOverlap(candidates[j], renvoBackendValueSlotSize, local.captureOff, renvoBackendValueSlotSize) {
 				candidates[j] = 0
 			}
 		}
@@ -1790,9 +1827,12 @@ func renvoWasm32RecordDirectLocals(g *renvoLinearGen, functionPC int) {
 		if op == renvoWasm32OpLoadStack || op == renvoWasm32OpStoreStack {
 			memoryOffsets = append(memoryOffsets, renvoWasm32GetS32(a.code, pc+2))
 			memorySizes = append(memorySizes, g.c.renvoNativeIntSize)
+		} else if op == renvoWasm32OpPanicCompare {
+			memoryOffsets = append(memoryOffsets, renvoWasm32GetS32(a.code, pc+5))
+			memorySizes = append(memorySizes, g.c.renvoNativeIntSize)
 		} else if op == renvoWasm32OpWideBinary || op == renvoWasm32OpWideCompare {
-			// Wide operations access memory directly. Exclude every overlapping
-			// slot across all lifetimes, while retaining unrelated scalar locals.
+			// Whole-slot accesses can remain local only for an exact wide slot.
+			// Partial or overlapping accesses still require linear memory.
 			lastField := 5
 			if op == renvoWasm32OpWideBinary {
 				lastField = 9
@@ -1823,8 +1863,12 @@ func renvoWasm32RecordDirectLocals(g *renvoLinearGen, functionPC int) {
 				if candidate == 0 {
 					continue
 				}
-				directScalarAccess := (op == renvoWasm32OpLoadStack || op == renvoWasm32OpStoreStack) && memoryOffsets[k] == candidate
-				if !directScalarAccess {
+				directAccess := (op == renvoWasm32OpLoadStack || op == renvoWasm32OpStoreStack || op == renvoWasm32OpPanicCompare) &&
+					(memoryOffsets[k] == candidate || wide[j] && memoryOffsets[k] == candidate-4)
+				if (op == renvoWasm32OpWideBinary || op == renvoWasm32OpWideCompare) && wide[j] && memoryOffsets[k] == candidate {
+					directAccess = true
+				}
+				if !directAccess {
 					if renvoWasm32RangesOverlap(candidate, renvoBackendValueSlotSize, memoryOffsets[k], memorySizes[k]) {
 						candidates[j] = 0
 					}
@@ -1834,9 +1878,16 @@ func renvoWasm32RecordDirectLocals(g *renvoLinearGen, functionPC int) {
 	}
 	recordStart := len(a.wasmLocalSlots)
 	a.wasmLocalSlots = append(a.wasmLocalSlots, int32(functionPC), 0)
-	for i := 0; i < len(candidates); i++ {
-		if candidates[i] != 0 {
-			a.wasmLocalSlots = append(a.wasmLocalSlots, int32(candidates[i]))
+	for representation := 0; representation < 2; representation++ {
+		for i := 0; i < len(candidates); i++ {
+			if candidates[i] == 0 || wide[i] != (representation == 1) {
+				continue
+			}
+			offset := candidates[i]
+			if wide[i] {
+				offset = -offset
+			}
+			a.wasmLocalSlots = append(a.wasmLocalSlots, int32(offset))
 		}
 	}
 	a.wasmLocalSlots[recordStart+1] = int32(len(a.wasmLocalSlots) - recordStart - 2)

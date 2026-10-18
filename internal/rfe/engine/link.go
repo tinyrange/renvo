@@ -13,10 +13,11 @@ func (e *Engine) runLinked(c CPU, remaining uint64, first *compiledBlock, memory
 	if e.linkContexts == nil {
 		e.linkContexts = make(map[*emu.MemoryContext]CodeStamp)
 	}
-	if _, known := e.linkContexts[context]; !known && len(e.linkContexts) >= 64 {
+	previous, known := e.linkContexts[context]
+	if !known && len(e.linkContexts) >= 64 {
 		clear(e.linkContexts)
 	}
-	if claimed || e.linkContexts[context] != stamp {
+	if claimed || previous != stamp {
 		context.ClearLinks()
 		e.Stats.LinkContextChanges++
 		e.linkContexts[context] = stamp
@@ -62,29 +63,37 @@ func (e *Engine) runLinked(c CPU, remaining uint64, first *compiledBlock, memory
 	if err := e.native.PrepareTargetLink(pc, entry, e.arch.StateWords, instructions); err != nil {
 		return err
 	}
-	if link == nil || link.Entry != uint64(entry) || link.Instructions != uint64(instructions) {
+	published := link == nil || link.Entry != uint64(entry) || link.Instructions != uint64(instructions)
+	if published {
 		if region {
-			context.PublishLink(pc, entry, instructions, first.regionPrefix)
+			link = context.PublishLink(pc, entry, instructions, first.regionPrefix)
 		} else {
-			context.PublishLink(pc, entry, instructions, first.memoryPrefix)
+			link = context.PublishLink(pc, entry, instructions, first.memoryPrefix)
 		}
+	}
+	if link == nil {
+		return e.stepBlock(c, remaining, first)
+	}
+	if !e.prefillBrowserLinks(c, first, memory, context, stamp, published) {
+		return e.stepBlock(c, remaining, e.block(c))
 	}
 	link = context.LookupLink(pc)
 	if link == nil {
 		return e.stepBlock(c, remaining, first)
 	}
-	// This publication has completed cold region preparation at the current
-	// promotion generation. Suppress per-quantum retries for an installed region;
-	// the next host-selected session may upgrade it after further promotions.
-	link.Reserved = e.Stats.Promotions
-	if first.region {
-		link.Reserved = ^uint64(0)
+	// A changed tuple starts a fresh region-demand countdown. Preserve a
+	// matching region's existing countdown across host sessions; otherwise a
+	// root reached fewer times in each bounded session could never demand an
+	// upgrade. Ordinary leaves retain their existing generation hint.
+	if published || !region {
+		link.Reserved = e.regionPublicationHint(first, e.Stats.Promotions)
 	}
 	first.visits++
 	budget := remaining
 	if budget > uint64(e.config.MaxNativeInstructions) {
 		budget = uint64(e.config.MaxNativeInstructions)
 	}
+	fastRefill := e.beginFastRefill(memory, context)
 	var err error
 	if e.config.MaxNativeInstructions > 64 {
 		if owner, ok := memory.(NativeBackingMemory); ok && owner.NativeCodeVersions() {
@@ -93,11 +102,17 @@ func (e *Engine) runLinked(c CPU, remaining uint64, first *compiledBlock, memory
 			err = e.native.RunLinkedSession(c.Registers(), context, budget)
 		}
 		if err != nil {
+			if fastRefill {
+				e.endFastRefill(false)
+			}
 			return fmt.Errorf("%w: pc=%#x budget=%d total=%d remaining=%d memory=%d status=%d retired=%d", err, c.Registers()[e.arch.PC], budget, context.Total, context.Remaining, context.MemoryTotal, context.Status, context.Retired)
 		}
 	} else if quanta == 1 || e.config.MaxNativeInstructions < 64 {
 		err = e.native.CallLinked(c.Registers(), context, budget)
 		if err != nil {
+			if fastRefill {
+				e.endFastRefill(false)
+			}
 			return err
 		}
 	} else {
@@ -106,12 +121,18 @@ func (e *Engine) runLinked(c CPU, remaining uint64, first *compiledBlock, memory
 		// a fault or cold target stops scheduling before any host slow path.
 		_, err = e.native.RunLinkedQuanta(c.Registers(), context, quanta, remaining, e.Stats.Promotions)
 	}
+	if fastRefill {
+		e.endFastRefill(err == nil)
+	}
 	e.Stats.NativeSessions++
 	if context.Status == 0 && context.Remaining != 0 {
 		pc := c.Registers()[e.arch.PC]
 		link := context.LookupLink(pc)
 		if link == nil {
 			e.Stats.LinkMissStops++
+			if context.Total != 0 {
+				e.observeBrowserLink(context, pc)
+			}
 			if e.config.ProfileNative {
 				e.recordLinkMiss(pc)
 			}
@@ -130,6 +151,9 @@ func (e *Engine) runLinked(c CPU, remaining uint64, first *compiledBlock, memory
 	if err != nil {
 		return err
 	}
+	if e.finishBrowserRegionUpgrade(c, context) {
+		return nil
+	}
 	if context.Status == emu.RegionExit {
 		e.Stats.RegionExits++
 		return nil
@@ -141,6 +165,9 @@ func (e *Engine) runLinked(c CPU, remaining uint64, first *compiledBlock, memory
 		}
 		if context.Status == 1 {
 			memory.NativeRefill(context.Address)
+			if e.memoryRetryAllowed && !e.memoryRetry && !e.inNativeBatch && context.Remaining != 0 && refillReady(context) {
+				return e.retryMemory(c, context.Remaining)
+			}
 		}
 		return e.interpret(c)
 	}

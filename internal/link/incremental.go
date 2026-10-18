@@ -156,7 +156,7 @@ func (s *PackageSession) Step() bool {
 		arena.Discard(s.artifactStarts[i], s.artifactEnds[i])
 	}
 	concurrencyNeeded := len(program.ConcurrencySites) > 0
-	if !lowerVariableGroups(&program, s.transient) || !lowerReflectionCore(&program, s.reflection, s.transient) {
+	if !lowerBlankPackageVariables(&program, s.transient) || !lowerVariableGroups(&program, s.transient) || !lowerReflectionCore(&program, s.reflection, s.transient) {
 		s.failUnit()
 		return true
 	}

@@ -40,7 +40,7 @@ func main() {
 		t.Fatalf("LinkBuildCore failed: err=%d pkg=%d", linked.Error, linked.ErrorPackage)
 	}
 	if !bytes.Contains(linked.Program.Text, []byte("{value: &w}")) ||
-		!bytes.Contains(linked.Program.Text, []byte(").value.apply(")) {
+		!bytes.Contains(linked.Program.Text, []byte("fn.data.value.apply(")) {
 		t.Fatalf("bound method call argument was not lowered:\n%s", linked.Program.Text)
 	}
 }

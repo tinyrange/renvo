@@ -26,6 +26,9 @@ func (b *Builder) MemoryLoad(address Value, size int) Value {
 	return b.emit(Op{Kind: MemoryLoad, A: address, Imm: uint64(size)})
 }
 func (b *Builder) MemoryStore(address, value Value, size int) {
+	if b.BeforeMemoryStore != nil {
+		b.BeforeMemoryStore(b)
+	}
 	address = b.checkedAddress(address)
 	b.emit(Op{Kind: MemoryStore, A: address, B: value, Imm: uint64(size)})
 }
@@ -35,7 +38,18 @@ func (b *Builder) Guard(condition Value) { b.emit(Op{Kind: Guard, A: condition})
 // forwarding remains valid, but checkpoints are observable roots, not deferred
 // writes that may be moved past a fault or a guest-memory side effect.
 func (b *Builder) Commit(words int) {
-	for i := 0; i < words; i++ {
+	fast := words
+	if fast > len(b.stateSlots) {
+		fast = len(b.stateSlots)
+	}
+	for i := 0; i < fast; i++ {
+		mask := uint32(1) << uint(i&31)
+		if b.dirtySlots[i>>5]&mask != 0 {
+			b.emit(Op{Kind: StoreState, A: b.stateSlots[i], Imm: uint64(i)})
+			b.dirtySlots[i>>5] &^= mask
+		}
+	}
+	for i := fast; i < words; i++ {
 		if b.dirty[i] {
 			b.emit(Op{Kind: StoreState, A: b.state[i], Imm: uint64(i)})
 			delete(b.dirty, i)
@@ -67,35 +81,33 @@ func effectOnly(k int) bool {
 }
 func (b *Builder) FinishMemory(words int) []Op {
 	b.Commit(words)
-	live := make([]bool, len(b.Ops))
-	var visit func(Value)
-	visit = func(v Value) {
-		if live[v] {
-			return
+	live, remap := b.finishScratch()
+	// Builder values are topologically ordered SSA: every operand precedes
+	// its consumer. Seed observable effects while walking backwards, then
+	// propagate liveness directly without a recursive function-value visitor.
+	for i := len(b.Ops) - 1; i >= 0; i-- {
+		o := b.Ops[i]
+		if effectOnly(o.Kind) || o.Kind == MemoryLoad || o.Kind == PairHigh {
+			live[i] = true
 		}
-		live[v] = true
-		o := b.Ops[v]
+		if !live[i] {
+			continue
+		}
 		left, right := memoryOperands(o)
 		if left {
-			visit(o.A)
+			live[o.A] = true
 		}
 		if right {
-			visit(o.B)
+			live[o.B] = true
 		}
 		if o.Kind == SelectValue {
-			visit(Value(o.Imm))
+			live[Value(o.Imm)] = true
 		}
 		if carryKind(o.Kind) || o.Kind == MemoryPairStore {
-			visit(Value(o.Imm >> 8))
+			live[Value(o.Imm>>8)] = true
 		}
 	}
-	for i, o := range b.Ops {
-		if effectOnly(o.Kind) || o.Kind == MemoryLoad || o.Kind == PairHigh {
-			visit(Value(i))
-		}
-	}
-	remap := make([]Value, len(b.Ops))
-	var out []Op
+	out := make([]Op, 0, len(b.Ops))
 	for i, o := range b.Ops {
 		if !live[i] {
 			continue
@@ -193,19 +205,34 @@ type NativeContext = rfeabi.Context
 // 4 successful region side exit after a committed architectural checkpoint.
 type MemoryContext struct {
 	NativeContext
-	linkOwner  *Native
-	linkVictim uint64 // cold round-robin replacement; not part of the native ABI
+	linkOwner                     *Native
+	linkVictim                    uint64           // cold round-robin replacement; not part of the native ABI
+	wasmMemoryRetired, wasmLinked uint64           // compiled browser scheduling scratch, outside the shared ABI
+	browserLinks                  []NativeLink     // browser-only bounded descriptor backing
+	browserLinksOwner             *MemoryContext   // copied contexts must not alias publication authority
+	browserLinkSlots              []uint32         // each touched descriptor slot, at most once per clear
+	browserLinkPresent            []bool           // independent of caller-visible occupancy mutation
+	browserPages                  browserPageTable // inline backing: copied contexts never share translation authority
+	RefillAccess                  uint32           // generated access kind is a hint; permissions still rechecked
+	wasmServiceSP, wasmServiceFP  uint32           // scoped private browser callback stacks, not native ABI
+	wasmLinkSource                uint64           // last proof-admitted browser block; optional successor hint only
 }
 
+// LinkedSourcePC is meaningful only after a linked WASM session made progress.
+// It is a hint for successor publication, never execution authority.
+func (m *MemoryContext) FastRefillWrite() bool { return m.RefillAccess != 0 }
+
+func (m *MemoryContext) LinkedSourcePC() uint64 { return m.wasmLinkSource }
+
 func (m *MemoryContext) Fill(number uint64, data *[4096]byte, permissions uint64, epoch *uint64) {
-	if number >= 1<<36 || data == nil || permissions & ^uint64(7) != 0 || epoch == nil {
+	if number >= nativePageNumberLimit || data == nil || permissions & ^uint64(7) != 0 || epoch == nil {
 		m.Forget(number)
 		return
 	}
-	m.Pages[number&63] = NativePage{number, data, permissions, epoch}
+	*m.PageSlot(number) = NativePage{number, data, permissions, epoch}
 }
 func (m *MemoryContext) Forget(number uint64) {
-	p := &m.Pages[number&63]
+	p := m.PageSlot(number)
 	if p.Number == number {
 		*p = NativePage{}
 	}

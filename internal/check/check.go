@@ -312,6 +312,9 @@ func checkPackageHeader(graph load.Graph, pkgIndex int) (PackageInfo, bool, int,
 		for i := 0; i < len(file.Decls); i++ {
 			decl := file.Decls[i]
 			name := tokenString(&file, decl.NameTok)
+			if name == "_" {
+				continue
+			} // Checked declarations remain; blank names create no binding.
 			if pkg.ExplicitC && pkg.Files[fileIndex].C {
 				name = "C." + name
 			}

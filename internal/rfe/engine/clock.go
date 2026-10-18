@@ -9,10 +9,14 @@ type TranslationClock interface {
 	ResumeTranslationClock()
 }
 
-func pauseTranslationClock(c CPU) func() {
+func pauseTranslationClock(c CPU) TranslationClock {
+	if enabled, ok := c.(interface{ TranslationClockEnabled() bool }); ok && !enabled.TranslationClockEnabled() {
+		return nil
+	}
 	if clock, ok := c.(TranslationClock); ok {
 		clock.PauseTranslationClock()
-		return clock.ResumeTranslationClock
+		return clock
 	}
-	return func() {}
+	return nil
 }
+func resumeTranslationClock(clock TranslationClock) { clock.ResumeTranslationClock() }

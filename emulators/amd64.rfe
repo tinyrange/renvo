@@ -21,9 +21,11 @@ const (
 	stateWords       = 18
 	fsBaseSlot       = 18
 	gsBaseSlot       = 19
-	systemStateWords = 20
+	systemStateWords = 23
 	timeBaseSlot     = 20
-	timedStateWords  = 21
+	selectorLoSlot   = 21
+	selectorHiSlot   = 22 // FS, GS, and CPL; snapshot only, never exported
+	timedStateWords  = 23
 )
 
 // Adapter keeps the shared native ABI contiguous without forcing clients to
@@ -39,8 +41,12 @@ func (a *Adapter) Import() {
 	a.state[pcSlot] = a.CPU.PC
 	a.state[flagsSlot] = a.CPU.Flags
 	a.state[fsBaseSlot], a.state[gsBaseSlot], a.state[timeBaseSlot] = 0, 0, 0
+	a.state[selectorLoSlot], a.state[selectorHiSlot] = 0, 0
 	if a.CPU.System != nil {
 		a.state[fsBaseSlot], a.state[gsBaseSlot], a.state[timeBaseSlot] = a.CPU.System.FSBase, a.CPU.System.GSBase, a.CPU.System.TSC
+		s := a.CPU.System
+		a.state[selectorLoSlot] = uint64(s.Segments[0].Selector) | uint64(s.Segments[1].Selector)<<16 | uint64(s.Segments[2].Selector)<<32 | uint64(s.Segments[3].Selector)<<48
+		a.state[selectorHiSlot] = uint64(s.Segments[4].Selector) | uint64(s.Segments[5].Selector)<<16 | uint64(s.CPL)<<32
 	}
 }
 func (a *Adapter) Export() {
@@ -54,15 +60,17 @@ func (a *Adapter) Retirement() *uint64      { return &a.CPU.Retired }
 func (a *Adapter) Step() error              { a.Export(); err := a.CPU.Step(); a.Import(); return err }
 func (a *Adapter) ExecuteInstruction(i engine.Instruction) error {
 	a.Export()
-	err := a.CPU.Execute(i.Decoded.(Instruction))
+	err := a.CPU.Execute(DecodedInstruction(i))
 	a.Import()
 	return err
 }
 func Architecture() engine.Architecture {
-	return engine.Architecture{Name: "x86_64", StateWords: stateWords, PC: pcSlot, Alignment: 1, Fetch: fetch, Lower: lower}
+	arch := engine.Architecture{Name: "x86_64", StateWords: stateWords, PC: pcSlot, Alignment: 1, Fetch: fetch, Lower: lower}
+	configureDecodedArchitecture(&arch)
+	return arch
 }
 
-// SystemAdapter adds read-only FS/GS base values to the native state. Every
+// SystemAdapter adds read-only segment, privilege, and clock snapshots to the native state. Every
 // interpreter and scheduling transition imports them again; SWAPGS/WRMSR and
 // segment loads remain interpreted. Ordinary Linux-user adapters stay 18 words.
 type SystemAdapter struct{ *Adapter }
@@ -76,13 +84,25 @@ func NewSystemAdapter(c *CPU) *SystemAdapter {
 func (a *SystemAdapter) Registers() []uint64      { return a.state[:systemStateWords] }
 func (a *SystemAdapter) TimedRegisters() []uint64 { return a.state[:] }
 
+// NativeInterruptible observes imported/native-authoritative flags rather than
+// possibly stale CPU flags. The shadow remains architectural CPU state.
+func (a *SystemAdapter) NativeInterruptible() bool {
+	return a.state[flagsSlot]&FlagIF != 0 && a.CPU.System.IRQShadow == 0
+}
+
+func (a *SystemAdapter) RefreshTime() { a.state[timeBaseSlot] = a.CPU.System.TSC }
+
 func SystemArchitecture() engine.Architecture {
 	arch := Architecture()
 	arch.StateWords = systemStateWords
+	baseFetch := arch.Fetch
 	arch.Fetch = func(m engine.Memory, pc uint64) (engine.Instruction, error) {
-		ins, err := fetch(m, pc)
+		ins, err := baseFetch(m, pc)
 		if err == nil {
-			ins.InterpretOnly = !supportedSystem(ins.Decoded.(Instruction))
+			ins.InterpretOnly = !supportedSystem(DecodedInstruction(ins))
+			// POPF may enable delivery. Never include it in a region or a
+			// linked session: the machine must inspect live flags afterwards.
+			ins.ScheduleBoundary = DecodedInstruction(ins).Op == "popf"
 		}
 		return ins, err
 	}
@@ -97,6 +117,14 @@ func supportedSystem(i Instruction) bool {
 		return false
 	}
 	i.Dst.Segment, i.Src.Segment = 0, 0
+	switch i.Op {
+	case "readseg":
+		return i.CC < 6 && (i.Dst.Kind == regOperand || i.Dst.Kind == memOperand)
+	case "cli":
+		return true // dynamic CPL guard precedes every effect
+	case "popf":
+		return i.Width == 2 || i.Width == 8
+	}
 	return supported(i)
 }
 func supported(i Instruction) bool {
@@ -104,8 +132,14 @@ func supported(i Instruction) bool {
 		return false
 	}
 	switch i.Op {
-	case "mov", "movsx", "movzx", "lea", "nop", "jmp", "jcc", "call", "callind", "jmpind", "ret", "push", "pop", "setcc", "cmov", "add", "adc", "sub", "sbb", "cmp", "inc", "dec", "neg", "and", "or", "xor", "test", "not", "imul", "imul3", "mul", "imul1", "cld", "std", "clc", "stc", "cmc", "pushf", "cmpxchg", "bt", "bts", "btr", "btc":
+	case "mov", "movsx", "movzx", "lea", "nop", "jmp", "jcc", "call", "callind", "jmpind", "ret", "leave", "push", "pop", "setcc", "cmov", "add", "adc", "sub", "sbb", "cmp", "inc", "dec", "neg", "and", "or", "xor", "test", "not", "imul", "imul3", "mul", "imul1", "cld", "std", "clc", "stc", "cmc", "pushf", "cmpxchg", "bt", "bts", "btr", "btc":
 		return true
+	case "xchg", "xadd":
+		// Register/register overlap retains the existing interpreter path.
+		// These forms have exactly one checked atomic RAM write boundary.
+		return i.Dst.Kind == memOperand && i.Src.Kind == regOperand
+	case "movs", "stos", "lods", "cmps", "scas":
+		return i.Segment == 0 && (i.Width == 1 || i.Width == 2 || i.Width == 4 || i.Width == 8)
 	case "bsf", "bsr":
 		return true
 	case "bswap":
@@ -134,15 +168,29 @@ func fetch(m engine.Memory, pc uint64) (engine.Instruction, error) {
 	if err != nil {
 		return engine.Instruction{}, err
 	}
+	return describeInstruction(i, i), nil
+}
+func describeInstruction(i Instruction, decoded any) engine.Instruction {
+	pc := i.PC
 	memory := i.Dst.Kind == memOperand || i.Src.Kind == memOperand
 	switch i.Op {
-	case "call", "callind", "push", "pushf", "pop", "ret":
+	case "call", "callind", "push", "pushf", "pop", "ret", "leave", "movs", "stos", "lods", "cmps", "scas":
 		memory = true
 	case "lea", "nop":
 		memory = false
+	case "cli", "popf":
+		// CLI needs the precise guard/fallback protocol, even without RAM.
+		memory = true
 	}
-	ins := engine.Instruction{PC: pc, Length: uint8(i.Next - pc), Decoded: i, Memory: memory, InterpretOnly: !supported(i), Flow: engine.Successors{Known: true, Next: i.Next}}
+	ins := engine.Instruction{PC: pc, Length: uint8(i.Next - pc), Decoded: decoded, Memory: memory, InterpretOnly: !supported(i), Flow: engine.Successors{Known: true, Next: i.Next}}
 	switch i.Op {
+	case "movs", "stos", "lods", "cmps", "scas":
+		// One string iteration is one architectural scheduling unit, exactly as
+		// Step accounts it. REP loops can chain while retaining every fault edge.
+		ins.Terminal = true
+		if i.Repeat != 0 {
+			ins.Flow.Next, ins.Flow.Alternate, ins.Flow.Conditional = i.PC, i.Next, true
+		}
 	case "jmp":
 		ins.Terminal = true
 		ins.Flow.Next = i.Src.Imm
@@ -158,13 +206,13 @@ func fetch(m engine.Memory, pc uint64) (engine.Instruction, error) {
 		ins.Terminal = true
 		ins.Flow.Known = false
 	}
-	return ins, nil
+	return ins
 }
 func lower(b *emu.Builder, ins engine.Instruction, completed int) bool {
 	return lowerInstruction(b, ins, completed, false)
 }
 func lowerInstruction(b *emu.Builder, ins engine.Instruction, completed int, system bool) bool {
-	i := ins.Decoded.(Instruction)
+	i := DecodedInstruction(ins)
 	if (!system && !supported(i)) || (system && !supportedSystem(i)) {
 		return false
 	}
@@ -225,6 +273,66 @@ func lowerInstruction(b *emu.Builder, ins engine.Instruction, completed int, sys
 		return true
 	}
 	switch i.Op {
+	case "movs", "stos", "lods", "cmps", "scas":
+		count := b.Load(RCX)
+		if i.Repeat != 0 {
+			// A zero-count REP does not access either address. Exit to Step before
+			// any access, with its unchanged checkpoint and zero completed work.
+			b.Guard(l.not(l.bin(emu.Equal, count, b.Constant(0))))
+		}
+		src, dst := b.Load(RSI), b.Load(RDI)
+		value := l.narrow(b.Load(RAX), w)
+		if i.Op == "movs" || i.Op == "cmps" || i.Op == "lods" {
+			value = b.MemoryLoad(src, int(w))
+		}
+		if i.Op == "cmps" || i.Op == "scas" {
+			rhs := b.MemoryLoad(dst, int(w))
+			result := l.narrow(l.bin(emu.Sub, value, rhs), w)
+			flags := l.bin(emu.Or, l.and(b.Load(flagsSlot), ^arithmeticFlags), l.arithmetic(value, rhs, result, w, true))
+			b.Store(flagsSlot, flags)
+		} else if i.Op == "lods" {
+			l.write(Operand{Kind: regOperand, Reg: RAX}, w, value)
+		} else {
+			b.MemoryStore(dst, value, int(w))
+		}
+		delta := b.Choose(l.and(b.Load(flagsSlot), FlagDF), b.Constant(0-uint64(w)), b.Constant(uint64(w)))
+		if i.Op == "movs" || i.Op == "cmps" || i.Op == "lods" {
+			b.Store(RSI, l.bin(emu.Add, src, delta))
+		}
+		if i.Op != "lods" {
+			b.Store(RDI, l.bin(emu.Add, dst, delta))
+		}
+		if i.Repeat != 0 {
+			count = l.bin(emu.Sub, count, b.Constant(1))
+			b.Store(RCX, count)
+			again := l.not(l.bin(emu.Equal, count, b.Constant(0)))
+			if i.Op == "cmps" || i.Op == "scas" {
+				equal := l.not(l.bin(emu.Equal, l.and(b.Load(flagsSlot), ZF), b.Constant(0)))
+				if i.Repeat != 0xf3 {
+					equal = l.not(equal)
+				}
+				again = l.bin(emu.And, again, equal)
+			}
+			next = b.Choose(again, b.Constant(i.PC), next)
+		}
+		b.Store(pcSlot, next)
+	case "readseg":
+		slot, shift := selectorLoSlot, uint64(i.CC)*16
+		if i.CC >= 4 {
+			slot, shift = selectorHiSlot, uint64(i.CC-4)*16
+		}
+		l.write(i.Dst, 2, b.Shift(emu.Shr, b.Load(slot), shift))
+	case "cli":
+		b.Guard(l.bin(emu.Equal, b.Shift(emu.Shr, b.Load(selectorHiSlot), 32), b.Constant(0)))
+		b.Store(flagsSlot, l.and(b.Load(flagsSlot), ^FlagIF))
+	case "popf":
+		sp := b.Load(RSP)
+		v := b.MemoryLoad(sp, int(w))
+		kernel := l.bin(emu.Equal, b.Shift(emu.Shr, b.Load(selectorHiSlot), 32), b.Constant(0))
+		mask := b.Choose(kernel, b.Constant(0x3f7fd7), b.Constant(0x3f7fd7 & ^uint64(FlagIF|0x3000)))
+		flags := l.bin(emu.Or, l.bin(emu.And, b.Load(flagsSlot), l.bin(emu.Xor, mask, b.Constant(^uint64(0)))), l.bin(emu.And, v, mask))
+		b.Store(RSP, l.bin(emu.Add, sp, b.Constant(uint64(w))))
+		b.Store(flagsSlot, l.bin(emu.Or, flags, b.Constant(2)))
 	case "bsf", "bsr":
 		value := l.read(i.Src, w)
 		nonzero := l.not(l.bin(emu.Equal, value, b.Constant(0)))
@@ -363,6 +471,13 @@ func lowerInstruction(b *emu.Builder, ins engine.Instruction, completed int, sys
 		sp := l.bin(emu.Sub, b.Load(RSP), b.Constant(uint64(w)))
 		b.MemoryStore(sp, v, int(w))
 		b.Store(RSP, sp)
+	case "leave":
+		// The stack load must succeed before either RSP or RBP is committed.
+		// Its checkpoint still exposes the original stack and frame pointers.
+		sp := b.Load(RBP)
+		value := b.MemoryLoad(sp, int(w))
+		b.Store(RSP, l.bin(emu.Add, sp, b.Constant(uint64(w))))
+		b.Store(RBP, value)
 	case "pop", "ret":
 		sp := b.Load(RSP)
 		v := b.MemoryLoad(sp, int(w))
@@ -432,6 +547,20 @@ func lowerInstruction(b *emu.Builder, ins engine.Instruction, completed int, sys
 			}
 		}
 		b.Store(flagsSlot, l.bin(emu.Or, l.and(b.Load(flagsSlot), ^CF), carry))
+	case "xchg", "xadd":
+		a, source := l.read(i.Dst, w), l.read(i.Src, w)
+		value := source
+		if i.Op == "xadd" {
+			value = l.narrow(l.bin(emu.Add, a, source), w)
+		}
+		// No register/flag mutation before the checked memory store. Native
+		// execution is serialized with this single CPU, including LOCK forms.
+		l.write(i.Dst, w, value)
+		l.write(i.Src, w, a)
+		if i.Op == "xadd" {
+			flags := l.arithmetic(a, source, value, w, false)
+			b.Store(flagsSlot, l.bin(emu.Or, l.and(b.Load(flagsSlot), ^arithmeticFlags), flags))
+		}
 	case "cmpxchg":
 		a, rhs := l.read(i.Dst, w), l.read(i.Src, w)
 		acc := l.narrow(b.Load(RAX), w)
@@ -1328,6 +1457,7 @@ type CPU struct {
 	MXCSR               uint32
 	cache               map[uint64]Instruction
 	stamp               engine.CodeStamp
+	decodeScratch       decoder // single-threaded borrowed decode work; never retained by an instruction
 }
 
 func mask(w uint8) uint64 {
@@ -1487,7 +1617,7 @@ func (c *CPU) Step() error {
 	}
 	if !ok {
 		var err error
-		i, err = Decode(c.Memory, c.PC)
+		i, err = c.decodeInstruction(c.Memory, c.PC)
 		if err != nil {
 			return err
 		}
@@ -2150,7 +2280,17 @@ type Instruction struct {
 	CC                 uint8
 	Repeat, Segment    uint8
 }
+
+// Instruction windows borrow stable ordinary RAM only for one synchronous
+// decode. Providers must validate execute access without walks or faults and
+// expose only ordinary, preowned RAM. Windows cannot cross a page,
+// trigger I/O, change mappings, or survive a decode/execution boundary.
+type instructionWindowMemory interface{ InstructionBytes(uint64) []byte }
+
 type decoder struct {
+	window                  []byte
+	windowPC                uint64
+	windowSource            instructionWindowMemory
 	memory                  Memory
 	pc, start               uint64
 	rex, width              uint8
@@ -2167,6 +2307,20 @@ func (d *decoder) byte() byte {
 	if d.pc-d.start >= 15 {
 		d.err = fmt.Errorf("instruction exceeds 15 bytes at %#x", d.start)
 		return 0
+	}
+	if d.pc-d.windowPC >= uint64(len(d.window)) && d.windowSource != nil {
+		// The optional capability validates an EXISTING execute mapping and
+		// ordinary RAM without walks, faults or I/O. Absence is not cached:
+		// a demand Read below may populate the TLB for the next byte.
+		d.window, d.windowPC = d.windowSource.InstructionBytes(d.pc), d.pc
+		if limit := int(4096 - d.pc&4095); len(d.window) > limit {
+			d.window = d.window[:limit]
+		}
+	}
+	if offset := d.pc - d.windowPC; offset < uint64(len(d.window)) {
+		v := d.window[offset]
+		d.pc++
+		return v
 	}
 	v, e := d.memory.Read(d.pc, 1, true)
 	if e != nil {
@@ -2227,8 +2381,19 @@ func (d *decoder) modrm(w uint8) (Operand, Operand, uint8) {
 	}
 	return m, r, group
 }
+func (c *CPU) decodeInstruction(m Memory, pc uint64) (Instruction, error) {
+	i, err := decodeInto(&c.decodeScratch, m, pc)
+	c.decodeScratch.memory = nil
+	c.decodeScratch.window, c.decodeScratch.windowSource = nil, nil
+	return i, err
+}
 func Decode(m Memory, pc uint64) (Instruction, error) {
-	d := decoder{memory: m, pc: pc, start: pc, width: 4}
+	d := decoder{}
+	return decodeInto(&d, m, pc)
+}
+func decodeInto(d *decoder, m Memory, pc uint64) (Instruction, error) {
+	source, _ := m.(instructionWindowMemory)
+	*d = decoder{memory: m, pc: pc, start: pc, width: 4, windowSource: source}
 	i := Instruction{PC: pc}
 	var op byte
 	operand16 := false
@@ -2284,7 +2449,7 @@ func Decode(m Memory, pc uint64) (Instruction, error) {
 	if immWidth == 8 {
 		immWidth = 4
 	}
-	alu := []string{"add", "or", "adc", "sbb", "and", "sub", "xor", "cmp"}
+	alu := [8]string{"add", "or", "adc", "sbb", "and", "sub", "xor", "cmp"}
 	switch {
 	case op < 0x40 && op&7 <= 5:
 		i.Op = alu[op>>3]
@@ -2565,6 +2730,74 @@ func Decode(m Memory, pc uint64) (Instruction, error) {
 	}
 	return i, nil
 }
+
+-- decoded_browser.go --
+//go:build browser
+
+package amd64
+
+import "renvo.dev/internal/rfe/engine"
+
+// Each live instruction has one owned descriptor. A descriptor can be reused
+// only after its engine block has been unpublished; no raw guest address or
+// code epoch alone authorizes reuse. The pool grows only to peak live demand.
+type ownedDecoded struct {
+	value Instruction
+	next  *ownedDecoded
+}
+type decodedPool struct {
+	free    *ownedDecoded
+	scratch decoder
+}
+
+func (p *decodedPool) fetch(m engine.Memory, pc uint64) (engine.Instruction, error) {
+	i, err := decodeInto(&p.scratch, m, pc)
+	p.scratch.memory = nil
+	p.scratch.window, p.scratch.windowSource = nil, nil
+	if err != nil {
+		return engine.Instruction{}, err
+	}
+	cell := p.free
+	if cell == nil {
+		cell = &ownedDecoded{}
+	} else {
+		p.free = cell.next
+	}
+	*cell = ownedDecoded{value: i}
+	return describeInstruction(i, cell), nil
+}
+func (p *decodedPool) release(ins engine.Instruction) {
+	if ins.Decoded == nil {
+		return
+	}
+	cell := ins.Decoded.(*ownedDecoded)
+	cell.value = Instruction{}
+	cell.next = p.free
+	p.free = cell
+}
+func equalDecoded(a, b any) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.(*ownedDecoded).value == b.(*ownedDecoded).value
+}
+func configureDecodedArchitecture(arch *engine.Architecture) {
+	p := &decodedPool{}
+	arch.Fetch = p.fetch
+	arch.Release = p.release
+	arch.EqualDecoded = equalDecoded
+}
+func DecodedInstruction(ins engine.Instruction) Instruction { return ins.Decoded.(*ownedDecoded).value }
+
+-- decoded_native.go --
+//go:build !browser
+
+package amd64
+
+import "renvo.dev/internal/rfe/engine"
+
+func configureDecodedArchitecture(arch *engine.Architecture) {}
+func DecodedInstruction(ins engine.Instruction) Instruction  { return ins.Decoded.(Instruction) }
 
 -- direct_call_region_test.go --
 package amd64
@@ -2925,6 +3158,33 @@ func (d *decoder) extra(i *Instruction, op byte, operand16 bool) {
 		}
 	}
 }
+
+// These synchronous helpers borrow CPU state; they do not create escaping
+// callback environments on the arena-based browser runtime.
+func (c *CPU) privExtra(op string) error {
+	if c.System == nil {
+		return fmt.Errorf("system instruction %s in user personality", op)
+	}
+	if c.System.CPL != 0 {
+		return gp()
+	}
+	return nil
+}
+func (c *CPU) writeExtra(o Operand, n uint8, v, next uint64) error { return c.write(o, n, next, v) }
+func (c *CPU) pushExtra(w uint8, v uint64) error {
+	if e := c.Memory.Write(c.R[RSP]-uint64(w), int(w), v); e != nil {
+		return e
+	}
+	c.R[RSP] -= uint64(w)
+	return nil
+}
+func (c *CPU) popExtra(w uint8) (uint64, error) {
+	v, e := c.Memory.Read(c.R[RSP], int(w), false)
+	if e == nil {
+		c.R[RSP] += uint64(w)
+	}
+	return v, e
+}
 func (c *CPU) executeExtra(i Instruction) (bool, error) {
 	if handled, e := c.vectorExecute(i); handled {
 		return true, e
@@ -2932,34 +3192,9 @@ func (c *CPU) executeExtra(i Instruction) (bool, error) {
 	s := c.System
 	next, w := i.Next, i.Width
 	var e error
-	priv := func() error {
-		if s == nil {
-			return fmt.Errorf("system instruction %s in user personality", i.Op)
-		}
-		if s.CPL != 0 {
-			return gp()
-		}
-		return nil
-	}
-	read := func(o Operand, n uint8) (uint64, error) { return c.read(o, n, next) }
-	write := func(o Operand, n uint8, v uint64) error { return c.write(o, n, next, v) }
-	push := func(v uint64) error {
-		if e := c.Memory.Write(c.R[RSP]-uint64(w), int(w), v); e != nil {
-			return e
-		}
-		c.R[RSP] -= uint64(w)
-		return nil
-	}
-	pop := func() (uint64, error) {
-		v, e := c.Memory.Read(c.R[RSP], int(w), false)
-		if e == nil {
-			c.R[RSP] += uint64(w)
-		}
-		return v, e
-	}
 	switch i.Op {
 	case "cli", "sti", "hlt", "clts", "cacheflush", "swapgs":
-		if e = priv(); e != nil {
+		if e = c.privExtra(i.Op); e != nil {
 			break
 		}
 		switch i.Op {
@@ -2986,10 +3221,10 @@ func (c *CPU) executeExtra(i Instruction) (bool, error) {
 	case "cmc":
 		c.Flags ^= CF
 	case "pushf":
-		e = push(c.Flags | 2)
+		e = c.pushExtra(w, c.Flags|2)
 	case "popf":
 		var v uint64
-		v, e = pop()
+		v, e = c.popExtra(w)
 		if e == nil {
 			mask := uint64(0x3f7fd7)
 			if s != nil && s.CPL != 0 {
@@ -3016,7 +3251,7 @@ func (c *CPU) executeExtra(i Instruction) (bool, error) {
 			c.R[RCX] = 0
 		}
 	case "rdmsr", "wrmsr":
-		if e = priv(); e != nil {
+		if e = c.privExtra(i.Op); e != nil {
 			break
 		}
 		if i.Op == "wrmsr" {
@@ -3029,7 +3264,7 @@ func (c *CPU) executeExtra(i Instruction) (bool, error) {
 			}
 		}
 	case "readcr", "writecr", "readdr", "writedr":
-		if e = priv(); e != nil {
+		if e = c.privExtra(i.Op); e != nil {
 			break
 		}
 		if int(i.CC) >= len(s.CR) {
@@ -3038,21 +3273,21 @@ func (c *CPU) executeExtra(i Instruction) (bool, error) {
 		}
 		switch i.Op {
 		case "readcr":
-			e = write(i.Dst, 8, s.CR[i.CC])
+			e = c.writeExtra(i.Dst, 8, s.CR[i.CC], next)
 		case "readdr":
 			if i.CC >= 8 {
 				e = gp()
 			} else {
-				e = write(i.Dst, 8, s.DR[i.CC])
+				e = c.writeExtra(i.Dst, 8, s.DR[i.CC], next)
 			}
 		case "writedr":
 			if i.CC >= 8 {
 				e = gp()
 			} else {
-				s.DR[i.CC], e = read(i.Dst, 8)
+				s.DR[i.CC], e = c.read(i.Dst, 8, next)
 			}
 		case "writecr":
-			v, err := read(i.Dst, 8)
+			v, err := c.read(i.Dst, 8, next)
 			e = err
 			if e == nil {
 				s.CR[i.CC] = v
@@ -3067,7 +3302,7 @@ func (c *CPU) executeExtra(i Instruction) (bool, error) {
 			}
 		}
 	case "lgdt", "lidt", "sgdt", "sidt":
-		if e = priv(); e != nil {
+		if e = c.privExtra(i.Op); e != nil {
 			break
 		}
 		a := c.address(i.Dst, next)
@@ -3105,24 +3340,24 @@ func (c *CPU) executeExtra(i Instruction) (bool, error) {
 			break
 		}
 		if i.Op == "movseg" {
-			v, err := read(i.Dst, 2)
+			v, err := c.read(i.Dst, 2, next)
 			e = err
 			if e == nil {
 				e = s.segment(i.CC, uint16(v))
 			}
 		} else {
-			e = write(i.Dst, 2, uint64(s.Segments[i.CC].Selector))
+			e = c.writeExtra(i.Dst, 2, uint64(s.Segments[i.CC].Selector), next)
 		}
 	case "ltr", "lldt", "str", "sldt":
-		if e = priv(); e != nil {
+		if e = c.privExtra(i.Op); e != nil {
 			break
 		}
 		if i.Op == "str" {
-			e = write(i.Dst, 2, uint64(s.TR.Selector))
+			e = c.writeExtra(i.Dst, 2, uint64(s.TR.Selector), next)
 		} else if i.Op == "sldt" {
-			e = write(i.Dst, 2, uint64(s.LDTR.Selector))
+			e = c.writeExtra(i.Dst, 2, uint64(s.LDTR.Selector), next)
 		} else {
-			v, err := read(i.Dst, 2)
+			v, err := c.read(i.Dst, 2, next)
 			e = err
 			if e == nil {
 				var d Segment
@@ -3144,7 +3379,7 @@ func (c *CPU) executeExtra(i Instruction) (bool, error) {
 			break
 		}
 		var selector uint64
-		selector, e = read(i.Dst, 2)
+		selector, e = c.read(i.Dst, 2, next)
 		if e == nil {
 			var allowed bool
 			allowed, e = s.verifySelector(uint16(selector), i.Op == "verw")
@@ -3161,9 +3396,9 @@ func (c *CPU) executeExtra(i Instruction) (bool, error) {
 			break
 		}
 		if i.Op == "smsw" {
-			e = write(i.Dst, w, s.CR[0])
-		} else if e = priv(); e == nil {
-			v, err := read(i.Dst, 2)
+			e = c.writeExtra(i.Dst, w, s.CR[0], next)
+		} else if e = c.privExtra(i.Op); e == nil {
+			v, err := c.read(i.Dst, 2, next)
 			e = err
 			if e == nil {
 				s.CR[0] = (s.CR[0] &^ 15) | (v & 15) | (s.CR[0] & 1)
@@ -3171,7 +3406,7 @@ func (c *CPU) executeExtra(i Instruction) (bool, error) {
 			}
 		}
 	case "invlpg":
-		if e = priv(); e == nil {
+		if e = c.privExtra(i.Op); e == nil {
 			s.invalidatePage(c.address(i.Dst, next))
 		}
 	case "lret":
@@ -3180,9 +3415,9 @@ func (c *CPU) executeExtra(i Instruction) (bool, error) {
 			break
 		}
 		var pc, sel uint64
-		pc, e = pop()
+		pc, e = c.popExtra(w)
 		if e == nil {
-			sel, e = pop()
+			sel, e = c.popExtra(w)
 		}
 		if e == nil {
 			e = s.segment(1, uint16(sel))
@@ -3224,7 +3459,7 @@ func (c *CPU) executeExtra(i Instruction) (bool, error) {
 		s.Segments[1].Selector = uint16(s.STAR>>32) &^ 3
 		s.Segments[2].Selector = s.Segments[1].Selector + 8
 	case "sysret":
-		if e = priv(); e != nil {
+		if e = c.privExtra(i.Op); e != nil {
 			break
 		}
 		s.CPL = 3
@@ -3243,10 +3478,10 @@ func (c *CPU) executeExtra(i Instruction) (bool, error) {
 	case "ud2":
 		e = &Exception{Vector: 6}
 	case "in", "out":
-		if e = priv(); e != nil {
+		if e = c.privExtra(i.Op); e != nil {
 			break
 		}
-		port, err := read(i.Src, 2)
+		port, err := c.read(i.Src, 2, next)
 		e = err
 		if e != nil {
 			break
@@ -3256,7 +3491,7 @@ func (c *CPU) executeExtra(i Instruction) (bool, error) {
 			break
 		}
 		if i.Op == "in" {
-			e = write(Operand{Kind: regOperand, Reg: RAX}, w, uint64(s.Ports.In(uint16(port), int(w))))
+			e = c.writeExtra(Operand{Kind: regOperand, Reg: RAX}, w, uint64(s.Ports.In(uint16(port), int(w))), next)
 		} else {
 			s.Ports.Out(uint16(port), int(w), uint32(c.R[RAX]))
 		}
@@ -3298,7 +3533,7 @@ func (c *CPU) executeExtra(i Instruction) (bool, error) {
 			e = c.Memory.Write(dst, int(w), a)
 		}
 		if i.Op == "lods" {
-			e = write(Operand{Kind: regOperand, Reg: RAX}, w, a)
+			e = c.writeExtra(Operand{Kind: regOperand, Reg: RAX}, w, a, next)
 		}
 		if e != nil {
 			break
@@ -3324,42 +3559,42 @@ func (c *CPU) executeExtra(i Instruction) (bool, error) {
 			}
 		}
 	case "xchg", "xadd", "cmpxchg":
-		a, err := read(i.Dst, w)
+		a, err := c.read(i.Dst, w, next)
 		e = err
 		if e != nil {
 			break
 		}
-		b, err := read(i.Src, w)
+		b, err := c.read(i.Src, w, next)
 		e = err
 		if e != nil {
 			break
 		}
 		switch i.Op {
 		case "xchg":
-			e = write(i.Dst, w, b)
+			e = c.writeExtra(i.Dst, w, b, next)
 			if e == nil {
-				e = write(i.Src, w, a)
+				e = c.writeExtra(i.Src, w, a, next)
 			}
 		case "xadd":
 			v, f := arithmetic(a, b, 0, w, false)
-			e = write(i.Dst, w, v)
+			e = c.writeExtra(i.Dst, w, v, next)
 			if e == nil {
-				e = write(i.Src, w, a)
+				e = c.writeExtra(i.Src, w, a, next)
 				c.Flags = c.Flags&^arithmeticFlags | f
 			}
 		case "cmpxchg":
 			_, f := arithmetic(c.R[RAX], a, 0, w, true)
 			if f&ZF != 0 {
-				e = write(i.Dst, w, b)
+				e = c.writeExtra(i.Dst, w, b, next)
 			} else {
-				e = write(Operand{Kind: regOperand, Reg: RAX}, w, a)
+				e = c.writeExtra(Operand{Kind: regOperand, Reg: RAX}, w, a, next)
 			}
 			if e == nil {
 				c.Flags = c.Flags&^arithmeticFlags | f
 			}
 		}
 	case "bt", "bts", "btr", "btc":
-		bit, err := read(i.Src, w)
+		bit, err := c.read(i.Src, w, next)
 		e = err
 		if e != nil {
 			break
@@ -3369,7 +3604,7 @@ func (c *CPU) executeExtra(i Instruction) (bool, error) {
 			dst.Disp += (signed(bit, w) >> 3) &^ (int64(w) - 1)
 		}
 		bit &= uint64(w*8 - 1)
-		v, err := read(dst, w)
+		v, err := c.read(dst, w, next)
 		e = err
 		if e != nil {
 			break
@@ -3384,10 +3619,10 @@ func (c *CPU) executeExtra(i Instruction) (bool, error) {
 			case "btc":
 				v ^= 1 << bit
 			}
-			e = write(dst, w, v)
+			e = c.writeExtra(dst, w, v, next)
 		}
 	case "bsf", "bsr":
-		v, err := read(i.Src, w)
+		v, err := c.read(i.Src, w, next)
 		e = err
 		if e != nil {
 			break
@@ -3400,10 +3635,10 @@ func (c *CPU) executeExtra(i Instruction) (bool, error) {
 			if i.Op == "bsr" {
 				n = 63 - bits.LeadingZeros64(v)
 			}
-			e = write(i.Dst, w, uint64(n))
+			e = c.writeExtra(i.Dst, w, uint64(n), next)
 		}
 	case "bswap":
-		v, err := read(i.Dst, w)
+		v, err := c.read(i.Dst, w, next)
 		e = err
 		if e == nil {
 			if w == 8 {
@@ -3411,15 +3646,15 @@ func (c *CPU) executeExtra(i Instruction) (bool, error) {
 			} else {
 				v = uint64(bits.ReverseBytes32(uint32(v)))
 			}
-			e = write(i.Dst, w, v)
+			e = c.writeExtra(i.Dst, w, v, next)
 		}
 	case "shld", "shrd":
-		a, err := read(i.Dst, w)
+		a, err := c.read(i.Dst, w, next)
 		e = err
 		if e != nil {
 			break
 		}
-		b, err := read(i.Src, w)
+		b, err := c.read(i.Src, w, next)
 		e = err
 		if e != nil {
 			break
@@ -3447,7 +3682,7 @@ func (c *CPU) executeExtra(i Instruction) (bool, error) {
 			v = (a >> n) | (b << (width - n))
 			carry = a >> (n - 1) & 1
 		}
-		e = write(i.Dst, w, v)
+		e = c.writeExtra(i.Dst, w, v, next)
 		if e == nil {
 			f := szp(v, w) | carry
 			if n == 1 && (a^v)>>(width-1)&1 != 0 {
@@ -3476,7 +3711,7 @@ func (c *CPU) executeExtra(i Instruction) (bool, error) {
 		v, err := c.Memory.Read(c.R[RBX]+(c.R[RAX]&255), 1, false)
 		e = err
 		if e == nil {
-			e = write(Operand{Kind: regOperand, Reg: RAX}, 1, v)
+			e = c.writeExtra(Operand{Kind: regOperand, Reg: RAX}, 1, v, next)
 		}
 	default:
 		return false, nil
@@ -3725,6 +3960,176 @@ func TestSSEHalfMoves(t *testing.T) {
 	}
 	if got, _ := c.Memory.Read(0x1808, 8, false); got != 99 {
 		t.Fatal("half store overwrote adjacent memory", got)
+	}
+}
+
+-- instruction_window_fault_test.go --
+package amd64
+
+import "testing"
+
+// Wrapping only Memory deliberately hides the optional capability, providing
+// the original demand-by-byte reference without changing the decoder.
+type scalarInstructionMemory struct{ Memory }
+
+func TestInstructionWindowSystemNXFaultMatchesScalar(t *testing.T) {
+	for _, cached := range []bool{false, true} {
+		physical := &instructionWindowProbe{data: make([]byte, 16384), denied: ^uint64(0)}
+		code := []byte{0x48, 0xb8, 1, 2, 3, 4, 5, 6, 7, 8}
+		copy(physical.data[8190:], code)
+		c := &CPU{PC: 8190}
+		s := NewSystem(c, physical, nil)
+		s.CR[0], s.EFER = 1<<31, 1<<10|1<<11
+		// The two bytes on the first page are valid; the immediate on the next
+		// page must deliver exactly one execute protection fault, never prefetch.
+		s.tlb[1] = pageEntry{physical: 4096, user: true}
+		s.tlb[2] = pageEntry{physical: 8192, user: true, nx: true}
+		var memory Memory = s
+		if !cached {
+			memory = scalarInstructionMemory{s}
+		}
+		_, err := Decode(memory, 8190)
+		fault, ok := err.(*Exception)
+		if !ok || fault.Vector != 14 || fault.Address != 8192 || fault.Code != 17 || s.CR[2] != 8192 || s.FaultCount != 1 || c.PC != 8190 || c.Retired != 0 {
+			t.Fatal("execute fault differs", cached, err, s.CR[2], s.FaultCount, c.PC, c.Retired)
+		}
+	}
+}
+func TestInstructionWindowSystemInvalidationAndDemandOnly(t *testing.T) {
+	physical := &instructionWindowProbe{data: make([]byte, 16384), denied: ^uint64(0)}
+	c := &CPU{PC: 8191}
+	s := NewSystem(c, physical, nil)
+	s.CR[0], s.EFER = 1<<31, 1<<10|1<<11
+	physical.data[8191] = 0x90
+	s.tlb[1] = pageEntry{physical: 4096, user: true}
+	if _, err := Decode(s, 8191); err != nil || s.FaultCount != 0 {
+		t.Fatal("unused next page fetched", err, s.FaultCount)
+	}
+	entry := s.tlb[1]
+	s.fastTLB[systemFastPageSlot(1)] = systemFastPage{number: 1, generation: s.tlbGeneration, valid: true, entry: entry}
+	s.invalidatePage(4096)
+	if s.InstructionBytes(8191) != nil || s.FaultCount != 0 {
+		t.Fatal("revoked execute translation reused")
+	}
+}
+
+-- instruction_window_test.go --
+package amd64
+
+import (
+	"errors"
+	"testing"
+)
+
+type instructionWindowProbe struct {
+	data    []byte
+	reads   []uint64
+	windows []uint64
+	denied  uint64
+}
+
+func (m *instructionWindowProbe) Read(a uint64, n int, x bool) (uint64, error) {
+	m.reads = append(m.reads, a)
+	if n != 1 || a >= uint64(len(m.data)) || a>>12 == m.denied {
+		return 0, errors.New("execute fault")
+	}
+	return uint64(m.data[a]), nil
+}
+func (m *instructionWindowProbe) Write(uint64, int, uint64) error {
+	return errors.New("unexpected write")
+}
+func (m *instructionWindowProbe) InstructionBytes(a uint64) []byte {
+	m.windows = append(m.windows, a)
+	if a >= uint64(len(m.data)) || a>>12 == m.denied {
+		return nil
+	}
+	// Intentionally expose beyond the page to verify decoder-side clamping.
+	return m.data[a:]
+}
+func TestInstructionWindowDemandFaultsLifetimeAndLimit(t *testing.T) {
+	code := []byte{0x48, 0xb8, 1, 2, 3, 4, 5, 6, 7, 8}
+	m := &instructionWindowProbe{data: make([]byte, 12288), denied: ^uint64(0)}
+	copy(m.data[4090:], code)
+	got, err := Decode(m, 4090)
+	if err != nil || got.Next != 4100 || got.Src.Imm != 0x0807060504030201 || len(m.reads) != 0 || len(m.windows) != 2 {
+		t.Fatal("cross-page demand fetch", got, err, m.reads, m.windows)
+	}
+	m.reads, m.windows = nil, nil
+	m.denied = 1
+	if _, err = Decode(m, 4090); err == nil || len(m.reads) != 1 || m.reads[0] != 4096 || len(m.windows) != 2 {
+		t.Fatal("late execute fault hidden", err, m.reads, m.windows)
+	}
+	// No read or permission query of an unused page after a one-byte instruction.
+	m.reads, m.windows = nil, nil
+	m.data[4095] = 0x90
+	if ins, err := Decode(m, 4095); err != nil || ins.Next != 4096 || len(m.reads) != 0 || len(m.windows) != 1 {
+		t.Fatal("overfetched next page", ins, err, m.reads, m.windows)
+	}
+	// CPU scratch must discard both borrowed RAM and capability after a decode.
+	m.denied = ^uint64(0)
+	c := &CPU{}
+	copy(m.data[100:], code)
+	if _, err := c.decodeInstruction(m, 100); err != nil {
+		t.Fatal(err)
+	}
+	if c.decodeScratch.window != nil || c.decodeScratch.windowSource != nil || c.decodeScratch.memory != nil {
+		t.Fatal("borrow survived decode")
+	}
+	m.data[102] = 77
+	ins, err := c.decodeInstruction(m, 100)
+	if err != nil || ins.Src.Imm&255 != 77 {
+		t.Fatal("stale decode", ins, err)
+	}
+	m.denied = 0
+	m.windows = nil
+	if _, err := Decode(m, 100); err == nil || len(m.windows) != 1 {
+		t.Fatal("denied cached execute query did not take demand fault", err, m.windows)
+	}
+	m.denied = ^uint64(0)
+	for i := 0; i < 16; i++ {
+		m.data[100+i] = 0x66
+	}
+	m.data[116] = 0x90
+	if _, err := Decode(m, 100); err == nil {
+		t.Fatal("15-byte limit bypassed")
+	}
+}
+func TestInstructionWindowCachedExecutePermissionAndFullTag(t *testing.T) {
+	m := &instructionWindowProbe{data: make([]byte, 32768), denied: ^uint64(0)}
+	s := &System{Physical: m, tlb: make(map[uint64]pageEntry)}
+	s.CR[0], s.EFER = 1<<31, 1<<10
+	s.CR[2], s.FaultCount = 91, 7
+	if s.InstructionBytes(4096) != nil || len(m.reads) != 0 || len(m.windows) != 0 {
+		t.Fatal("uncached window walked")
+	}
+	e := pageEntry{physical: 8192, user: true}
+	s.tlb[1] = e
+	if w := s.InstructionBytes(4100); len(w) != 4092 || len(m.windows) != 1 || m.windows[0] != 8196 {
+		t.Fatal("wrong physical range", len(w), m.windows)
+	}
+	e.nx = true
+	s.tlb[1] = e
+	if s.InstructionBytes(4100) != nil {
+		t.Fatal("NX window")
+	}
+	e.nx = false
+	e.user = false
+	s.tlb[1] = e
+	s.CPL = 3
+	if s.InstructionBytes(4100) != nil {
+		t.Fatal("kernel window in user mode")
+	}
+	s.CPL = 0
+	if s.InstructionBytes(0x0000800000001004) != nil {
+		t.Fatal("noncanonical window")
+	}
+	high := uint64(0xffff800000001)
+	s.fastTLB[systemFastPageSlot(high)] = systemFastPage{number: 1, generation: s.tlbGeneration, valid: true, entry: e}
+	if s.InstructionBytes(high<<12|4) != nil {
+		t.Fatal("truncated cache tag")
+	}
+	if s.CR[2] != 91 || s.FaultCount != 7 || len(m.reads) != 0 {
+		t.Fatal("query delivered a fault or read ahead")
 	}
 }
 
@@ -4089,6 +4494,155 @@ func TestNativeSignedMemoryResultsAndFault(t *testing.T) {
 	}
 }
 
+-- string_compiled_probe.go --
+package amd64
+
+import (
+	"fmt"
+	emu "renvo.dev/internal/rfe/runtime"
+)
+
+type stringProbeMemory struct {
+	data [4096]byte
+	code []byte
+}
+
+func (m *stringProbeMemory) Read(a uint64, n int, x bool) (uint64, error) {
+	if x {
+		if a < 0x10000 || a-0x10000 >= uint64(len(m.code)) || uint64(n) > uint64(len(m.code))-(a-0x10000) {
+			return 0, fmt.Errorf("probe fetch range")
+		}
+		return uint64(m.code[a-0x10000]), nil
+	}
+	if a > 4096 || uint64(n) > 4096-a {
+		return 0, fmt.Errorf("probe read range")
+	}
+	var v uint64
+	for j := 0; j < n; j++ {
+		v |= uint64(m.data[a+uint64(j)]) << uint(j*8)
+	}
+	return v, nil
+}
+func (m *stringProbeMemory) Write(a uint64, n int, v uint64) error {
+	if a > 4096 || uint64(n) > 4096-a {
+		return fmt.Errorf("probe write range")
+	}
+	for j := 0; j < n; j++ {
+		m.data[a+uint64(j)] = byte(v >> uint(j*8))
+	}
+	return nil
+}
+
+// ProbeCompiledStrings compares the real generated backend with architectural
+// semantics, including zero-count no-access, DF, comparison stopping, and exits
+// that must commit neither pointers nor flags. Browsers execute the same probe.
+func ProbeCompiledStrings() error {
+	n, err := emu.NewNative(1 << 20)
+	if err != nil {
+		return err
+	}
+	defer n.Close()
+	arch := Architecture()
+	var page [4096]byte
+	clock, epoch := uint64(1), uint64(1)
+	m := &emu.MemoryContext{}
+	m.Clock = &clock
+	for _, opcode := range [5]byte{0xa4, 0xaa, 0xac, 0xa6, 0xae} {
+		for _, width := range [4]int{1, 2, 4, 8} {
+			for _, repeat := range [3]byte{0, 0xf2, 0xf3} {
+				ref := &stringProbeMemory{}
+				if repeat != 0 {
+					ref.code = append(ref.code, repeat)
+				}
+				if width == 2 {
+					ref.code = append(ref.code, 0x66)
+				}
+				if width == 8 {
+					ref.code = append(ref.code, 0x48)
+				}
+				op := opcode
+				if width != 1 {
+					op++
+				}
+				ref.code = append(ref.code, op)
+				ins, e := arch.Fetch(ref, 0x10000)
+				if e != nil {
+					return e
+				}
+				decoded := DecodedInstruction(ins)
+				var b emu.Builder
+				b.Reset(true)
+				if !arch.Lower(&b, ins, 0) {
+					return fmt.Errorf("string lowering rejected")
+				}
+				b.Checkpoint(stateWords, 1)
+				entry, e := n.CompileMemory(b.FinishMemory(stateWords), stateWords)
+				if arch.Release != nil {
+					arch.Release(ins)
+				}
+				if e != nil {
+					return e
+				}
+				for _, address := range [4]uint64{64, 4095, 1 << 48, 1 << 60} {
+					for _, count := range [3]uint64{0, 1, 4} {
+						for _, df := range [2]uint64{0, FlagDF} {
+							for j := range ref.data {
+								ref.data[j] = byte(j*37 + 11)
+							}
+							page = ref.data
+							clock, epoch = 1, 1
+							m.Fill(0, &page, 3, &epoch)
+							c := CPU{Memory: ref, PC: 0x10000, Flags: 2 | FlagIF | arithmeticFlags | df}
+							c.R[RAX], c.R[RCX], c.R[RSI], c.R[RDI] = 0xa5a55a5a12345678, count, address, address
+							a := NewAdapter(&c)
+							original := a.state
+							if e = n.CallMemory(entry, a.Registers(), m); e != nil {
+								return e
+							}
+							if m.Status == 0 {
+								if address == 64 && (repeat == 0 || count != 0) && m.Retired != 1 {
+									return fmt.Errorf("string retirement mismatch")
+								}
+								if e = c.Execute(decoded); e != nil {
+									return e
+								}
+								expected := NewAdapter(&c)
+								for j := 0; j < stateWords; j++ {
+									if a.state[j] != expected.state[j] {
+										return fmt.Errorf("string state mismatch opcode=%d width=%d repeat=%d slot=%d got=%d want=%d", opcode, width, repeat, j, a.state[j], expected.state[j])
+									}
+								}
+								if page != ref.data {
+									return fmt.Errorf("string memory mismatch")
+								}
+							} else {
+								if a.state != original || m.Retired != 0 || page != ref.data || clock != 1 || epoch != 1 {
+									return fmt.Errorf("string exit committed partial state")
+								}
+								if address == 64 && (repeat == 0 || count != 0) {
+									return fmt.Errorf("valid string iteration exited")
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+-- string_compiled_test.go --
+package amd64
+
+import "testing"
+
+func TestCompiledStringsFlagsPointersAndPreciseExits(t *testing.T) {
+	if err := ProbeCompiledStrings(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 -- system.go --
 package amd64
 
@@ -4122,9 +4676,10 @@ type pageEntry struct {
 // CPU.Memory exposes checked linear access through this state.
 type System struct {
 	// Bounded fault history for full-system bringup diagnostics.
-	FaultCount uint64
-	FaultTrace [8][3]uint64 // PC, linear address, page-fault error code
-	decoded    map[uint64]systemDecode
+	FaultCount     uint64
+	InterruptEpoch uint64       // host scheduling boundary, including same-CPL software traps
+	FaultTrace     [8][3]uint64 // PC, linear address, page-fault error code
+	decoded        map[uint64]systemDecode
 
 	IRQShadow uint8
 
@@ -4150,6 +4705,8 @@ type System struct {
 	InvariantTSC                       bool
 	MSR                                map[uint32]uint64
 	tlb                                map[uint64]pageEntry
+	fastTLB                            [1024]systemFastPage
+	tlbGeneration                      uint64
 	supervisor                         bool
 }
 
@@ -4178,6 +4735,7 @@ func NewSystem(c *CPU, physical Memory, ports PortBus) *System {
 // may preserve root-tagged native proofs ONLY if it tracks every observed table
 // write and all permission/TLBI changes separately. Other buses fully invalidate.
 func (s *System) switchAddressSpace() {
+	s.clearFastTLB()
 	clear(s.tlb)
 	s.CPU.cache = nil
 	if memory, ok := s.Physical.(interface{ SwitchAddressSpace() }); ok {
@@ -4187,20 +4745,26 @@ func (s *System) switchAddressSpace() {
 	}
 }
 
-// invalidatePage revokes native descriptors/code proofs even if they were
-// republished from the old architectural TLB after a guest PTE store. The
-// narrow machine callback retains table watches for surviving TLB entries.
+// A single-page architectural invalidation also revokes native proofs that
+// may have been revalidated through the old TLB after a page-table write.
+// Its bus hook MUST preserve table watches for all surviving TLB entries.
 func (s *System) invalidatePage(address uint64) {
-	delete(s.tlb, address>>12)
-	if memory, ok := s.Physical.(interface{ InvalidateNativeMappings() }); ok {
-		memory.InvalidateNativeMappings()
+	if memory, ok := s.Physical.(interface{ InvalidatePage(uint64) }); ok {
+		key := address >> 12
+		fast := &s.fastTLB[systemFastPageSlot(key)]
+		if fast.number == key {
+			fast.valid = false
+		}
+		delete(s.tlb, key)
+		memory.InvalidatePage(address)
 	} else {
-		// Unknown buses get a complete revocation so InvalidateMappings never
-		// mistakes a partial TLB flush for permission to retire table watches.
+		// A bus with only the full-flush contract may release table watches.
+		// Evict every architectural entry before invoking that contract.
 		s.Flush()
 	}
 }
 func (s *System) Flush() {
+	s.clearFastTLB()
 	clear(s.tlb)
 	// Decoded entries are not mapping grants: decode rechecks execute access,
 	// physical identities and page epochs (including the final page) on reuse.
@@ -4230,7 +4794,7 @@ func (s *System) Fault(address uint64, write, execute, present bool) error {
 	s.CR[2] = address
 	return &Exception{Vector: 14, Code: code, Address: address, HasCode: true}
 }
-func (s *System) translate(address uint64, write, execute bool) (uint64, error) {
+func (s *System) translateSlow(address uint64, write, execute bool) (uint64, error) {
 	if s.CR[0]&(1<<31) == 0 {
 		return address, nil
 	}
@@ -4241,6 +4805,12 @@ func (s *System) translate(address uint64, write, execute bool) (uint64, error) 
 	key := address >> 12
 	e, ok := s.tlb[key]
 	if !ok {
+		// Eviction can expose page-table changes just like explicit TLBI. Do
+		// this before walking, so the full-flush bus may release old watches
+		// and the new translation then records its dependencies afresh.
+		if len(s.tlb) >= 65536 {
+			s.Flush()
+		}
 		if s.CR[4]&(1<<5) == 0 || s.EFER&(1<<10) == 0 {
 			return 0, fmt.Errorf("unsupported paging mode cr0=%#x cr4=%#x efer=%#x", s.CR[0], s.CR[4], s.EFER)
 		}
@@ -4248,7 +4818,9 @@ func (s *System) translate(address uint64, write, execute bool) (uint64, error) 
 		e.writable, e.user = true, true
 		for level := 3; level >= 0; level-- {
 			pteAddress := base + ((address>>uint(12+9*level))&511)*8
-			if memory, ok := s.Physical.(interface{ MarkPageTable(uint64) }); ok {
+			if memory, ok := s.Physical.(interface{ MarkPageTableEntry(uint64) }); ok {
+				memory.MarkPageTableEntry(pteAddress)
+			} else if memory, ok := s.Physical.(interface{ MarkPageTable(uint64) }); ok {
 				memory.MarkPageTable(pteAddress)
 			}
 			pte, err := s.Physical.Read(pteAddress, 8, false)
@@ -4276,9 +4848,6 @@ func (s *System) translate(address uint64, write, execute bool) (uint64, error) 
 			}
 			base = pte & 0x000ffffffffff000
 		}
-		if len(s.tlb) >= 65536 {
-			clear(s.tlb)
-		}
 		s.tlb[key] = e
 	}
 	user := s.CPL == 3 && !s.supervisor
@@ -4286,7 +4855,7 @@ func (s *System) translate(address uint64, write, execute bool) (uint64, error) 
 		// A protection fault must not pin stale permissions across the guest's
 		// fault handler. Hardware may evict TLB entries at any time, and Linux
 		// can lazily upgrade permissions after a spurious protection fault.
-		delete(s.tlb, key)
+		s.invalidatePage(address)
 		return 0, s.Fault(address, write, execute, true)
 	}
 	if write && !e.dirty {
@@ -4456,6 +5025,7 @@ func (s *System) segment(index uint8, sel uint16) error {
 
 // Interrupt enters an IDT interrupt/trap gate, including TSS stack switching.
 func (s *System) Interrupt(vector uint8, code uint32, hasCode bool) error {
+	s.InterruptEpoch++
 	old := s.supervisor
 	s.supervisor = true
 	defer func() { s.supervisor = old }()
@@ -4683,7 +5253,7 @@ type systemDecode struct {
 func (s *System) decode() (Instruction, error) {
 	versioned, ok := s.Physical.(PhysicalCodeMemory)
 	if !ok {
-		return Decode(s, s.CPU.PC)
+		return s.CPU.decodeInstruction(s, s.CPU.PC)
 	}
 	pc := s.CPU.PC
 	first, e := s.translate(pc, false, true)
@@ -4702,7 +5272,7 @@ func (s *System) decode() (Instruction, error) {
 			return cached.instruction, nil
 		}
 	}
-	i, e := Decode(s, pc)
+	i, e := s.CPU.decodeInstruction(s, pc)
 	if e != nil {
 		return i, e
 	}
@@ -4718,6 +5288,255 @@ func (s *System) decode() (Instruction, error) {
 	}
 	s.decoded[pc] = systemDecode{instruction: i, first: first, last: last, firstEpoch: versioned.CodeEpoch(first), lastEpoch: versioned.CodeEpoch(last)}
 	return i, nil
+}
+
+-- system_cached_mapping_test.go --
+package amd64
+
+import "testing"
+
+func TestNativeCachedMappingNeverWalksOrSetsDirtyOrFaults(t *testing.T) {
+	s := &System{CPL: 0, tlb: make(map[uint64]pageEntry)}
+	s.CR[0] = 1<<31 | 1<<16
+	s.CR[4] = 1 << 5
+	s.EFER = 1 << 10
+	s.CR[2], s.FaultCount = 123, 7
+	// Physical is intentionally nil: any accidental walk would fail this test.
+	for _, write := range []bool{false, true} {
+		if _, _, ok := s.NativeCachedMapping(0x4008, write); ok {
+			t.Fatal("uncached page admitted")
+		}
+	}
+	s.tlb[4] = pageEntry{physical: 0x9000, writable: true, user: true}
+	if p, w, ok := s.NativeCachedMapping(0x4008, false); !ok || w || p != 0x9008 {
+		t.Fatal("clean cached read differs", p, w, ok)
+	}
+	if _, _, ok := s.NativeCachedMapping(0x4008, true); ok {
+		t.Fatal("clean PTE upgraded without architectural write")
+	}
+	e := s.tlb[4]
+	e.dirty = true
+	s.tlb[4] = e
+	if p, w, ok := s.NativeCachedMapping(0x4008, true); !ok || !w || p != 0x9008 {
+		t.Fatal("dirty cached write rejected", p, w, ok)
+	}
+	e.user = false
+	s.tlb[4] = e
+	s.CPL = 3
+	if _, _, ok := s.NativeCachedMapping(0x4008, false); ok {
+		t.Fatal("user read inherited kernel cache")
+	}
+	s.CPL = 0
+	e.writable = false
+	s.tlb[4] = e
+	if _, _, ok := s.NativeCachedMapping(0x4008, true); ok {
+		t.Fatal("WP ignored")
+	}
+	s.CR[0] &^= 1 << 16
+	if _, w, ok := s.NativeCachedMapping(0x4008, true); !ok || !w {
+		t.Fatal("kernel WP=0 cache differs")
+	}
+	if _, _, ok := s.NativeCachedMapping(0x0000800000004008, false); ok {
+		t.Fatal("noncanonical address admitted")
+	}
+	s.supervisor = true
+	if _, _, ok := s.NativeCachedMapping(0x4008, false); ok {
+		t.Fatal("temporary supervisor mapping admitted")
+	}
+	if s.CR[2] != 123 || s.FaultCount != 7 || len(s.tlb) != 1 || s.tlb[4] != e {
+		t.Fatal("cached query mutated architectural state")
+	}
+}
+
+-- system_fast_tlb.go --
+package amd64
+
+// This is only a bounded lookaside for the architectural TLB, not another
+// translation authority. All permission/control checks remain per access; every
+// architectural invalidation revokes its exact page or the whole generation.
+type systemFastPage struct {
+	number, generation uint64
+	valid              bool
+	entry              pageEntry
+}
+
+func systemFastPageSlot(page uint64) uint64 { return (page ^ page>>10) & 1023 }
+func (s *System) clearFastTLB() {
+	s.tlbGeneration++
+	if s.tlbGeneration == 0 {
+		clear(s.fastTLB[:])
+	}
+}
+func (s *System) translate(address uint64, write, execute bool) (uint64, error) {
+	if s.CR[0]&(1<<31) == 0 {
+		return address, nil
+	}
+	if s.EFER&(1<<10) != 0 && uint64(int64(address<<16)>>16) != address {
+		return 0, gp()
+	}
+	key := address >> 12
+	fast := &s.fastTLB[systemFastPageSlot(key)]
+	if fast.valid && fast.generation == s.tlbGeneration && fast.number == key {
+		e := &fast.entry
+		user := s.CPL == 3 && !s.supervisor
+		if (!user || e.user) && (!execute || !e.nx) && (!write || e.dirty && (e.writable || !user && s.CR[0]&(1<<16) == 0)) {
+			return e.physical | address&4095, nil
+		}
+	}
+	return s.translateFill(address, write, execute)
+}
+
+// Cold walking, fault delivery and the first architectural dirty-bit store use
+// exactly the original path. Keep its large walker frame off a hot TLB hit.
+func (s *System) translateFill(address uint64, write, execute bool) (uint64, error) {
+	physical, err := s.translateSlow(address, write, execute)
+	if err != nil {
+		return 0, err
+	}
+	key := address >> 12
+	if entry, ok := s.tlb[key]; ok {
+		fast := &s.fastTLB[systemFastPageSlot(key)]
+		*fast = systemFastPage{number: key, generation: s.tlbGeneration, valid: true, entry: entry}
+	}
+	return physical, nil
+}
+
+-- system_fast_tlb_test.go --
+package amd64
+
+import "testing"
+
+type fastInvalidationBus struct{ *systemRAM }
+
+func (m *fastInvalidationBus) InvalidatePage(uint64) {}
+func (m *fastInvalidationBus) SwitchAddressSpace()   {}
+func (m *fastInvalidationBus) InvalidateMappings()   {}
+
+func TestSystemFastTLBRevocationAndFullTags(t *testing.T) {
+	m := &fastInvalidationBus{newSystemRAM()}
+	s := NewSystem(&CPU{}, m, nil)
+	s.CR[0], s.CR[3], s.CR[4], s.EFER = 1<<31|1<<16|1, 0x1000, 1<<5, 1<<10|1<<11
+	for a, v := range map[uint64]uint64{0x1000: 0x2027, 0x2000: 0x3027, 0x3000: 0x4027, 0x4040: 0x10067} {
+		m.Write(a, 8, v)
+	}
+	check := func(want uint64) {
+		t.Helper()
+		for i := 0; i < 2; i++ {
+			if p, e := s.translate(0x8001, false, true); e != nil || p != want {
+				t.Fatal("translation", p, e, want)
+			}
+		}
+	}
+	check(0x10001)
+	// No implicit refresh: an ordinary PTE write retains the architectural TLB.
+	m.Write(0x4040, 8, 0x11067)
+	check(0x10001)
+	s.invalidatePage(0x8000)
+	check(0x11001)
+	m.Write(0x4040, 8, 0x12067)
+	s.switchAddressSpace()
+	check(0x12001)
+	m.Write(0x4040, 8, 0x13067)
+	s.Flush()
+	check(0x13001)
+	// A populated shortcut cannot accept either a noncanonical address or a
+	// different full page key with the same bounded cache index.
+	if _, e := s.translate(0x0000800000008001, false, false); e == nil {
+		t.Fatal("noncanonical fast hit")
+	}
+	highKey := uint64(0xffff800000008)
+	slot := systemFastPageSlot(highKey)
+	s.fastTLB[slot] = systemFastPage{number: 8, generation: s.tlbGeneration, valid: true, entry: pageEntry{physical: 0x13000, user: true, dirty: true, writable: true}}
+	if _, e := s.translate(highKey<<12|1, false, false); e == nil {
+		t.Fatal("full key lost")
+	}
+	// Wrap must not resurrect a generation-zero entry from a distant past.
+	s.fastTLB[systemFastPageSlot(8)] = systemFastPage{number: 8, generation: 0, valid: true, entry: pageEntry{physical: 0xdead000}}
+	s.tlbGeneration = ^uint64(0)
+	s.Flush()
+	check(0x13001)
+}
+func TestSystemFastTLBPermissionsAndDirtyUpgrade(t *testing.T) {
+	m := newSystemRAM()
+	s := NewSystem(&CPU{}, m, nil)
+	s.CR[0], s.CR[3], s.CR[4], s.EFER = 1<<31|1<<16|1, 0x1000, 1<<5, 1<<10|1<<11
+	for a, v := range map[uint64]uint64{0x1000: 0x2027, 0x2000: 0x3027, 0x3000: 0x4027, 0x4040: 0x10023} {
+		m.Write(a, 8, v)
+	}
+	// Read only populates a clean kernel-only mapping. A write must still set D.
+	if _, e := s.translate(0x8001, false, false); e != nil {
+		t.Fatal(e)
+	}
+	if e := s.Write(0x8001, 1, 42); e != nil {
+		t.Fatal(e)
+	}
+	pte, _ := m.Read(0x4040, 8, false)
+	if pte&(1<<6) == 0 || !s.tlb[8].dirty {
+		t.Fatal("cached write skipped dirty-bit update")
+	}
+	s.CPL = 3
+	if _, e := s.translate(0x8001, false, false); e == nil {
+		t.Fatal("cached kernel mapping admitted user")
+	}
+	s.CPL = 0
+	// Read-only PTE: kernel WP=0 may write, but changing WP rechecks permissions.
+	m.Write(0x4040, 8, 0x10061)
+	s.Flush()
+	s.CR[0] &^= 1 << 16
+	if _, e := s.translate(0x8001, true, false); e != nil {
+		t.Fatal(e)
+	}
+	s.CR[0] |= 1 << 16
+	if _, e := s.translate(0x8001, true, false); e == nil {
+		t.Fatal("cached write ignored WP")
+	}
+	m.Write(0x4040, 8, uint64(1)<<63|0x10067)
+	s.Flush()
+	if _, e := s.translate(0x8001, false, false); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := s.translate(0x8001, false, true); e == nil {
+		t.Fatal("cached read granted NX execute")
+	}
+}
+
+-- system_instruction_window.go --
+package amd64
+
+// This is only a query of an already-populated architectural TLB. In
+// particular it neither walks nor delivers speculative faults/sets A/D bits.
+// Missing/protected mappings return nil; only the exact demand Read faults.
+func (s *System) InstructionBytes(address uint64) []byte {
+	physical := address
+	if s.CR[0]&(1<<31) != 0 {
+		if s.EFER&(1<<10) == 0 || uint64(int64(address<<16)>>16) != address {
+			return nil
+		}
+		key := address >> 12
+		fast := &s.fastTLB[systemFastPageSlot(key)]
+		var entry pageEntry
+		if fast.valid && fast.generation == s.tlbGeneration && fast.number == key {
+			entry = fast.entry
+		} else {
+			var present bool
+			entry, present = s.tlb[key]
+			if !present {
+				return nil
+			}
+		}
+		if s.CPL == 3 && !s.supervisor && !entry.user || entry.nx {
+			return nil
+		}
+		physical = entry.physical | address&4095
+	}
+	if memory, ok := s.Physical.(instructionWindowMemory); ok {
+		window := memory.InstructionBytes(physical)
+		if limit := int(4096 - address&4095); len(window) > limit {
+			window = window[:limit]
+		}
+		return window
+	}
+	return nil
 }
 
 -- system_native.go --
@@ -4745,6 +5564,30 @@ func (s *System) NativeMapping(address uint64, execute bool) (uint64, bool, erro
 	user := s.CPL == 3
 	writable := entry.writable || !user && s.CR[0]&(1<<16) == 0
 	return p, writable && entry.dirty && (!user || entry.user), nil
+}
+
+// NativeCachedMapping never walks, changes A/D bits or delivers a fault.
+// Only cached ordinary read/write access can be retried inside native code.
+func (s *System) NativeCachedMapping(address uint64, write bool) (uint64, bool, bool) {
+	if (s.CPL != 0 && s.CPL != 3) || s.supervisor {
+		return 0, false, false
+	}
+	if s.CR[0]&(1<<31) == 0 {
+		return address, true, true
+	}
+	if s.EFER&(1<<10) == 0 || uint64(int64(address<<16)>>16) != address {
+		return 0, false, false
+	}
+	e, ok := s.tlb[address>>12]
+	user := s.CPL == 3
+	if !ok || user && !e.user {
+		return 0, false, false
+	}
+	writable := e.dirty && (e.writable || !user && s.CR[0]&(1<<16) == 0)
+	if write && !writable {
+		return 0, false, false
+	}
+	return e.physical | address&4095, writable, true
 }
 
 // NativeRead protects CR2/diagnostic state when a speculative block fetch
@@ -4955,7 +5798,7 @@ import (
 
 // TimedSystemArchitecture requires a caller that imports a synchronized TSC
 // base before every native boundary and accounts retired instructions at 100
-// TSC ticks each. Ordinary SystemArchitecture/Adapter keep their original ABI.
+// TSC ticks each. Ordinary SystemArchitecture does not consume the time slot.
 func TimedSystemArchitecture() engine.Architecture { return clockedSystemArchitecture(true) }
 
 // SampledSystemArchitecture uses the machine's oscillator snapshot at native
@@ -4970,7 +5813,7 @@ func clockedSystemArchitecture(deterministic bool) engine.Architecture {
 	arch.Fetch = func(m engine.Memory, pc uint64) (engine.Instruction, error) {
 		ins, err := fetch(m, pc)
 		if err == nil {
-			op := ins.Decoded.(Instruction).Op
+			op := DecodedInstruction(ins).Op
 			if op == "rdtsc" || op == "rdtscp" {
 				ins.InterpretOnly = false
 				ins.Memory = true
@@ -4980,7 +5823,7 @@ func clockedSystemArchitecture(deterministic bool) engine.Architecture {
 		return ins, err
 	}
 	arch.Lower = func(b *emu.Builder, ins engine.Instruction, completed int) bool {
-		i := ins.Decoded.(Instruction)
+		i := DecodedInstruction(ins)
 		if i.Op != "rdtsc" && i.Op != "rdtscp" {
 			return lower(b, ins, completed)
 		}
@@ -4999,6 +5842,46 @@ func clockedSystemArchitecture(deterministic bool) engine.Architecture {
 		return true
 	}
 	return arch
+}
+
+-- tlb_eviction_test.go --
+package amd64
+
+import "testing"
+
+type evictionBus struct {
+	*systemRAM
+	flushes int
+	watched map[uint64]bool
+}
+
+func (m *evictionBus) InvalidateMappings()         { m.flushes++; clear(m.watched) }
+func (m *evictionBus) MarkPageTableEntry(a uint64) { m.watched[a] = true }
+func TestBoundedTLBEvictionRevokesBeforeWatchingNewWalk(t *testing.T) {
+	m := &evictionBus{systemRAM: newSystemRAM(), watched: make(map[uint64]bool)}
+	c := &CPU{}
+	s := NewSystem(c, m, nil)
+	s.CR[0], s.CR[3], s.CR[4], s.EFER = 1<<31|1<<16|1, 0x1000, 1<<5, 1<<10|1<<11
+	for a, v := range map[uint64]uint64{0x1000: 0x2027, 0x2000: 0x3027, 0x3000: 0x4027, 0x4040: 0x10067} {
+		if err := m.Write(a, 8, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for j := uint64(0); j < 65536; j++ {
+		s.tlb[0x10000+j] = pageEntry{}
+	}
+	m.watched[0xdead] = true
+	if off, err := s.translate(0x8000, false, true); err != nil || off != 0x10000 {
+		t.Fatal("new walk", off, err)
+	}
+	if m.flushes != 1 || len(s.tlb) != 1 || m.watched[0xdead] {
+		t.Fatal("bounded eviction did not revoke old translations", m.flushes, len(s.tlb))
+	}
+	for _, a := range []uint64{0x1000, 0x2000, 0x3000, 0x4040} {
+		if !m.watched[a] {
+			t.Fatal("new translation lost its table watch", a)
+		}
+	}
 }
 
 -- tlb_fault_test.go --
@@ -5220,6 +6103,34 @@ func (d *decoder) vectorDecode(i *Instruction, op byte, operand16 bool) {
 		}
 	}
 }
+func (c *CPU) vectorRead(o Operand, w uint8, next uint64) ([16]byte, error) {
+	var v [16]byte
+	if o.Kind == regOperand {
+		return c.XMM[o.Reg], nil
+	}
+	a := c.address(o, next)
+	for j := 0; j < int(w); j++ {
+		b, err := c.Memory.Read(a+uint64(j), 1, false)
+		if err != nil {
+			return v, err
+		}
+		v[j] = byte(b)
+	}
+	return v, nil
+}
+func (c *CPU) vectorStore(o Operand, w uint8, v [16]byte, next uint64) error {
+	if o.Kind == regOperand {
+		copy(c.XMM[o.Reg][:w], v[:w])
+		return nil
+	}
+	a := c.address(o, next)
+	for j := 0; j < int(w); j++ {
+		if err := c.Memory.Write(a+uint64(j), 1, uint64(v[j])); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 func (c *CPU) vectorExecute(i Instruction) (bool, error) {
 	var e error
 	next := i.Next
@@ -5311,48 +6222,20 @@ func (c *CPU) vectorExecute(i Instruction) (bool, error) {
 			e = fmt.Errorf("unsupported FPU state operation /%d", i.CC)
 		}
 	case "vector", "shufpd", "movhalf":
-		read := func(o Operand, w uint8) ([16]byte, error) {
-			var v [16]byte
-			if o.Kind == regOperand {
-				return c.XMM[o.Reg], nil
-			}
-			a := c.address(o, next)
-			for j := 0; j < int(w); j++ {
-				b, err := c.Memory.Read(a+uint64(j), 1, false)
-				if err != nil {
-					return v, err
-				}
-				v[j] = byte(b)
-			}
-			return v, nil
-		}
-		store := func(o Operand, w uint8, v [16]byte) error {
-			if o.Kind == regOperand {
-				copy(c.XMM[o.Reg][:w], v[:w])
-				return nil
-			}
-			a := c.address(o, next)
-			for j := 0; j < int(w); j++ {
-				if err := c.Memory.Write(a+uint64(j), 1, uint64(v[j])); err != nil {
-					return err
-				}
-			}
-			return nil
-		}
 		if i.Op == "movhalf" {
 			if i.CC&1 != 0 {
 				value := c.XMM[i.Src.Reg]
 				if i.CC == 0x17 {
 					copy(value[:8], value[8:])
 				}
-				e = store(i.Dst, 8, value)
+				e = c.vectorStore(i.Dst, 8, value, next)
 			} else {
 				width := uint8(8)
 				if i.Src.Kind == regOperand {
 					width = 16
 				}
 				var source [16]byte
-				source, e = read(i.Src, width)
+				source, e = c.vectorRead(i.Src, width, next)
 				if e == nil {
 					value := c.XMM[i.Dst.Reg]
 					if i.CC == 0x16 {
@@ -5386,7 +6269,7 @@ func (c *CPU) vectorExecute(i Instruction) (bool, error) {
 			break
 		}
 		if i.CC == 0xd7 {
-			v, err := read(i.Src, 16)
+			v, err := c.vectorRead(i.Src, 16, next)
 			e = err
 			if e == nil {
 				var mask uint64
@@ -5440,7 +6323,7 @@ func (c *CPU) vectorExecute(i Instruction) (bool, error) {
 			c.XMM[i.Dst.Reg] = result
 			break
 		}
-		b, err := read(i.Src, i.Width)
+		b, err := c.vectorRead(i.Src, i.Width, next)
 		e = err
 		if e != nil {
 			break
@@ -5539,7 +6422,7 @@ func (c *CPU) vectorExecute(i Instruction) (bool, error) {
 		default:
 			return true, fmt.Errorf("unsupported vector opcode %#x", i.CC)
 		}
-		e = store(i.Dst, i.Width, v)
+		e = c.vectorStore(i.Dst, i.Width, v, next)
 	default:
 		return false, nil
 	}
@@ -5549,4 +6432,95 @@ func (c *CPU) vectorExecute(i Instruction) (bool, error) {
 	c.PC = next
 	c.Retired++
 	return true, nil
+}
+
+-- xadd_native_test.go --
+package amd64
+
+import (
+	"renvo.dev/internal/rfe/engine"
+	"renvo.dev/internal/rfe/linuxuser"
+	"testing"
+)
+
+func TestNativeExchangeAddAndExchangeMemoryFaults(t *testing.T) {
+	for _, add := range []bool{true, false} {
+		for _, width := range []uint8{1, 2, 4, 8} {
+			code := []byte{}
+			if add {
+				code = append(code, 0xf0)
+			} // LOCK XADD
+			if width == 2 {
+				code = append(code, 0x66)
+			}
+			if width == 8 {
+				code = append(code, 0x48)
+			}
+			op := byte(0x87)
+			if add {
+				code = append(code, 0x0f)
+				op = 0xc1
+			}
+			if width == 1 {
+				op--
+			}
+			code = append(code, op, 0x0b) // [RBX], RCX
+			code = append(code, 0xeb, byte(256-len(code)-2))
+			want, got := testCPU(t, code), testCPU(t, code)
+			for _, c := range []*CPU{want, got} {
+				if err := c.Memory.(*linuxuser.Memory).Map(0x3000, 4096, 3); err != nil {
+					t.Fatal(err)
+				}
+				if err := c.Memory.Write(0x3000, int(width), 0x7fffffffffffffff); err != nil {
+					t.Fatal(err)
+				}
+				c.R[RBX], c.R[RCX], c.Flags = 0x3000, 0xfedcba9876543211, 0x646
+			}
+			cfg := engine.DefaultEngineConfig()
+			cfg.IRThreshold, cfg.NativeThreshold = 1, 1
+			e, err := engine.New(cfg, Architecture())
+			if err != nil {
+				t.Fatal(err)
+			}
+			adapter := NewAdapter(got)
+			for _, count := range []uint64{4096, 1, 2, 3, 63, 65} {
+				end := got.Retired + count
+				for want.Retired < end {
+					if err := want.Step(); err != nil {
+						t.Fatal(err)
+					}
+				}
+				for got.Retired < end {
+					if err := e.RunQuanta(adapter, end-got.Retired); err != nil {
+						t.Fatal(err)
+					}
+					adapter.Export()
+				}
+				a, _ := want.Memory.Read(0x3000, int(width), false)
+				b, _ := got.Memory.Read(0x3000, int(width), false)
+				if want.R != got.R || want.Flags != got.Flags || want.PC != got.PC || a != b {
+					t.Fatal("XADD/XCHG state", add, width, count, want.R, got.R)
+				}
+			}
+			if e.NativeAvailable() && e.Stats.NativeMemory == 0 {
+				t.Fatal("exchange never native", add, width)
+			}
+			for _, c := range []*CPU{want, got} {
+				if err := c.Memory.(*linuxuser.Memory).Protect(0x3000, 4096, 1); err != nil {
+					t.Fatal(err)
+				}
+				c.PC = 0x1000
+			}
+			adapter.Import()
+			retired := got.Retired
+			a, errA := got.Memory.Read(0x3000, int(width), false)
+			errWant, errGot := want.Step(), e.RunQuanta(adapter, 64)
+			adapter.Export()
+			b, errB := got.Memory.Read(0x3000, int(width), false)
+			if errWant == nil || errGot == nil || errA != nil || errB != nil || a != b || want.R != got.R || want.Flags != got.Flags || want.PC != got.PC || got.Retired != retired {
+				t.Fatal("failed exchange committed register/flags/memory", add, width, errWant, errGot)
+			}
+			e.Close()
+		}
+	}
 }

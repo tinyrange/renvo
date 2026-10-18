@@ -1,4 +1,4 @@
-//go:build renvo
+//go:build renvo && !browser
 
 package runtime
 
@@ -78,9 +78,4 @@ func (n *Native) CanLinkMemory(memory *MemoryContext) bool { return false }
 
 func (n *Native) RunLinkedBackingSession(state []uint64, m *MemoryContext, budget uint64, backing []byte) error {
 	return fmt.Errorf("native mapping unavailable")
-}
-
-// Portable hosts preserve the same unavailable-native fallback as other loops.
-func (n *Native) CompileOwnedDirectLoop(ops []Op, words, instructions int, memory *MemoryContext) (int, error) {
-	return n.CompileLoop(ops, words, instructions)
 }
