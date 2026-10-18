@@ -70,3 +70,14 @@ func decodeDescriptor(data string) Descriptor {
 	d.ReleaseArtifact = r.text()
 	return d
 }
+
+// Membership checks do not allocate a descriptor or temporary slice.
+func descriptorSetContains(data string, value string) bool {
+	r := descriptorReader{data: data}
+	for r.pos < len(data) {
+		if r.text() == value {
+			return true
+		}
+	}
+	return false
+}

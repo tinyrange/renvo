@@ -344,15 +344,18 @@ func frontendSource(descriptors []sourceDescriptor) []byte {
 	out.WriteString("out := make([]Descriptor, descriptorCount)\n")
 	out.WriteString("for i := 0; i < len(out); i++ { out[i] = descriptorAt(i) }\n")
 	out.WriteString("return out\n}\n\n")
-	out.WriteString("func Lookup(name string) (Descriptor, bool) {\n")
+	out.WriteString("func Lookup(name string) (Descriptor, bool) {\nindex := descriptorIndex(name, true)\nif index < 0 { return Descriptor{}, false }\nreturn descriptorAt(index), true\n}\n\n")
+	out.WriteString("func descriptorIndex(name string, aliases bool) int {\n")
 	for i, descriptor := range descriptors {
-		fmt.Fprintf(&out, "if name == %q", descriptor.Name)
-		for _, alias := range descriptor.Aliases {
-			fmt.Fprintf(&out, " || name == %q", alias)
-		}
-		fmt.Fprintf(&out, " { return descriptorAt(%d), true }\n", i)
+		fmt.Fprintf(&out, "if name == %q { return %d }\n", descriptor.Name, i)
 	}
-	out.WriteString("return Descriptor{}, false\n}\n\n")
+	out.WriteString("if aliases {\n")
+	for i, descriptor := range descriptors {
+		for _, alias := range descriptor.Aliases {
+			fmt.Fprintf(&out, "if name == %q { return %d }\n", alias, i)
+		}
+	}
+	out.WriteString("}\nreturn -1\n}\n\n")
 	out.WriteString("func descriptorAt(index int) Descriptor {\n")
 	for i, descriptor := range descriptors {
 		fmt.Fprintf(&out, "if index == %d { return ", i)
@@ -360,27 +363,26 @@ func frontendSource(descriptors []sourceDescriptor) []byte {
 		out.WriteString(" }\n")
 	}
 	out.WriteString("return Descriptor{}\n}\n\n")
-	out.WriteString("func Binding(name string) (string, string, int, bool) {\n")
-	for _, descriptor := range descriptors {
-		fmt.Fprintf(&out, "if name == %q", descriptor.Name)
-		for _, alias := range descriptor.Aliases {
-			fmt.Fprintf(&out, " || name == %q", alias)
-		}
-		fmt.Fprintf(&out, " { return %q, %s, %d, true }\n",
+	out.WriteString("func Binding(name string) (string, string, int, bool) {\nindex := descriptorIndex(name, true)\n")
+	for i, descriptor := range descriptors {
+		fmt.Fprintf(&out, "if index == %d { return %q, %s, %d, true }\n", i,
 			descriptor.Name, quotedDefinition(descriptor.Definition), descriptor.Descriptor)
 	}
 	out.WriteString("return \"\", \"\", 0, false\n}\n\n")
-	out.WriteString("func IsAdvertised(name string) bool { return ")
+	out.WriteString("func IsAdvertised(name string) bool {\nindex := descriptorIndex(name, false)\nreturn ")
 	first := true
-	for _, descriptor := range descriptors {
+	for i, descriptor := range descriptors {
 		if !descriptor.Advertised {
 			continue
 		}
 		if !first {
 			out.WriteString(" || ")
 		}
-		fmt.Fprintf(&out, "name == %q", descriptor.Name)
+		fmt.Fprintf(&out, "index == %d", i)
 		first = false
+	}
+	if first {
+		out.WriteString("false")
 	}
 	out.WriteString(" }\n\n")
 	out.WriteString("func Backend(name string) string {\n")
@@ -393,64 +395,45 @@ func frontendSource(descriptors []sourceDescriptor) []byte {
 		}
 	}
 	out.WriteString("return name\n}\n\n")
-	out.WriteString("func HasBuildTag(name string, tag string) bool {\n")
-	for _, descriptor := range descriptors {
-		fmt.Fprintf(&out, "if name == %q { return ", descriptor.Name)
-		for i, tag := range descriptor.Tags {
-			if i > 0 {
-				out.WriteString(" || ")
-			}
-			fmt.Fprintf(&out, "tag == %q", tag)
-		}
-		out.WriteString(" }\n")
+	out.WriteString("func HasBuildTag(name string, tag string) bool {\nindex := descriptorIndex(name, false)\n")
+	for i, descriptor := range descriptors {
+		fmt.Fprintf(&out, "if index == %d { return descriptorSetContains(%q, tag) }\n", i, descriptorSet(descriptor.Tags))
 	}
 	out.WriteString("return false\n}\n\n")
-	out.WriteString("func HasCapability(name string, capability string) bool {\n")
-	for _, descriptor := range descriptors {
-		fmt.Fprintf(&out, "if name == %q", descriptor.Name)
-		for _, alias := range descriptor.Aliases {
-			fmt.Fprintf(&out, " || name == %q", alias)
-		}
-		out.WriteString(" { return ")
-		for i, capability := range descriptor.Capabilities {
-			if i > 0 {
-				out.WriteString(" || ")
-			}
-			fmt.Fprintf(&out, "capability == %q", capability)
-		}
-		out.WriteString(" }\n")
+	out.WriteString("func HasCapability(name string, capability string) bool {\nindex := descriptorIndex(name, true)\n")
+	for i, descriptor := range descriptors {
+		fmt.Fprintf(&out, "if index == %d { return descriptorSetContains(%q, capability) }\n", i, descriptorSet(descriptor.Capabilities))
 	}
 	out.WriteString("return false\n}\n\n")
-	out.WriteString("func SupportsInPlaceEntry(name string) bool { return ")
+	out.WriteString("func SupportsInPlaceEntry(name string) bool {\n")
 	first = true
-	for _, descriptor := range descriptors {
+	for i, descriptor := range descriptors {
 		if !contains(descriptor.Capabilities, "in_place_entry") {
 			continue
 		}
-		if !first {
+		if first {
+			out.WriteString("index := descriptorIndex(name, true)\nreturn ")
+		} else {
 			out.WriteString(" || ")
 		}
-		fmt.Fprintf(&out, "name == %q", descriptor.Name)
-		for _, alias := range descriptor.Aliases {
-			fmt.Fprintf(&out, " || name == %q", alias)
-		}
+		fmt.Fprintf(&out, "index == %d", i)
 		first = false
 	}
 	if first {
-		out.WriteString("false")
+		out.WriteString("return false")
 	}
 	out.WriteString(" }\n\n")
-	out.WriteString("func MemoryStrategy(name string) string {\n")
-	for _, descriptor := range descriptors {
+	out.WriteString("func MemoryStrategy(name string) string {\nindex := descriptorIndex(name, false)\n")
+	for i, descriptor := range descriptors {
 		if descriptor.MemoryStrategy != "" {
-			fmt.Fprintf(&out, "if name == %q { return %q }\n", descriptor.Name, descriptor.MemoryStrategy)
+			fmt.Fprintf(&out, "if index == %d { return %q }\n", i, descriptor.MemoryStrategy)
 		}
 	}
 	out.WriteString("return \"\"\n}\n\n")
-	out.WriteString("func DefaultArena(name string) int {\n")
-	for _, descriptor := range descriptors {
+	out.WriteString("func DefaultArena(name string) int {\nindex := descriptorIndex(name, false)\n")
+	for i, descriptor := range descriptors {
 		if descriptor.DefaultArena != 0 {
-			fmt.Fprintf(&out, "if name == %q { return %d }\n", descriptor.Name, descriptor.DefaultArena)
+			fmt.Fprintf(&out, "if index == %d { return %d }\n", i, descriptor.DefaultArena)
 		}
 	}
 	out.WriteString("return 0\n}\n\n")
@@ -521,6 +504,15 @@ func writeFrontendDescriptor(out *bytes.Buffer, descriptor sourceDescriptor) {
 	writeDescriptorNumber(&record, descriptor.DefaultArena)
 	text(descriptor.ReleaseArtifact)
 	fmt.Fprintf(out, "decodeDescriptor(%q)", record.String())
+}
+
+func descriptorSet(values []string) string {
+	var record bytes.Buffer
+	for _, value := range values {
+		writeDescriptorNumber(&record, len(value))
+		record.WriteString(value)
+	}
+	return record.String()
 }
 
 func writeDescriptorNumber(out *bytes.Buffer, value int) {
