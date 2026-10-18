@@ -934,7 +934,7 @@ func sourceEmbedArchiveAddPosition(data []byte, buckets []int32, previous []int3
 func sourceEmbedArchiveMatch(data []byte, buckets []int32, previous []int32, pos int) (int, int) {
 	// Limit dictionary search work on repetitive source. A short search keeps
 	// compression inexpensive while retaining long matches and lazy look-ahead.
-	const maxCandidates = 64
+	const maxCandidates = 32
 	const maxLength = 273
 	if pos+2 >= len(data) {
 		return 0, 0
