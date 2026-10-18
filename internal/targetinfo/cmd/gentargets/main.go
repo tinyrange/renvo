@@ -356,19 +356,26 @@ func frontendSource(descriptors []sourceDescriptor) []byte {
 		}
 	}
 	out.WriteString("}\nreturn -1\n}\n\n")
-	out.WriteString("func descriptorAt(index int) Descriptor {\n")
+	out.WriteString("func descriptorAt(index int) Descriptor {\ndata := descriptorData(index)\nif data == \"\" { return Descriptor{} }\nreturn decodeDescriptor(data)\n}\n\n")
+	out.WriteString("func descriptorData(index int) string {\n")
 	for i, descriptor := range descriptors {
 		fmt.Fprintf(&out, "if index == %d { return ", i)
 		writeFrontendDescriptor(&out, descriptor)
 		out.WriteString(" }\n")
 	}
-	out.WriteString("return Descriptor{}\n}\n\n")
-	out.WriteString("func Binding(name string) (string, string, int, bool) {\nindex := descriptorIndex(name, true)\n")
+	out.WriteString("return \"\"\n}\n\n")
+	out.WriteString("func Binding(name string) (string, string, int, bool) {\ndata := bindingData(descriptorIndex(name, true))\nif data == \"\" { return \"\", \"\", 0, false }\nr := descriptorReader{data: data}\ncanonical := r.text()\nfingerprint := r.text()\nversion := r.number()\nreturn canonical, fingerprint, version, true\n}\n\n")
+	out.WriteString("func bindingData(index int) string {\n")
 	for i, descriptor := range descriptors {
-		fmt.Fprintf(&out, "if index == %d { return %q, %s, %d, true }\n", i,
-			descriptor.Name, quotedDefinition(descriptor.Definition), descriptor.Descriptor)
+		var record bytes.Buffer
+		writeDescriptorNumber(&record, len(descriptor.Name))
+		record.WriteString(descriptor.Name)
+		writeDescriptorNumber(&record, len(descriptor.Definition))
+		record.Write(descriptor.Definition[:])
+		writeDescriptorNumber(&record, descriptor.Descriptor)
+		fmt.Fprintf(&out, "if index == %d { return %q }\n", i, record.String())
 	}
-	out.WriteString("return \"\", \"\", 0, false\n}\n\n")
+	out.WriteString("return \"\"\n}\n\n")
 	out.WriteString("func IsAdvertised(name string) bool {\nindex := descriptorIndex(name, false)\nreturn ")
 	first := true
 	for i, descriptor := range descriptors {
@@ -503,7 +510,7 @@ func writeFrontendDescriptor(out *bytes.Buffer, descriptor sourceDescriptor) {
 	writeDescriptorNumber(&record, flags)
 	writeDescriptorNumber(&record, descriptor.DefaultArena)
 	text(descriptor.ReleaseArtifact)
-	fmt.Fprintf(out, "decodeDescriptor(%q)", record.String())
+	fmt.Fprintf(out, "%q", record.String())
 }
 
 func descriptorSet(values []string) string {
