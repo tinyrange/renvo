@@ -35,7 +35,7 @@ func TestSourceEmbedArchiveMatchPreservesSelection(t *testing.T) {
 					t.Fatalf("mode=%d pos=%d probe=%d got=(%d,%d) want=(%d,%d)", mode, pos, probe, distance, length, wantDistance, wantLength)
 				}
 			}
-			// Keep a full historical chain for the unchanged reference matcher.
+			// Keep a full historical chain for the full-chain reference matcher.
 			if pos+2 < len(data) {
 				bucket := sourceEmbedArchiveBucket(data, pos, len(buckets))
 				referencePrevious[pos] = buckets[bucket]
@@ -48,7 +48,7 @@ func TestSourceEmbedArchiveMatchPreservesSelection(t *testing.T) {
 func referenceSourceEmbedArchiveMatch(data []byte, buckets []int32, previous []int32, pos int) (int, int) {
 	// Bound search work even on adversarial buckets. The best-match boundary
 	// check below avoids rescanning shared prefixes during the deeper search.
-	const maxCandidates = 16
+	const maxCandidates = 32
 	const maxLength = 273
 	if pos+2 >= len(data) {
 		return 0, 0

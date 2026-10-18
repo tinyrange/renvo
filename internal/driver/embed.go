@@ -873,7 +873,7 @@ func compressSourceEmbedArchive(data []byte) []byte {
 			// A literal can expose a longer match at the next byte. Keep the
 			// same bounded dictionary search, but avoid committing to a short
 			// match when that would discard the larger saving immediately ahead.
-			if length >= 3 && length < 8 && pos+1 < len(data) {
+			if length >= 3 && length < 18 && pos+1 < len(data) {
 				_, nextLength := sourceEmbedArchiveMatch(data, buckets, previous, pos+1)
 				if nextLength > length+1 {
 					length = 0
@@ -934,7 +934,7 @@ func sourceEmbedArchiveAddPosition(data []byte, buckets []int32, previous []int3
 func sourceEmbedArchiveMatch(data []byte, buckets []int32, previous []int32, pos int) (int, int) {
 	// Limit dictionary search work on repetitive source. A short search keeps
 	// compression inexpensive while retaining long matches and lazy look-ahead.
-	const maxCandidates = 16
+	const maxCandidates = 32
 	const maxLength = 273
 	if pos+2 >= len(data) {
 		return 0, 0

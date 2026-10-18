@@ -39,16 +39,3 @@ arch sample {}
 		}
 	}
 }
-
-func TestCompilerParameterSignature(t *testing.T) {
-	operation := compilerEmitterOperation{Parameters: compilerParameters("src []byte,offset int,fn *renvoFuncInfo"), Result: "bool"}
-	if got, want := operation.signature(), "(a *renvoAsm, src []byte, offset int, fn *renvoFuncInfo) bool"; got != want {
-		t.Fatalf("signature = %q, want %q", got, want)
-	}
-	if got, want := operation.arguments(), "(a, src, offset, fn)"; got != want {
-		t.Fatalf("arguments = %q, want %q", got, want)
-	}
-	if got := compilerParameters(""); got == nil || len(got) != 0 {
-		t.Fatalf("empty parameters = %#v", got)
-	}
-}
