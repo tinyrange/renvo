@@ -1,18 +1,10 @@
 package syntax
 
-import (
-	"testing"
-	"unicode"
-)
+import "testing"
 
 func TestUnicodeIdentifierCategories(t *testing.T) {
-	for r := rune(0); r <= unicode.MaxRune; r++ {
-		if unicodeRangeContains(unicodeLetterRanges, int(r)) != unicode.IsLetter(r) ||
-			unicodeRangeContains(unicodeDigitRanges, int(r)) != unicode.IsDigit(r) ||
-			unicodeRangeContains(unicodeUpperRanges, int(r)) != unicode.IsUpper(r) {
-			t.Fatalf("Unicode classification differs for U+%04X", r)
-		}
-	}
+	// Exhaustive classification is checked against the pinned independent
+	// Unicode 15 oracle in unicode_snapshot_test.go, not the host version.
 	for _, name := range []string{"Ω", "É", "𐐀"} {
 		if !IdentifierExported([]byte(name), 0) {
 			t.Fatalf("not exported: %s", name)

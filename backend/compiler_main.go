@@ -69,8 +69,18 @@ func renvoPrintUsage() {
 }
 
 func renvoParsePositiveDecimal(value string) (int, bool) {
+	return renvoParseAllocationBudget(value, renvoRTGManagedHeap != 0)
+}
+
+func renvoParseAllocationBudget(value string, managed bool) (int, bool) {
 	if len(value) == 0 {
 		return 0, false
+	}
+	minimum, maximum := 256, 1073741824
+	if managed {
+		// Desktop compilers transport the managed budget through the existing
+		// allocator-policy argument, without the legacy arena cap.
+		minimum, maximum = 1, 9223372036854775807
 	}
 	result := 0
 	for i := 0; i < len(value); i++ {
@@ -79,12 +89,12 @@ func renvoParsePositiveDecimal(value string) (int, bool) {
 			return 0, false
 		}
 		digit := int(ch - '0')
-		if result > (1073741824-digit)/10 {
+		if result > (maximum-digit)/10 {
 			return 0, false
 		}
 		result = result*10 + digit
 	}
-	if result < 256 || result > 1073741824 {
+	if result < minimum || result > maximum {
 		return 0, false
 	}
 	return result, true
@@ -107,6 +117,8 @@ func appMain(args []string, env []string) int {
 	moduleLicense := "Proprietary"
 	target := renvoDefaultTarget
 	arenaSize := 0
+	var arenaArg string
+	arenaSpecified := false
 	renvoCompilerStripSymbols = false
 	renvoCompilerEmitImage = false
 	renvoCompilerObjectFile = false
@@ -206,14 +218,10 @@ func appMain(args []string, env []string) int {
 				renvoPrintUsage()
 				return 1
 			}
-			parsedArenaSize, ok := renvoParsePositiveDecimal(args[i])
-			if !ok {
-				renvoPrintErr("renvo: invalid arena size: ")
-				renvoPrintErr(args[i])
-				renvoPrintErr("\n")
-				return 1
-			}
-			arenaSize = parsedArenaSize
+			// Validate after target selection so argument order cannot change
+			// the accepted managed budget range.
+			arenaArg = args[i]
+			arenaSpecified = true
 			i++
 			continue
 		}
@@ -250,6 +258,16 @@ func appMain(args []string, env []string) int {
 		input[inputCount] = fd
 		inputCount++
 		i++
+	}
+	if arenaSpecified {
+		parsed, ok := renvoParseAllocationBudget(arenaArg, renvoManagedTarget(target))
+		if !ok {
+			renvoPrintErr("renvo: invalid arena size: ")
+			renvoPrintErr(arenaArg)
+			renvoPrintErr("\n")
+			return 1
+		}
+		arenaSize = parsed
 	}
 	if outputPath == "" {
 		renvoPrintErr("renvo: missing output path (-o)\n")

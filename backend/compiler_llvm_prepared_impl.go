@@ -6,8 +6,8 @@
 // unit: llvm a459d8f0caa973ee6b7a98ef7f13e4fe5c7e8098f3ad0723bbd4ed6bed8f88cf
 package main
 
-type RTGTargetDescriptor struct { Name string; Family string; OS string; ISA string; WordBits int; PointerBits int; CodePointerBits int; FunctionPointerBits int; MaxAlign int; ArenaDefault int; Endian string; ABI string; Runtime string; RuntimeOps []string; Executable string; Object string; OutputKind string; Definition string; Version int }
-var RTGTarget = RTGTargetDescriptor{Name:"llvm/linux-amd64",Family:"native_v1",OS:"linux",ISA:"amd64",Endian:"little",ABI:"llvm_internal",Runtime:"llvm_linux",Executable:"llvm_ir_object",Object:"llvm_ir_object",OutputKind:"llvm-ir-object",Definition:"9c4ed0359e43f64a8dd67043b3d78b4e2887f84e48fc860e8b230e18eb8d6e83",WordBits:64,PointerBits:64,CodePointerBits:64,FunctionPointerBits:64,MaxAlign:8,ArenaDefault:134217728,RuntimeOps:[]string{"read","write","open","close","read_at","write_at","chmod","print","exit"},Version:3}
+type RTGTargetDescriptor struct { Name string; Family string; OS string; ISA string; WordBits int; PointerBits int; CodePointerBits int; FunctionPointerBits int; MaxAlign int; ArenaDefault int; MemoryStrategy string; Endian string; ABI string; Runtime string; RuntimeOps []string; Executable string; Object string; OutputKind string; Definition string; Version int }
+var RTGTarget = RTGTargetDescriptor{Name:"llvm/linux-amd64",Family:"native_v1",OS:"linux",ISA:"amd64",Endian:"little",ABI:"llvm_internal",Runtime:"llvm_linux",Executable:"llvm_ir_object",Object:"llvm_ir_object",OutputKind:"llvm-ir-object",Definition:"9c4ed0359e43f64a8dd67043b3d78b4e2887f84e48fc860e8b230e18eb8d6e83",WordBits:64,PointerBits:64,CodePointerBits:64,FunctionPointerBits:64,MaxAlign:8,MemoryStrategy:"",ArenaDefault:134217728,RuntimeOps:[]string{"read","write","open","close","read_at","write_at","chmod","print","exit"},Version:3}
 
 type RTGRegister struct {
 	Code int
@@ -586,6 +586,8 @@ if target != renvoTargetRTG { return false }
 return capability == "argv" || capability == "environment" || capability == "executable" || capability == "filesystem" || capability == "heap" || capability == "hosted" || capability == "linkstatic" || capability == "object"
 }
 
+const renvoRTGManagedHeap = 0
+
 func renvoRTGProfileForTarget(target int) renvoTargetProfile {
 if target != renvoTargetRTG { return renvoTargetProfile{} }
 p := renvoTargetProfile{}
@@ -639,6 +641,17 @@ func renvoRTGEmitCustomSyscall(out *renvoAsm, wordCount int, number int) bool {
 return false
 }
 func renvoRTGRecordRawSyscall(out *renvoAsm, number int) {
+}
+
+func renvoManagedTarget(target int) bool { return false }
+func renvoManagedRuntimeSource(target int) string {
+return ""
+}
+func renvoManagedStartup(target int, out *renvoAsm, limit int, label int) {
+out.patchFailed = true
+}
+func renvoManagedBoundary(target int, out *renvoAsm, label int) {
+out.patchFailed = true
 }
 
 var rtgLlvmRAX = RTGRegister{Code:0, Valid:true}
@@ -3910,7 +3923,7 @@ renvoNonNil(g)
 	// Object writers require relocations to name storage inside a section;
 	// the executable fast path also references the arena's one-past end.
 	// Keep ordinary zeroing for objects, including prepared object targets.
-	if g.c.objectFile {
+	if g.c.objectFile || renvoManagedTarget(g.c.renvoTarget) {
 		return
 	}
 	renvoStringHeapOffsets(g)

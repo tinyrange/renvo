@@ -700,6 +700,13 @@ abi internal_sparc {
 	unsigned_divide = go encoderUnsignedDivide
 }
 runtime runtime_sparc {
+	managed_heap_abi = 1
+	managed_word_bits = 32
+	managed_source = go managedSource
+	managed_startup = go managedStartup
+	managed_boundary = go managedBoundary
+	emit_syscall_from_stack = go managedRawSyscall
+
 	emit_entry_start = go targetStart
 	emit_entry = go encoderEntry
 	emit_exit = go encoderExit
@@ -739,4 +746,339 @@ target experimental/linux-sparc {
 	arena_default = 16777216
 	build_tags = [linux, unix, sparc]
 	capabilities = [hosted, executable, filesystem, heap]
+}
+
+# Shared managed collector and Linux services embedded for standalone use.
+go backend {
+	func managedHeap64Source() string { return managedHeapSource(8) }
+	func managedHeap32Source() string { return managedHeapSource(4) }
+
+	// Headers keep their aligned layout; payload/root scanning follows native words.
+	func managedHeapSource(wordBytes int) string {
+		constants := "const __renvoManagedWordBytes = uintptr(8)\nconst __renvoManagedMax = uintptr(9223372036854775807)\n"
+		if wordBytes == 4 {
+			constants = "const __renvoManagedWordBytes = uintptr(4)\nconst __renvoManagedMax = uintptr(2147483647)\n"
+		}
+		return constants + `
+					// Desktop heap runtime, parsed and compiled with the application. No helper
+					// below allocates through make/new/append or calls application code.
+					var __renvoManagedState [16]uintptr
+
+					func __renvoManagedRead(p uintptr) uintptr { return *(*uintptr)(p) }
+					func __renvoManagedWrite(p uintptr, v uintptr) { *(*uintptr)(p) = v }
+					func __renvoManagedByte(p uintptr) byte { return *(*byte)(p) }
+
+					func __renvoManagedLimit(p uintptr) uintptr {
+						var value uintptr
+						var digits int
+						for __renvoManagedByte(p) >= '0' && __renvoManagedByte(p) <= '9' {
+							digit := uintptr(__renvoManagedByte(p)-'0')
+							if value > (__renvoManagedMax-digit)/10 { return 0 }
+							value = value*10+digit
+							p++
+							digits++
+						}
+						if digits == 0 || value == 0 { return 0 }
+						var shift uintptr
+						if __renvoManagedByte(p) != 0 {
+							c := __renvoManagedByte(p)
+							if c == 'K' { shift = 10 } else if c == 'M' { shift = 20 } else if c == 'G' { shift = 30 } else if c == 'T' { shift = 40 } else { return 0 }
+							if __renvoManagedByte(p+1) != 'i' || __renvoManagedByte(p+2) != 'B' || __renvoManagedByte(p+3) != 0 { return 0 }
+						}
+						if value > __renvoManagedMax>>shift { return 0 }
+						return value << shift
+					}
+
+					func __renvoManagedInit(limit uintptr, stack uintptr, globals uintptr, end uintptr) {
+						if limit == 0 { limit = __renvoManagedMax }
+						override := __renvoManagedEnvironment(stack)
+						if override != 0 {
+							limit = __renvoManagedLimit(override)
+							if limit == 0 { __renvoManagedFatal("renvo: invalid RENVO_HEAP_LIMIT\n") }
+						}
+						// State and the common allocator's 32-byte compatibility bookkeeping.
+						if limit < 160 { __renvoManagedFatal("panic: out of memory\n") }
+						__renvoManagedState[1] = limit
+						__renvoManagedState[2] = 160
+						__renvoManagedState[3] = stack
+						__renvoManagedState[6] = globals
+						__renvoManagedState[7] = end
+						__renvoManagedState[8] = 65536
+					}
+
+					// Segment header: next, mapping size, payload offset, reserved word; then one
+					// block-header index per mapped page. All of this resides in charged mappings.
+					func __renvoManagedHeader(size uintptr) uintptr { return (32+(size/__renvoManagedPageSize)*8+15)&^uintptr(15) }
+					func __renvoManagedIndex(s uintptr, b uintptr, span uintptr) {
+						first := (b-s+(__renvoManagedPageSize-1))/__renvoManagedPageSize
+						end := (b-s+span+(__renvoManagedPageSize-1))/__renvoManagedPageSize
+						for page := first; page < end; page++ { __renvoManagedWrite(s+32+page*8, b) }
+					}
+					func __renvoManagedFind(pointer uintptr) uintptr {
+						for s := __renvoManagedState[0]; s != 0; s = __renvoManagedRead(s) {
+							size := __renvoManagedRead(s+8)
+							if pointer < s+__renvoManagedRead(s+16)+16 || pointer-s >= size { continue }
+							b := __renvoManagedRead(s+32+((pointer-s)/__renvoManagedPageSize)*8)
+							for b < s+size {
+								span := __renvoManagedRead(b)
+								if pointer < b+span {
+									if pointer >= b+16 && __renvoManagedRead(b+8)&1 != 0 { return b }
+									return 0
+								}
+								b += span
+							}
+						}
+						return 0
+					}
+					func __renvoManagedMark(pointer uintptr) {
+						b := __renvoManagedFind(pointer)
+						if b != 0 && __renvoManagedRead(b+8)&2 == 0 {
+							// Block headers are 16-byte aligned. During marking the upper bits
+							// hold the next work item; low bits retain allocated/marked flags.
+							__renvoManagedWrite(b+8, __renvoManagedState[9]|3)
+							__renvoManagedState[9] = b
+						}
+					}
+					func __renvoManagedScan(start uintptr, end uintptr) {
+						for p := start; p < end; p += __renvoManagedWordBytes { __renvoManagedMark(__renvoManagedRead(p)) }
+					}
+					func __renvoManagedCollect(roots uintptr) {
+						__renvoManagedState[4] = 0
+						__renvoManagedState[5] = 0
+						__renvoManagedState[9] = 0
+						__renvoManagedRoots(roots)
+						state := uintptr(&__renvoManagedState[0])
+						__renvoManagedScan(__renvoManagedState[6], state)
+						__renvoManagedScan(state+16*__renvoManagedWordBytes, __renvoManagedState[7])
+						for __renvoManagedState[9] != 0 {
+							b := __renvoManagedState[9]
+							__renvoManagedState[9] = __renvoManagedRead(b+8)&^uintptr(15)
+							__renvoManagedWrite(b+8, 3)
+							__renvoManagedScan(b+16, b+__renvoManagedRead(b))
+						}
+						var previous uintptr
+						var live uintptr
+						for s := __renvoManagedState[0]; s != 0; {
+							size := __renvoManagedRead(s+8)
+							var free uintptr
+							used := false
+							for b := s+__renvoManagedRead(s+16); b < s+size; {
+								span := __renvoManagedRead(b)
+								if __renvoManagedRead(b+8)&2 != 0 {
+									__renvoManagedWrite(b+8, 1)
+									free = 0
+									used = true
+									live += span
+								} else {
+									__renvoManagedWrite(b+8, 0)
+									if free != 0 { __renvoManagedWrite(free, __renvoManagedRead(free)+span) } else { free = b }
+								}
+								b += span
+							}
+							next := __renvoManagedRead(s)
+							if !used {
+								if previous == 0 { __renvoManagedState[0] = next } else { __renvoManagedWrite(previous, next) }
+								if !__renvoManagedRelease(s, size) { __renvoManagedFatal("renvo: managed heap release failed\n") }
+								__renvoManagedState[2] -= size
+							} else {
+								previous = s
+								__renvoManagedWrite(s+32, s+__renvoManagedRead(s+16))
+								for b := s+__renvoManagedRead(s+16); b < s+size; b += __renvoManagedRead(b) {
+									__renvoManagedIndex(s, b, __renvoManagedRead(b))
+								}
+							}
+							s = next
+						}
+						__renvoManagedState[10]++
+						__renvoManagedState[12] = live
+					}
+					func __renvoManagedClaim(s uintptr, b uintptr, span uintptr) uintptr {
+						available := __renvoManagedRead(b)
+						__renvoManagedState[4] = 0
+						if available-span >= 32 {
+							__renvoManagedWrite(b+span, available-span)
+							__renvoManagedWrite(b+span+8, 0)
+							__renvoManagedWrite(b, span)
+							__renvoManagedState[4] = b+span
+							__renvoManagedState[5] = s
+							available = span
+						}
+						// Only occupied pages need a fresh index. An older free-page index is
+						// still a valid earlier block; lookup walks forward until sweep rebuilds it.
+						__renvoManagedIndex(s, b, available)
+						__renvoManagedWrite(b+8, 1)
+						for p := b+16; p < b+available; p += __renvoManagedWordBytes { __renvoManagedWrite(p, 0) }
+						return b+16
+					}
+					func __renvoManagedTake(span uintptr) uintptr {
+						b := __renvoManagedState[4]
+						if b != 0 && __renvoManagedRead(b) >= span {
+							return __renvoManagedClaim(__renvoManagedState[5], b, span)
+						}
+						for s := __renvoManagedState[0]; s != 0; s = __renvoManagedRead(s) {
+							end := s+__renvoManagedRead(s+8)
+							for b := s+__renvoManagedRead(s+16); b < end; b += __renvoManagedRead(b) {
+								if __renvoManagedRead(b+8) == 0 && __renvoManagedRead(b) >= span {
+									return __renvoManagedClaim(s, b, span)
+								}
+							}
+						}
+						return 0
+					}
+					func __renvoManagedRequest(size uintptr, roots uintptr) uintptr {
+						if size > __renvoManagedMax-(__renvoManagedPageSize+31) { return 0 }
+						if size == 0 { size = 16 }
+						span := ((size+15)&^uintptr(15))+16
+						result := __renvoManagedTake(span)
+						if result != 0 { return result }
+						if __renvoManagedState[0] != 0 {
+							__renvoManagedCollect(roots)
+							result = __renvoManagedTake(span)
+							if result != 0 { return result }
+						}
+						minimum := (span+48+(__renvoManagedPageSize-1))&^uintptr((__renvoManagedPageSize-1))
+						for minimum-__renvoManagedHeader(minimum) < span {
+							minimum = (span+__renvoManagedHeader(minimum)+(__renvoManagedPageSize-1))&^uintptr((__renvoManagedPageSize-1))
+						}
+						available := (__renvoManagedState[1]-__renvoManagedState[2])&^uintptr((__renvoManagedPageSize-1))
+						if minimum > available { return 0 }
+						growth := __renvoManagedState[8]
+						if growth < minimum { growth = minimum }
+						if growth > available { growth = available }
+						mapping := __renvoManagedMap(growth)
+						if mapping == 0 && growth != minimum {
+							growth = minimum
+							mapping = __renvoManagedMap(growth)
+						}
+						if mapping == 0 { return 0 }
+						base := uintptr(mapping)
+						__renvoManagedWrite(base, __renvoManagedState[0])
+						__renvoManagedWrite(base+8, growth)
+						header := __renvoManagedHeader(growth)
+						__renvoManagedWrite(base+16, header)
+						for page := uintptr(0); page < growth/__renvoManagedPageSize; page++ { __renvoManagedWrite(base+32+page*8, base+header) }
+						__renvoManagedWrite(base+header, growth-header)
+						__renvoManagedState[4] = base+header
+						__renvoManagedState[5] = base
+						__renvoManagedState[0] = base
+						__renvoManagedState[2] += growth
+						if growth < __renvoManagedMax/2 { __renvoManagedState[8] = growth*2 }
+						return __renvoManagedTake(span)
+					}
+					func __renvoManagedCollectBoundary(ignored uintptr, roots uintptr) uintptr {
+						__renvoManagedCollect(roots)
+						return 0
+					}
+					`
+	}
+}
+
+go backend {
+	func linuxManagedSource() string {
+		return `
+					//renvo:intrinsic renvo_runtime_Syscall
+					func __renvoManagedSyscall(n int, a uintptr, b uintptr, c uintptr, d uintptr, e int, f uintptr) int { return -1 }
+					
+					func __renvoManagedMap(size uintptr) uintptr {
+					 p := __renvoManagedSyscall(__renvoManagedMapNumber, 0, size, 3, __renvoManagedMapFlags, -1, 0)
+					 if uintptr(p) >= ^uintptr(4094) { return 0 }; return uintptr(p)
+					}
+					func __renvoManagedRelease(base uintptr, size uintptr) bool { return __renvoManagedSyscall(__renvoManagedReleaseNumber, base, size, 0, 0, 0, 0) == 0 }
+					func __renvoManagedFatal(message string) { print(message); __renvoManagedSyscall(__renvoManagedExitNumber, 2, 0, 0, 0, 0, 0) }
+					func __renvoManagedEnvironment(stack uintptr) uintptr {
+					 // Linux initial process stack: argc, argv[], null, envp[], null.
+					 p := stack + 18*__renvoManagedWordBytes + __renvoManagedRead(stack+16*__renvoManagedWordBytes)*__renvoManagedWordBytes
+					 for __renvoManagedRead(p) != 0 {
+					  entry := __renvoManagedRead(p)
+					  matched := true
+					  prefix := "RENVO_HEAP_LIMIT="
+					  for i := 0; i < len(prefix); i++ {
+					   if __renvoManagedByte(entry+uintptr(i)) != prefix[i] { matched = false; break }
+					  }
+					  if matched { return entry+17 }
+					  p += __renvoManagedWordBytes
+					 }
+					 return 0
+					}
+					func __renvoManagedRoots(roots uintptr) {
+					 if roots > __renvoManagedState[3] { __renvoManagedFatal("renvo: unsupported managed stack\n") }
+					 __renvoManagedScan(roots, __renvoManagedState[3])
+					}
+					`
+	}
+}
+
+go backend {
+	func managedSource() string {
+		return managedHeap32Source() + linuxManagedSource() + `
+	const __renvoManagedPageSize = uintptr(4096)
+	const __renvoManagedMapNumber = 71
+	const __renvoManagedReleaseNumber = 73
+	const __renvoManagedExitNumber = 1
+	const __renvoManagedMapFlags = uintptr(34)
+	`
+	}
+	func managedBSS(out *RTGEmitter, reg int, offset int) {
+		at := out.Len()
+		encoderImmediate(out, encoderReg(reg), 0)
+		out.AbsoluteReloc(at, offset, RTGRelocationAbsoluteBSS)
+	}
+	func managedCall(out *RTGEmitter, label int) {
+		at := out.Len()
+		encoderImmediate(out, encoderReg(4), 0)
+		out.RelocAt(at, label)
+		encoderBranchRegister(out, encoderReg(4), true)
+	}
+	func managedStartup(out *RTGEmitter, limit int, label int) {
+		encoderImmediate(out, encoderReg(7), int64(limit))
+		encoderMove(out, encoderReg(2), encoderReg(15))
+		managedBSS(out, 1, 0)
+		managedBSS(out, 0, out.BSSSize())
+		managedCall(out, label)
+	}
+	func managedStack(out *RTGEmitter, delta int) {
+		encoderInsn(out, 0x80002000|(14<<25)|(14<<14)|(delta&8191))
+	}
+	func managedMemory(out *RTGEmitter, reg int, offset int, store bool) {
+		op := 0xc0002000
+		if store {
+			op = 0xc0202000
+		}
+		encoderInsn(out, op|(reg<<25)|(14<<14)|offset)
+	}
+	func managedBoundary(out *RTGEmitter, label int) {
+		managedStack(out, -288)
+		for reg := 0; reg < 32; reg++ {
+			if reg != 14 {
+				managedMemory(out, reg, reg*4, true)
+			}
+		}
+
+		encoderMove(out, encoderReg(1), encoderReg(0))
+		encoderMove(out, encoderReg(0), encoderReg(14))
+		managedCall(out, label)
+
+		for reg := 0; reg < 32; reg++ {
+			if reg != 14 && reg != 8 {
+				managedMemory(out, reg, reg*4, false)
+			}
+		}
+		managedStack(out, 288)
+	}
+	func managedRawSyscall(out *RTGEmitter, count int, number int) bool {
+		_ = number
+		if count < 1 || count > 7 {
+			return false
+		}
+		registers := []int{1, 8, 9, 10, 11, 12, 13}
+		for i := 0; i < count; i++ {
+			managedMemory(out, registers[i], i*4, false)
+		}
+		encoderInsn(out, 0x91d02010)
+		encoderInsn(out, 0x1a800003)
+		encoderInsn(out, 0x01000000)
+		encoderInsn(out, 0x90200008)
+		managedStack(out, count*4)
+		return true
+	}
 }

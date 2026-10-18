@@ -69,6 +69,8 @@ func optionDiagnostic(options Options) Diagnostic {
 		code, message = "RENVO-OPTION-010", "-windows-gui requires a Windows target"
 	case ParseErrMixedFileList:
 		code, message = "RENVO-OPTION-011", "explicit source list contains a non-.go/.c argument "+options.ErrorArg
+	case ParseErrHeapLimit:
+		code, message = "RENVO-OPTION-036", "invalid managed heap configuration: "+options.ErrorArg
 	case ParseErrMissingArenaSize:
 		code, message = "RENVO-OPTION-012", "missing arena size after -arena-size"
 	case ParseErrInvalidArenaSize:

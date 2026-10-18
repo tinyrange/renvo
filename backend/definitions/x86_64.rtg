@@ -3,6 +3,14 @@
 @import "elf_amd64_primitives.rtg"
 
 go backend {
+	func x8664PopRegister(out *RTGEmitter, destination RTGRegister) {
+		// A native POP does not clobber the scratch register or condition flags.
+		// The generic load/add expansion cannot pop R10 syscall arguments safely.
+		if destination.Code >= 8 {
+			out.Byte(0x41)
+		}
+		out.AppendByte(0x58 | int(destination.Code&7))
+	}
 	func encodeByteRegisterPair(out *RTGEmitter, opcode uint32, destination RTGRegister, source RTGRegister) {
 		byteRegister := source
 		if destination.Code > byteRegister.Code {
@@ -1471,6 +1479,11 @@ arch x86_64 {
 			out.Byte(0x0f)
 			out.AppendByte(int(condition.SetOpcode))
 			modRM(out, 3, 0, registerLowBits(destination))
+			# SETcc writes only a byte. The direct-emitter contract returns a
+			# complete boolean word, not the previous operand's upper bytes.
+			emitREX(out, false, destination, RTGNoRegister, destination, destination)
+			out.Bytes2(0x0f, 0xb6)
+			modRM(out, 3, registerLowBits(destination), registerLowBits(destination))
 		}
 		registerHighBit(reg:register) -> byte {
 			return byte(reg.Code >> 3) & 1
@@ -1485,6 +1498,7 @@ arch x86_64 {
 }
 
 abi renvo_x86_64 {
+	pop_register = go x8664PopRegister
 	arch = x86_64
 	frame_start = sequence frameStart
 	frame_finish = go frameFinish

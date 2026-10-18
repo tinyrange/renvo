@@ -150,5 +150,15 @@
     "isa_id": 1,
     "advertised": true,
     "release_artifact": ""
+  },
+  {
+    "name": "linux/amd64-desktop",
+    "backend": "linux/amd64-desktop",
+    "backend_id": 15,
+    "constant": "renvoTargetLinuxAmd64Desktop",
+    "os_id": 1,
+    "isa_id": 1,
+    "advertised": true,
+    "release_artifact": ""
   }
 ]

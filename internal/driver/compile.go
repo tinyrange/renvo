@@ -125,15 +125,15 @@ func compileBuiltUnit(result CompileResult, built BuildResult, backend Backend) 
 	var backendResult BackendResult
 	optionsBackend, acceptsOptions := backend.(OptionsBackend)
 	arenaBackend, acceptsArena := backend.(ArenaBackend)
-	arenaSize := backendArenaSize(built.Options.Target, built.Options.Tags, built.Options.ArenaSize, built.Options.Mode)
+	arenaSize := allocationBudget(built.Options)
 	if acceptsOptions && (built.Options.Mode != ModeExecutable || built.Options.EmitImage) {
 		backendResult = optionsBackend.CompileUnitWithOptions(built.Unit, BackendCompileOptions{Target: built.Options.Target, Mode: built.Options.Mode, Output: built.Options.Output, Strip: built.Options.Strip, WindowsGUI: built.Options.WindowsGUI, EmitImage: built.Options.EmitImage, ArenaSize: arenaSize, ModuleLicense: built.Options.ModuleLicense, ObjectFile: built.Options.Mode == ModeObject, Code16: built.Options.CCode16, RegParm: built.Options.CRegParm})
 	} else if built.Options.Mode != ModeExecutable {
 		backendResult.Diagnostic = Diagnostic{Phase: "backend", Code: "RENVO-BACKEND-006", Message: "backend does not accept output modes"}
 	} else if acceptsArena {
 		backendResult = arenaBackend.CompileUnitWithArena(built.Unit, backendTargetForOptions(built.Options.Target, built.Options.Mode), built.Options.Strip, built.Options.WindowsGUI, arenaSize)
-	} else if built.Options.ArenaSize != 0 {
-		backendResult.Diagnostic = Diagnostic{Phase: "backend", Code: "RENVO-BACKEND-005", Message: "backend does not accept an arena policy"}
+	} else if built.Options.ArenaSize != 0 || built.Options.HeapLimit != 0 || built.Options.MemoryStrategy == "desktop" {
+		backendResult.Diagnostic = Diagnostic{Phase: "backend", Code: "RENVO-BACKEND-005", Message: "backend does not accept an allocation policy"}
 	} else {
 		backendResult = backend.CompileUnit(built.Unit, backendTargetForOptions(built.Options.Target, built.Options.Mode), built.Options.Strip, built.Options.WindowsGUI)
 	}

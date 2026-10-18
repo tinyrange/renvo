@@ -178,6 +178,25 @@ Its current scalar/control-flow subset is deliberately smaller than the Go
 frontend; see [`internal/c11/README.md`](internal/c11/README.md) for its exact
 scope and growth boundary.
 
+## Opt-in managed heap
+
+`linux/amd64-desktop` is the Linux x86-64 managed-heap target. Existing targets
+keep their arena strategy. Select it with `-t linux/amd64-desktop` and optionally
+`-heap-limit 256MiB`; `RENVO_HEAP_LIMIT` overrides that managed budget at startup.
+The limit includes heap mappings and allocator metadata, not total process RSS.
+
+The compiler self-hosts on this target: the regression builds three stages,
+checks identical stage-2/stage-3 output, and runs collection-pressure programs
+compiled by those stages. The target currently supports one native stack;
+stack switching, JIT execution, and native FFI/object output remain unsupported.
+Managed runtime services and root-capture emitters are authored in RBE/RTG
+definitions, shared by prepared and bundled backends. All 33 supplied Linux QEMU
+targets now have adapters and pass the managed matrix; their ordinary targets
+still default to arenas. Set `memory_strategy = desktop` in a target definition
+to opt in. Adding a new platform requires platform hooks, not common-compiler edits.
+See `internal/managedheap/QEMU.md` for qualification scope and per-target results.
+See `internal/managedheap/README.md` for the porting contract and limitations.
+
 ## Build and try it
 
 A Go-built bootstrap uses a sibling standalone backend during development.

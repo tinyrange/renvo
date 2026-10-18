@@ -4,7 +4,14 @@ implements direct_emitter_v1
 
 @import "arm.rtg"
 
+@import "managed_linux_arm.rtg"
+
 runtime linux_arm {
+	managed_heap_abi = 1
+	managed_word_bits = 32
+	managed_source = go managed_linux_arm.linuxArmManagedSource
+	managed_startup = go managed_linux_arm.linuxArmManagedStartup
+	managed_boundary = go managed_linux_arm.linuxArmManagedBoundary
 	entry template {
 		max_parameters = 2
 		bss args 32768 16

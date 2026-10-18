@@ -1446,6 +1446,8 @@ func targetABICallWords(document Document, abi Declaration) []string {
 }
 
 func appendPreparedConditionAdapter(out []byte, document Document, arch Declaration) []byte {
+	// Both dispatch tables share one immutable symbol lookup input.
+	symbols := generatedArchitectureSymbols(document)
 	names := []string{"eq", "ne", "slt", "sge", "sle", "sgt", "ult", "uge", "ule", "ugt"}
 	semantic := []string{"Equal", "NotEqual", "SignedLess", "SignedGreaterEqual", "SignedLessEqual", "SignedGreater", "UnsignedLess", "UnsignedGreaterEqual", "UnsignedLessEqual", "UnsignedGreater"}
 	// Retain the private legacy adapter for existing physical emitter recipes.
@@ -1458,7 +1460,7 @@ func appendPreparedConditionAdapter(out []byte, document Document, arch Declarat
 		}
 		for i := 0; i < len(names); i++ {
 			local := architectureLocalPrefix(arch.Name) + upperIdentifier(names[i])
-			symbol, ok := generatedArchitectureOutput(document, local)
+			symbol, ok := generatedArchitectureOutputIndexed(symbols, local)
 			if !ok {
 				continue
 			}

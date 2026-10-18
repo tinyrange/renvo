@@ -1,0 +1,18 @@
+package main
+
+//renvo:intrinsic renvo_runtime_Syscall
+func rawMemoryCall(n int, a uintptr, b uintptr, c uintptr, d uintptr, e int, f uintptr) int {
+	return -1
+}
+
+func appMain() int {
+	p := rawMemoryCall(9, 0, 4096, 3, 34, -1, 0)
+	if p <= 0 {
+		panic("mmap arguments")
+	}
+	if rawMemoryCall(11, uintptr(p), 4096, 0, 0, 0, 0) != 0 {
+		panic("munmap")
+	}
+	print("PASS\n")
+	return 0
+}

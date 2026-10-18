@@ -15,6 +15,7 @@ import (
 )
 
 type sourceDescriptor struct {
+	MemoryStrategy      string         `json:"-"`
 	Name                string         `json:"name"`
 	Backend             string         `json:"backend"`
 	BackendID           int            `json:"backend_id"`
@@ -167,6 +168,7 @@ func mergeMachineDefinitions(root string, descriptors []sourceDescriptor) error 
 		delete(targets, descriptors[i].Name)
 		machine := resolved.descriptor
 		descriptors[i].Aliases = append([]string(nil), machine.Aliases...)
+		descriptors[i].MemoryStrategy = machine.MemoryStrategy
 		descriptors[i].Family = machine.Family
 		descriptors[i].OS = machine.OS
 		descriptors[i].ISA = machine.ISA
@@ -239,14 +241,14 @@ func contains(values []string, value string) bool {
 }
 
 func driverHelpSource(descriptors []sourceDescriptor) []byte {
-	const prefix = "Usage: renvo -o <file> [-t <target>] [-backend <file.rtg|file.rbe|file.rtgb>] [-system <file.rtg>] [-mode=<mode>] [-tags <list>] [-arena-size <bytes>] [-s] [-emit-unit] [-emit-image] [-windows-gui] <package | source files...>\n" +
+	const prefix = "Usage: renvo -o <file> [-t <target>] [-backend <file.rtg|file.rbe|file.rtgb>] [-system <file.rtg>] [-mode=<mode>] [-tags <list>] [-arena-size <bytes>] [-heap-limit <size>] [-s] [-emit-unit] [-emit-image] [-windows-gui] <package | source files...>\n" +
 		"       renvo cc -c [-I <dir>] [-isystem <dir>] <source.c> -o <object.o>\n" +
 		"       renvo cc <object.o...> -o <linux-executable>\n" +
 		"       renvo make [-f Makefile] [target...]\n" +
 		"       renvo run [build options] <script.go> [-- script arguments...]\n" +
 		"       renvo test [build options] [package]\n" +
 		"Options:\n" +
-		"  -arena-size  set the generated program arena limit in bytes (256..1073741824)\n" +
+		"  -arena-size  set the generated program arena limit in bytes (256..1073741824)\n  -heap-limit  cap a desktop managed heap (bytes or KiB/MiB/GiB/TiB); RENVO_HEAP_LIMIT overrides at startup\n" +
 		"  -backend     select and prepare a backend definition or prepared artifact\n" +
 		"  -system      load target, binary-size, and arena limits from a hosted system profile\n" +
 		"  -emit-unit   write the canonical linked Renvo unit without invoking a backend\n" +
@@ -438,6 +440,13 @@ func frontendSource(descriptors []sourceDescriptor) []byte {
 		out.WriteString("false")
 	}
 	out.WriteString(" }\n\n")
+	out.WriteString("func MemoryStrategy(name string) string {\n")
+	for _, descriptor := range descriptors {
+		if descriptor.MemoryStrategy != "" {
+			fmt.Fprintf(&out, "if name == %q { return %q }\n", descriptor.Name, descriptor.MemoryStrategy)
+		}
+	}
+	out.WriteString("return \"\"\n}\n\n")
 	out.WriteString("func DefaultArena(name string) int {\n")
 	for _, descriptor := range descriptors {
 		if descriptor.DefaultArena != 0 {

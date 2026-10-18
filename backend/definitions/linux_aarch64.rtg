@@ -3,6 +3,7 @@ unit native
 implements direct_emitter_v1
 
 @import "aarch64.rtg"
+@import "managed_linux_aarch64.rtg"
 
 extend arch aarch64 {
 	sequences {
@@ -76,6 +77,11 @@ extend arch aarch64 {
 }
 
 runtime linux_aarch64 {
+	managed_heap_abi = 1
+	managed_word_bits = 64
+	managed_source = go managed_linux_aarch64.linuxAarch64ManagedSource
+	managed_startup = go managed_linux_aarch64.linuxAarch64ManagedStartup
+	managed_boundary = go managed_linux_aarch64.linuxAarch64ManagedBoundary
 	entry sequence linuxEntry {
 		max_parameters = 2
 		bss args 32768 16

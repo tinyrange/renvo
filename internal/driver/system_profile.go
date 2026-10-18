@@ -1,6 +1,9 @@
 package driver
 
-import "renvo.dev/internal/load"
+import (
+	"renvo.dev/internal/load"
+	"renvo.dev/internal/targetinfo"
+)
 
 // SystemProfile is the deliberately small hosted resource contract loaded by
 // -system. ArenaSize limits the generated program's managed allocator, while
@@ -41,6 +44,12 @@ func resolveSystemOptions(options Options, workDir string, fs SourceFS) Options 
 	options.SystemName = profile.Name
 	if !options.TargetExplicit {
 		options.Target = profile.Target
+	}
+	// Profiles select the target after ordinary option parsing. Re-resolve its
+	// memory contract here rather than carrying the default target's policy.
+	options.MemoryStrategy = targetinfo.MemoryStrategy(options.Target)
+	if options.MemoryStrategy == "desktop" {
+		return parseFail(options, ParseErrHeapLimit, "desktop requires -heap-limit instead of an arena system profile", options.SystemAt)
 	}
 	options.BinaryLimit = profile.BinaryLimit
 	options.ArenaSize = profile.ArenaSize

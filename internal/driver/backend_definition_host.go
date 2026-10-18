@@ -121,6 +121,14 @@ func resolveBackendBuildOptions(args []string, workDir string, fs SourceFS) back
 	if !options.Ok {
 		return backendBuildOptions{options: options, hasBackend: true}
 	}
+	options.MemoryStrategy = resolved.Descriptor.MemoryStrategy
+	if options.MemoryStrategy == "desktop" {
+		if arenaExplicit || systemPath != "" || options.CCompiler || options.EmitImage || options.Mode != ModeExecutable {
+			options = parseFail(options, ParseErrHeapLimit, "desktop requires a Go executable without -arena-size or -system", backendAt)
+		}
+	} else if options.HeapLimit != 0 {
+		options = parseFail(options, ParseErrHeapLimit, "requires memory_strategy = desktop", backendAt)
+	}
 	options.CAssemblyCompiler = targetCAssemblyCompiler{vocabulary: resolved.Vocabulary}
 	options.Target = resolved.Descriptor.Name
 	options.TargetWordBits = resolved.Descriptor.WordBits

@@ -218,6 +218,11 @@ func renvoCompileOptionsValid(target int, options RenvoCompileOptions) bool {
 	if options.RegParm != 0 && (options.RegParm != 3 || target != renvoTargetLinux386 || !options.ObjectFile) {
 		return false
 	}
+	if renvoManagedTarget(target) {
+		// The transport field holds a managed limit, not a legacy arena size.
+		// Zero is uncapped; tiny positive budgets deliberately fail at startup.
+		return options.ArenaSize >= 0 && !options.ObjectFile && !options.EmitImage
+	}
 	return options.ArenaSize == 0 || options.ArenaSize >= renvoArenaSizeMinimum && options.ArenaSize <= renvoArenaSizeMaximum
 }
 

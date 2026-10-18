@@ -1,0 +1,35 @@
+# Linux process services; the adapter supplies syscall numbers and word width.
+go backend {
+	func linuxManagedSource() string {
+		return `
+					//renvo:intrinsic renvo_runtime_Syscall
+					func __renvoManagedSyscall(n int, a uintptr, b uintptr, c uintptr, d uintptr, e int, f uintptr) int { return -1 }
+					
+					func __renvoManagedMap(size uintptr) uintptr {
+					 p := __renvoManagedSyscall(__renvoManagedMapNumber, 0, size, 3, __renvoManagedMapFlags, -1, 0)
+					 if uintptr(p) >= ^uintptr(4094) { return 0 }; return uintptr(p)
+					}
+					func __renvoManagedRelease(base uintptr, size uintptr) bool { return __renvoManagedSyscall(__renvoManagedReleaseNumber, base, size, 0, 0, 0, 0) == 0 }
+					func __renvoManagedFatal(message string) { print(message); __renvoManagedSyscall(__renvoManagedExitNumber, 2, 0, 0, 0, 0, 0) }
+					func __renvoManagedEnvironment(stack uintptr) uintptr {
+					 // Linux initial process stack: argc, argv[], null, envp[], null.
+					 p := stack + 2*__renvoManagedWordBytes + __renvoManagedRead(stack)*__renvoManagedWordBytes
+					 for __renvoManagedRead(p) != 0 {
+					  entry := __renvoManagedRead(p)
+					  matched := true
+					  prefix := "RENVO_HEAP_LIMIT="
+					  for i := 0; i < len(prefix); i++ {
+					   if __renvoManagedByte(entry+uintptr(i)) != prefix[i] { matched = false; break }
+					  }
+					  if matched { return entry+17 }
+					  p += __renvoManagedWordBytes
+					 }
+					 return 0
+					}
+					func __renvoManagedRoots(roots uintptr) {
+					 if roots > __renvoManagedState[3] { __renvoManagedFatal("renvo: unsupported managed stack\n") }
+					 __renvoManagedScan(roots, __renvoManagedState[3])
+					}
+					`
+	}
+}

@@ -1,4 +1,4 @@
-//go:build renvo && linux
+//go:build renvo && linux && !renvo_managed
 
 package main
 

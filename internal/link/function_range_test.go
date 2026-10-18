@@ -163,3 +163,22 @@ func main(){
 		t.Fatalf("mixed ranges: persistent=%v transient=%v", persistent.Ok, transient.Ok)
 	}
 }
+
+func TestFunctionRangeRejectsVariadicSignatures(t *testing.T) {
+	for _, signature := range []string{
+		"func(func(...int)bool)",
+		"func(func(int,...string)bool)",
+		"func(...func(int)bool)",
+	} {
+		for _, transient := range []bool{false, true} {
+			program := unit.Program{Package: "main"}
+			source := []byte("package main;func run(seq " + signature + "){for range seq{}};func main(){}")
+			if !reparseFunctionValueProgram(&program, source, nil, len(source), -1) {
+				t.Fatal("parse", signature)
+			}
+			if lowerFunctionRangesCore(&program, transient) {
+				t.Fatal("accepted", signature)
+			}
+		}
+	}
+}

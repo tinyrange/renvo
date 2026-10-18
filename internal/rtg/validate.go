@@ -473,6 +473,7 @@ func declarationAllowedFields(kind string) []string {
 			"emit_static_call", "emit_operation", "entry_prologue", "entry_epilogue",
 			"emit_callback_address", "emit_entry_start_simple",
 			"prepare_read_write_buffer", "move_offset_argument",
+			"managed_heap_abi", "managed_word_bits", "managed_source", "managed_startup", "managed_boundary",
 		}
 	}
 	if kind == DeclFormat {
@@ -495,7 +496,7 @@ func declarationAllowedFields(kind string) []string {
 		return []string{
 			"family", "arch", "abi", "runtime", "executable", "object", "aliases", "build_tags",
 			"capabilities", "code_pointer_bits", "function_pointer_bits", "max_align",
-			"arena_default", "subsystem", "os", "frontend_arch", "production_projection",
+			"arena_default", "memory_strategy", "subsystem", "os", "frontend_arch", "production_projection",
 		}
 	}
 	if kind == DeclIR {
@@ -609,8 +610,9 @@ func validateRuntime(document Document, declaration Declaration) []Diagnostic {
 		"emit_entry_start", "emit_entry_start_simple", "emit_entry", "emit_exit", "emit_static_call",
 		"emit_operation", "entry_prologue", "entry_epilogue", "emit_callback_address",
 		"prepare_read_write_buffer", "move_offset_argument", "emit_syscall_from_stack",
+		"managed_source", "managed_startup", "managed_boundary",
 	}
-	hookParameters := make([][]string, 12)
+	hookParameters := make([][]string, 15)
 	hookParameters[0] = []string{"*RTGEmitter", "int"}
 	hookParameters[1] = []string{"*RTGEmitter"}
 	hookParameters[2] = []string{"*RTGEmitter", "int", "int"}
@@ -623,7 +625,10 @@ func validateRuntime(document Document, declaration Declaration) []Diagnostic {
 	hookParameters[9] = []string{"*RTGEmitter"}
 	hookParameters[10] = []string{"*RTGEmitter"}
 	hookParameters[11] = []string{"*RTGEmitter", "int", "int"}
-	hookResults := []string{"bool", "bool", "bool", "", "", "bool", "", "", "", "", "", "bool"}
+	hookParameters[12] = []string{}
+	hookParameters[13] = []string{"*RTGEmitter", "int", "int"}
+	hookParameters[14] = []string{"*RTGEmitter", "int"}
+	hookResults := []string{"bool", "bool", "bool", "", "", "bool", "", "", "", "", "", "bool", "string", "", ""}
 	for i := 0; i < len(declaration.Statements); i++ {
 		left, right, assignment := statementAssignment(declaration.Statements[i])
 		if assignment && len(left) == 1 {

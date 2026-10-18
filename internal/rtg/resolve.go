@@ -19,6 +19,7 @@ type TargetDescriptor struct {
 	FunctionPointerBits int
 	MaxAlign            int
 	ArenaDefault        int
+	MemoryStrategy      string // empty/arena preserves the existing allocator
 	Endian              string
 	ABI                 string
 	Runtime             string
@@ -205,6 +206,16 @@ func resolveTarget(document Document, declaration Declaration) (ResolvedTarget, 
 	if target.Descriptor.MaxAlign <= 0 || target.Descriptor.MaxAlign&(target.Descriptor.MaxAlign-1) != 0 {
 		return target, resolveDiagnostic(document, declaration, "RTG-RESOLVE-013", "target "+declaration.Name+" has invalid max_align"), false
 	}
+	if strategy, found := requiredNameField(document, declaration, "memory_strategy"); found {
+		if strategy != "arena" && strategy != "desktop" {
+			return target, resolveDiagnostic(document, declaration, "RTG-RESOLVE-022", "memory_strategy must be arena or desktop"), false
+		}
+		if strategy == "desktop" {
+			target.Descriptor.MemoryStrategy = strategy
+		}
+	} else if _, found := fieldValue(document, declaration, "memory_strategy"); found {
+		return target, resolveDiagnostic(document, declaration, "RTG-RESOLVE-022", "memory_strategy must be arena or desktop"), false
+	}
 	if target.Descriptor.ArenaDefault < 0 {
 		return target, resolveDiagnostic(document, declaration, "RTG-RESOLVE-014", "target "+declaration.Name+" has invalid arena_default"), false
 	}
@@ -233,8 +244,26 @@ func resolveTarget(document Document, declaration Declaration) (ResolvedTarget, 
 	if target.Descriptor.Executable == "" && target.Descriptor.Object == "" {
 		return target, resolveDiagnostic(document, declaration, "RTG-RESOLVE-009", "target "+declaration.Name+" has no output format"), false
 	}
+	if target.Descriptor.MemoryStrategy == "desktop" {
+		if diagnostic, ok := validateManagedTarget(document, target); !ok {
+			return target, diagnostic, false
+		}
+	}
 	target.Descriptor.Aliases = listField(document, declaration, "aliases")
 	target.Descriptor.BuildTags = listField(document, declaration, "build_tags")
+	// This internal runtime-selection tag follows the allocator contract, not
+	// target spelling or a manually copied list. Remove stale/duplicate copies
+	// when a definition switches strategies.
+	tags := make([]string, 0, len(target.Descriptor.BuildTags)+1)
+	for _, tag := range target.Descriptor.BuildTags {
+		if tag != "renvo_managed" {
+			tags = append(tags, tag)
+		}
+	}
+	if target.Descriptor.MemoryStrategy == "desktop" {
+		tags = append(tags, "renvo_managed")
+	}
+	target.Descriptor.BuildTags = tags
 	target.Descriptor.Capabilities = listField(document, declaration, "capabilities")
 	target.Descriptor.RuntimeOps = runtimeOperations(document, target.Runtime)
 	output := target.Executable

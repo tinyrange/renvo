@@ -6,8 +6,8 @@
 // unit: jvm a3a81aa6661ba92e5d4bcb968abeb949fd09c7172e1eb4efdc7edaf0d72529ef
 package main
 
-type RTGTargetDescriptor struct { Name string; Family string; OS string; ISA string; WordBits int; PointerBits int; CodePointerBits int; FunctionPointerBits int; MaxAlign int; ArenaDefault int; Endian string; ABI string; Runtime string; RuntimeOps []string; Executable string; Object string; OutputKind string; Definition string; Version int }
-var RTGTarget = RTGTargetDescriptor{Name:"jvm/vm32",Family:"structured32",OS:"jvm",ISA:"vm32",Endian:"little",ABI:"jvm_internal",Runtime:"jvm_hosted",Executable:"jvm_classfile",Object:"",OutputKind:"jvm-class",Definition:"1eb3c1560ad9b4ad1202e5efd8675290c34538eea211e29b1b57e5b9c463844f",WordBits:32,PointerBits:32,CodePointerBits:32,FunctionPointerBits:32,MaxAlign:8,ArenaDefault:16777216,RuntimeOps:[]string{"write","open","close","read","chmod","read_at","write_at","print"},Version:3}
+type RTGTargetDescriptor struct { Name string; Family string; OS string; ISA string; WordBits int; PointerBits int; CodePointerBits int; FunctionPointerBits int; MaxAlign int; ArenaDefault int; MemoryStrategy string; Endian string; ABI string; Runtime string; RuntimeOps []string; Executable string; Object string; OutputKind string; Definition string; Version int }
+var RTGTarget = RTGTargetDescriptor{Name:"jvm/vm32",Family:"structured32",OS:"jvm",ISA:"vm32",Endian:"little",ABI:"jvm_internal",Runtime:"jvm_hosted",Executable:"jvm_classfile",Object:"",OutputKind:"jvm-class",Definition:"1eb3c1560ad9b4ad1202e5efd8675290c34538eea211e29b1b57e5b9c463844f",WordBits:32,PointerBits:32,CodePointerBits:32,FunctionPointerBits:32,MaxAlign:8,MemoryStrategy:"",ArenaDefault:16777216,RuntimeOps:[]string{"write","open","close","read","chmod","read_at","write_at","print"},Version:3}
 
 type RTGRegister struct {
 	Code int
@@ -586,6 +586,8 @@ if target != renvoTargetRTG { return false }
 return capability == "argv" || capability == "environment" || capability == "executable" || capability == "filesystem" || capability == "heap" || capability == "hosted" || capability == "ieee_float"
 }
 
+const renvoRTGManagedHeap = 0
+
 func renvoRTGProfileForTarget(target int) renvoTargetProfile {
 if target != renvoTargetRTG { return renvoTargetProfile{} }
 p := renvoTargetProfile{}
@@ -639,6 +641,17 @@ func renvoRTGEmitCustomSyscall(out *renvoAsm, wordCount int, number int) bool {
 return false
 }
 func renvoRTGRecordRawSyscall(out *renvoAsm, number int) {
+}
+
+func renvoManagedTarget(target int) bool { return false }
+func renvoManagedRuntimeSource(target int) string {
+return ""
+}
+func renvoManagedStartup(target int, out *renvoAsm, limit int, label int) {
+out.patchFailed = true
+}
+func renvoManagedBoundary(target int, out *renvoAsm, label int) {
+out.patchFailed = true
 }
 
 var rtgJvmRAX = RTGRegister{Code:0, Valid:true}
@@ -6161,7 +6174,7 @@ renvoNonNil(g)
 	// Object writers require relocations to name storage inside a section;
 	// the executable fast path also references the arena's one-past end.
 	// Keep ordinary zeroing for objects, including prepared object targets.
-	if g.c.objectFile {
+	if g.c.objectFile || renvoManagedTarget(g.c.renvoTarget) {
 		return
 	}
 	renvoStringHeapOffsets(g)

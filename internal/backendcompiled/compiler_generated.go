@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "ccdc0c6e4a8b2374fce6d8f30fc27a9d246bc91926dbe783f8f8f336ab818219"
+const CompilerSourceDigest = "893e99411f385220f7019b4eec5b0514b6170df4540ba408f9a17f25f9ebc74a"
 
 // source: backend/compiler_common_impl.go
 
@@ -1033,6 +1033,12 @@ target := a.dataOffset + off
 if kind == renvoAbsBssReloc {
 target = renvoAsmBssOffset(a) + off
 }
+if kind == RTGRelocationAbsoluteBSSEnd {
+if off <= 0 {
+off = 1
+}
+target = renvoAsmBssOffset(a) + ((a.bssSize+off-1)/off)*off
+}
 next := a.codeOffset + at + 4
 disp := target - next
 renvoPut32At(a.code, at, disp)
@@ -1384,18 +1390,19 @@ origin      int
 }
 
 type renvoProgram struct {
-src           []byte
-toks          renvoTokens
-decls         []renvoDecl
-funcs         []renvoFuncDecl
-packageTable  *renvoPackageTable
-ok            bool
-parsedIntHigh int
-compilerInt32 bool
-c             renvoCompileContext
-c11Semantics  bool
-entryFunc     int
-foreign       *renvoForeignProgram
+managedRuntime bool
+src            []byte
+toks           renvoTokens
+decls          []renvoDecl
+funcs          []renvoFuncDecl
+packageTable   *renvoPackageTable
+ok             bool
+parsedIntHigh  int
+compilerInt32  bool
+c              renvoCompileContext
+c11Semantics   bool
+entryFunc      int
+foreign        *renvoForeignProgram
 }
 
 type renvoForeignProgram struct {
@@ -5307,6 +5314,7 @@ return m
 func renvoBuildMetaInto(pp *renvoProgram, m *renvoMeta) {
 renvoNonNil(pp, m)
 renvoPrepareSoftFloatProgram(pp)
+renvoPrepareManagedProgram(pp)
 if !pp.ok {
 return
 }
@@ -8384,6 +8392,15 @@ g.deferForwardMode = 0
 g.deferSites = nil
 g.emittingDefers = false
 g.suppressPanicCheck = false
+if renvoManagedTarget(g.c.renvoTarget) && g.currentFunc >= 0 && g.currentFunc < len(g.meta.funcs) {
+fn := &g.meta.funcs[g.currentFunc]
+if fn.nameEnd-fn.nameStart >= 14 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameStart+14, "__renvoManaged") {
+
+
+g.suppressPanicCheck = true
+return true
+}
+}
 if !g.meta.panicEnabled {
 return true
 }
@@ -11556,7 +11573,7 @@ return false
 renvoEmitCopyStackToBss(g, tempOffset, off, renvoTypeCopySize(meta, s.typ))
 g.localCount = localBase
 g.stackUsed = stackBase
-} else if renvoTypeIsSlice(meta, s.typ) {
+} else if !renvoManagedTarget(g.c.renvoTarget) && renvoTypeIsSlice(meta, s.typ) {
 renvoEmitInitEmptySliceBss(g, s.typ, off)
 }
 if renvoFixedTarget == 0 {
@@ -11616,6 +11633,9 @@ g.asm.bssSize += renvoAlignTo8(size)
 if renvoFixedTarget == 0 {
 renvoLinearAddReplGlobal(g, i, off, size)
 }
+}
+if renvoManagedTarget(g.c.renvoTarget) {
+renvoEmitManagedStartup(g)
 }
 for i := 0; i < len(meta.globals); i++ {
 if meta.globals[i].kind == renvoTokVar && !renvoLinearInitGlobal(g, i) {
@@ -13403,7 +13423,7 @@ return renvoTypeFromExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg))
 if callee == renvoIdentNew && e.argCount == 1 {
 targetType := renvoTypeFromExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg))
 if targetType != 0 {
-return renvoAddType(meta, renvoTypePointer, targetType, 0, 0, renvoBackendValueSlotSize, 0, 0)
+return renvoAddPointerType(meta, targetType, renvoPointerSpaceData)
 }
 }
 if callee == renvoIdentCap || callee == renvoIdentLen || callee == renvoIdentOpen || callee == renvoIdentClose || callee == renvoIdentRead || callee == renvoIdentWrite || callee == renvoIdentChmod || callee == renvoIdentCopy || callee == renvoIdentSyscall {
@@ -15315,6 +15335,9 @@ return true
 
 
 maxCapacity := renvoStringArenaSize(g) / elemSize
+if renvoManagedTarget(g.c.renvoTarget) {
+maxCapacity = 9223372036854771679 / elemSize
+}
 if !capacity.ok || capacity.value > maxCapacity {
 done := renvoAsmNewLabel(a)
 renvoEmitStackLessImmJump(g, capOffset, maxCapacity+1, done)
@@ -16813,6 +16836,25 @@ renvoNonNil(g, ep, fn)
 p := g.prog
 renvoNonNil(p)
 intrinsic := renvoRuntimeIntrinsicID(p.src, fn.nameStart, fn.nameEnd)
+if intrinsic == 24 {
+if ep.exprs[idx].argCount != 0 {
+return false
+}
+if renvoManagedTarget(g.c.renvoTarget) {
+renvoEmitManagedBoundary(g, "__renvoManagedCollectBoundary")
+}
+return true
+}
+if renvoManagedTarget(g.c.renvoTarget) && ((intrinsic >= 2 && intrinsic <= 8) || intrinsic == 12 || intrinsic == 13 || intrinsic == 16 || intrinsic == 23) {
+
+
+return false
+}
+if renvoManagedTarget(g.c.renvoTarget) && (intrinsic == 17 || intrinsic == 18) {
+renvoPrintErr("renvo: stack-switch operations are unavailable with the desktop heap\n")
+g.asm.patchFailed = true
+return false
+}
 if intrinsic == 1 {
 e := &ep.exprs[idx]
 if e.argCount != 1 || !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
@@ -16946,6 +16988,9 @@ return renvoEmitTargetRuntimeStack(g, ep, e, count)
 const renvoRuntimeIntrinsicTable = "\x9f\x85\x31\x61\x01\xcb\x5d\x4c\x2e\x02\x03\x1e\x4f\x00\x03\x67\x75\x10\x6e\x04\xaf\xd8\xf6\x20\x05\x1b\xfe\x37\x3f\x06\xe7\x1a\x8d\x21\x07\x15\x6b\xc1\x4f\x08\x07\xf9\x8f\x0d\x08\x8b\x07\x40\x3f\x08\x3b\x59\x62\x4e\x08\x47\x47\xc5\x5f\x0c\x47\x02\x93\x57\x0d\xc5\x07\xc6\x53\x0d\xad\xfc\x67\x17\x0d\x0b\x3b\x57\x66\x0d\x4f\x60\xcb\x57\x0d\x8b\xd1\xdd\x57\x0d\x95\xc5\x1f\x2c\x0e\x71\xbf\x72\x5d\x10\xbb\x84\xa2\x5b\x11\x31\xdd\xa5\x1c\x12\x3d\x21\xa6\x45\x13\x1f\x36\x4c\x7f\x14\xd9\x61\xdf\x55\x15\xe3\xec\x79\x7a\x16\x51\x35\x60\x42\x17"
 
 func renvoRuntimeIntrinsicID(src []byte, start int, end int) int {
+if renvoBytesEqualText(src, start, end, "renvo_runtime_HeapCollect") {
+return 24
+}
 hash1 := 5381
 hash2 := 0
 for i := start; i < end; i++ {
@@ -17123,6 +17168,9 @@ func renvoEmitUncaughtFaultHelperBody(g *renvoLinearGen, outOfMemory bool) {
 message := "panic\n"
 if outOfMemory {
 message = "out of memory\n"
+if renvoManagedTarget(g.c.renvoTarget) {
+message = "panic: out of memory\n"
+}
 }
 renvoEmitStaticWrite(g, message, 2)
 renvoAsmPrimaryImm(&g.asm, 2)
@@ -21904,6 +21952,9 @@ g.asm.bssSize += 32 + renvoStringArenaSize(g)
 }
 
 func renvoStringArenaSize(g *renvoLinearGen) int {
+if renvoManagedTarget(g.c.renvoTarget) {
+return 0
+}
 renvoNonNil(g)
 if g.arenaSize > 0 {
 return g.arenaSize
@@ -21980,6 +22031,17 @@ return label
 }
 
 func renvoEmitArenaAllocHelperBody(g *renvoLinearGen, persistent bool) {
+if renvoManagedTarget(g.c.renvoTarget) {
+renvoEmitManagedBoundary(g, "__renvoManagedRequest")
+if !g.meta.panicEnabled {
+ok := renvoAsmNewLabel(&g.asm)
+renvoAsmJnzPrimary(&g.asm, ok)
+renvoEmitUncaughtFaultTransfer(g, true)
+renvoAsmMarkLabel(&g.asm, ok)
+}
+renvoAsmRet(&g.asm)
+return
+}
 a := &g.asm
 belowOrEqual := renvoConditionSignedLessEqual
 aboveOrEqual := renvoConditionSignedGreaterEqual
@@ -24615,6 +24677,11 @@ return renvoEmitInterfaceCompare(g, ep, e)
 if e.kind == renvoExprCall {
 if renvoFixedTarget == 0 {
 if renvoExprIsIdentText(g.prog, ep, e.left, "renvo_runtime_CallJIT") {
+if renvoManagedTarget(g.c.renvoTarget) {
+renvoPrintErr("renvo: JIT stacks are unavailable with the desktop heap\n")
+g.asm.patchFailed = true
+return false
+}
 return renvoEmitJITCall(g, ep, idx)
 }
 }
@@ -31979,6 +32046,54 @@ renvoRFERegBinary(a, 3, 6, 0)
 renvoRFERegStore(a, 6, 5, span.offset, 8)
 }
 
+
+
+func renvoPrepareManagedProgram(prog *renvoProgram) {
+if !renvoManagedTarget(prog.c.renvoTarget) || prog.managedRuntime {
+return
+}
+if prog.c.objectFile || prog.c.emitImage || prog.c11Semantics {
+renvoPrintErr("renvo: desktop heap requires a Go process executable\n")
+prog.ok = false
+return
+}
+for _, fn := range prog.funcs {
+if fn.nameEnd-fn.nameStart >= 14 && renvoBytesEqualText(prog.src, fn.nameStart, fn.nameStart+14, "__renvoManaged") {
+renvoPrintErr("renvo: reserved managed runtime name\n")
+prog.ok = false
+return
+}
+}
+runtimeSource := renvoManagedRuntimeSource(prog.c.renvoTarget)
+source := make([]byte, 0, len(prog.src)+len(runtimeSource))
+source = append(source, prog.src...)
+source = append(source, runtimeSource...)
+parsed := renvoParseProgramWithContext(source, &prog.c)
+parsed.entryFunc = prog.entryFunc
+parsed.packageTable = prog.packageTable
+parsed.foreign = prog.foreign
+parsed.managedRuntime = true
+*prog = parsed
+}
+
+func renvoManagedFunctionLabel(g *renvoLinearGen, name string) int {
+fn := renvoFindMetaFunctionText(g.meta, name)
+if fn < 0 {
+g.asm.patchFailed = true
+return 0
+}
+renvoLinearMarkFunc(g, fn)
+return g.funcLabels[fn]
+}
+
+func renvoEmitManagedStartup(g *renvoLinearGen) {
+renvoManagedStartup(g.c.renvoTarget, &g.asm, g.arenaSize, renvoManagedFunctionLabel(g, "__renvoManagedInit"))
+}
+
+func renvoEmitManagedBoundary(g *renvoLinearGen, name string) {
+renvoManagedBoundary(g.c.renvoTarget, &g.asm, renvoManagedFunctionLabel(g, name))
+}
+
 // source: backend/compiler_object_cache_impl.go
 
 const renvoObjectCacheCapacity = 1024
@@ -33125,8 +33240,18 @@ renvoPrintErr("usage: renvo [options] [-emit-image] -o <output|-> <input.go|->..
 }
 
 func renvoParsePositiveDecimal(value string) (int, bool) {
+return renvoParseAllocationBudget(value, renvoRTGManagedHeap != 0)
+}
+
+func renvoParseAllocationBudget(value string, managed bool) (int, bool) {
 if len(value) == 0 {
 return 0, false
+}
+minimum, maximum := 256, 1073741824
+if managed {
+
+
+minimum, maximum = 1, 9223372036854775807
 }
 result := 0
 for i := 0; i < len(value); i++ {
@@ -33135,12 +33260,12 @@ if ch < '0' || ch > '9' {
 return 0, false
 }
 digit := int(ch - '0')
-if result > (1073741824-digit)/10 {
+if result > (maximum-digit)/10 {
 return 0, false
 }
 result = result*10 + digit
 }
-if result < 256 || result > 1073741824 {
+if result < minimum || result > maximum {
 return 0, false
 }
 return result, true
@@ -33163,6 +33288,8 @@ var moduleNamePath string
 moduleLicense := "Proprietary"
 target := renvoDefaultTarget
 arenaSize := 0
+var arenaArg string
+arenaSpecified := false
 renvoCompilerStripSymbols = false
 renvoCompilerEmitImage = false
 renvoCompilerObjectFile = false
@@ -33262,14 +33389,10 @@ renvoPrintErr("renvo: missing argument for -arena-size\n")
 renvoPrintUsage()
 return 1
 }
-parsedArenaSize, ok := renvoParsePositiveDecimal(args[i])
-if !ok {
-renvoPrintErr("renvo: invalid arena size: ")
-renvoPrintErr(args[i])
-renvoPrintErr("\n")
-return 1
-}
-arenaSize = parsedArenaSize
+
+
+arenaArg = args[i]
+arenaSpecified = true
 i++
 continue
 }
@@ -33306,6 +33429,16 @@ return 1
 input[inputCount] = fd
 inputCount++
 i++
+}
+if arenaSpecified {
+parsed, ok := renvoParseAllocationBudget(arenaArg, renvoManagedTarget(target))
+if !ok {
+renvoPrintErr("renvo: invalid arena size: ")
+renvoPrintErr(arenaArg)
+renvoPrintErr("\n")
+return 1
+}
+arenaSize = parsed
 }
 if outputPath == "" {
 renvoPrintErr("renvo: missing output path (-o)\n")
@@ -34347,6 +34480,9 @@ return 3
 if renvoFixedTarget == renvoTargetNetBSDAmd64 {
 return 3
 }
+if renvoFixedTarget == renvoTargetLinuxAmd64Desktop {
+return 0
+}
 return 0
 }
 if renvoTargetOS == 7 && renvoTargetArch == 1 {
@@ -34397,6 +34533,9 @@ return 4
 }
 if renvoFixedTarget == renvoTargetNetBSDAmd64 {
 return 4
+}
+if renvoFixedTarget == renvoTargetLinuxAmd64Desktop {
+return 1
 }
 return 0
 }
@@ -34449,6 +34588,9 @@ return 169
 if renvoFixedTarget == renvoTargetNetBSDAmd64 {
 return 173
 }
+if renvoFixedTarget == renvoTargetLinuxAmd64Desktop {
+return 17
+}
 return 0
 }
 if renvoTargetOS == 7 && renvoTargetArch == 1 {
@@ -34499,6 +34641,9 @@ return 170
 }
 if renvoFixedTarget == renvoTargetNetBSDAmd64 {
 return 174
+}
+if renvoFixedTarget == renvoTargetLinuxAmd64Desktop {
+return 18
 }
 return 0
 }
@@ -34551,6 +34696,9 @@ return 5
 if renvoFixedTarget == renvoTargetNetBSDAmd64 {
 return 5
 }
+if renvoFixedTarget == renvoTargetLinuxAmd64Desktop {
+return 2
+}
 return 0
 }
 if renvoTargetOS == 7 && renvoTargetArch == 1 {
@@ -34601,6 +34749,9 @@ return 6
 }
 if renvoFixedTarget == renvoTargetNetBSDAmd64 {
 return 6
+}
+if renvoFixedTarget == renvoTargetLinuxAmd64Desktop {
+return 3
 }
 return 0
 }
@@ -34653,6 +34804,9 @@ return 124
 if renvoFixedTarget == renvoTargetNetBSDAmd64 {
 return 124
 }
+if renvoFixedTarget == renvoTargetLinuxAmd64Desktop {
+return 91
+}
 return 0
 }
 if renvoTargetOS == 7 && renvoTargetArch == 1 {
@@ -34695,6 +34849,9 @@ return 1
 if renvoFixedTarget == renvoTargetNetBSDAmd64 {
 return 1
 }
+if renvoFixedTarget == renvoTargetLinuxAmd64Desktop {
+return 60
+}
 return 0
 }
 if renvoTargetOS == 7 {
@@ -34736,7 +34893,8 @@ const renvoTargetVM32 = 11
 const renvoTargetFreeBSDAmd64 = 12
 const renvoTargetOpenBSDAmd64 = 13
 const renvoTargetNetBSDAmd64 = 14
-const renvoTargetRTG = 15
+const renvoTargetLinuxAmd64Desktop = 15
+const renvoTargetRTG = 16
 const renvoContextDefaultTarget = renvoTargetLinuxAmd64
 const renvoContextDefaultTargetOS = 1
 const renvoContextDefaultTargetArch = 1
@@ -34751,15 +34909,15 @@ const renvoResolvedLinuxAmd64SysClose = 3
 const renvoResolvedLinuxAmd64SysFchmod = 91
 const renvoResolvedLinuxAmd64SysExit = 60
 
-const targetOSTable = "\x00\x01\x01\x01\x01\x02\x02\x04\x03\x01\x02\x05\a\b\t"
-const targetArchTable = "\x00\x01\x02\x03\x04\x01\x02\x05\x03\x01\x03\x05\x01\x01\x01"
-const renvoTargetIntBitsTable = "\x00@ @ @  @@@ @@@"
-const renvoTargetRuntimeCapsTable = "\x00\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f?\x7f\x7f\x7f\x7f\x7f"
-const renvoTargetKernelModuleTable = "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00"
-const renvoTargetPointerBitsTable = "\x00@ @ @  @@@ @@@"
-const renvoTargetCodePointerBitsTable = "\x00@ @ @  @@@ @@@"
-const renvoTargetFunctionPointerBitsTable = "\x00@ @ @  @@@ @@@"
-const renvoTargetEndianTable = "\x00\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01"
+const targetOSTable = "\x00\x01\x01\x01\x01\x02\x02\x04\x03\x01\x02\x05\a\b\t\x01"
+const targetArchTable = "\x00\x01\x02\x03\x04\x01\x02\x05\x03\x01\x03\x05\x01\x01\x01\x01"
+const renvoTargetIntBitsTable = "\x00@ @ @  @@@ @@@@"
+const renvoTargetRuntimeCapsTable = "\x00\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f?\x7f\x7f\x7f\x7f\x7f\x7f"
+const renvoTargetKernelModuleTable = "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00"
+const renvoTargetPointerBitsTable = "\x00@ @ @  @@@ @@@@"
+const renvoTargetCodePointerBitsTable = "\x00@ @ @  @@@ @@@@"
+const renvoTargetFunctionPointerBitsTable = "\x00@ @ @  @@@ @@@@"
+const renvoTargetEndianTable = "\x00\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01"
 
 func renvoBundledTargetMaxAlign(target int) int {
 if target == renvoTargetLinuxAmd64 {
@@ -34802,6 +34960,9 @@ if target == renvoTargetOpenBSDAmd64 {
 return 8
 }
 if target == renvoTargetNetBSDAmd64 {
+return 8
+}
+if target == renvoTargetLinuxAmd64Desktop {
 return 8
 }
 return 0
@@ -34848,6 +35009,9 @@ if target == renvoTargetOpenBSDAmd64 {
 return 0
 }
 if target == renvoTargetNetBSDAmd64 {
+return 0
+}
+if target == renvoTargetLinuxAmd64Desktop {
 return 0
 }
 return 0
@@ -35199,6 +35363,9 @@ return renvoArenaSize64BitHosted
 }
 
 func renvoResolveArenaSize(target int, requested int) int {
+if renvoManagedTarget(target) {
+return requested
+}
 if requested == 0 {
 return renvoDefaultArenaSize(target)
 }
@@ -35484,7 +35651,7 @@ a.bssOffset = renvoAlignValue(a.dataOffset+len(a.data), 0x1000)
 
 // source: backend/compiler_target_registry_impl.go
 
-const renvoSupportedTargets = "linux/amd64, linux/386, linux/aarch64, linux/arm, windows/amd64, windows/386, windows/arm64, darwin/arm64, wasi/wasm32, vm/vm32, freebsd/amd64, openbsd/amd64, netbsd/amd64"
+const renvoSupportedTargets = "linux/amd64, linux/386, linux/aarch64, linux/arm, windows/amd64, windows/386, windows/arm64, darwin/arm64, wasi/wasm32, vm/vm32, freebsd/amd64, openbsd/amd64, netbsd/amd64, linux/amd64-desktop"
 
 func renvoParseTargetArg(target string) int {
 if target == "linux/amd64" {
@@ -35529,24 +35696,27 @@ return renvoTargetOpenBSDAmd64
 if target == "netbsd/amd64" {
 return renvoTargetNetBSDAmd64
 }
+if target == "linux/amd64-desktop" {
+return renvoTargetLinuxAmd64Desktop
+}
 return renvoRTGParseTargetArg(target)
 }
 
 func renvoBuiltInTargetBinding(target int) (string, string, int, bool) {
 if target == renvoTargetLinuxAmd64 {
-return "linux/amd64", "\xef\x54\xbc\xdc\xa7\x39\xa1\x42\x3b\x54\x75\x00\x1b\x7f\x3e\x63\x36\xa0\x16\x84\x01\x40\x2a\xbe\x45\xf2\x93\x6a\xf5\x53\x4d\x7d", 3, true
+return "linux/amd64", "\x8b\x32\x75\x3a\xe5\x89\xce\xfa\x60\xd1\x83\xc0\x8f\x1c\xf2\x1f\x11\x34\xa1\xd3\x6f\x71\x36\x6c\xc2\xcf\x8f\x98\xcf\x7f\x11\x70", 3, true
 }
 if target == renvoTargetLinux386 {
-return "linux/386", "\x60\xc3\x7c\xa8\xd9\x78\x29\x90\xaa\xa0\xd4\x5c\xb6\xc6\x9f\x4f\x20\x90\xa5\x94\x11\x03\xe0\x23\x70\xa1\x58\x3a\x09\xbc\xa6\xd1", 3, true
+return "linux/386", "\x0d\x47\x10\xa4\x99\x4f\x89\xa5\x8e\xb1\x46\xb5\xba\x06\xd4\x4f\x99\xd0\x7b\xee\xfe\xfc\x1b\x32\x1a\x19\x6b\x09\x84\xda\x5b\x78", 3, true
 }
 if target == renvoTargetLinuxAarch64 {
-return "linux/aarch64", "\x70\xaa\x2b\x7d\x71\x51\xef\x9e\x36\x9a\xc5\xca\x40\x1f\x9f\xca\xe5\xae\xaf\xf4\x29\xd2\x70\x31\xae\xe9\x47\xb3\x30\xef\x90\x08", 3, true
+return "linux/aarch64", "\x89\x73\x18\x05\x97\x25\xf7\xc9\xb8\x98\x05\x2b\x08\xfb\x64\xe4\x87\xe2\xc1\xce\x8d\x35\x2b\x47\x3c\x55\xc3\xe9\xbe\x70\xe7\x3c", 3, true
 }
 if target == renvoTargetLinuxArm {
-return "linux/arm", "\x27\x7b\x54\xf0\x24\x66\x4e\xdc\xdf\xac\xb4\x34\x21\x91\x91\xfe\xbd\x98\x31\x9e\x7e\x02\x73\x64\xd4\x12\x0a\x6e\xec\x8e\xb7\xe4", 3, true
+return "linux/arm", "\x37\xff\xe8\x5d\x5c\x2c\xa7\x7f\x43\xaa\x80\x38\xe0\x8f\xb4\xbf\x7a\x18\x91\xcf\xe2\x3f\x19\xe8\x5a\xd3\xee\xad\x31\x58\x36\xf2", 3, true
 }
 if target == renvoTargetWindowsAmd64 {
-return "windows/amd64", "\xc0\xa6\x4c\x4b\x2f\x7f\x56\xe8\x6e\x76\x73\xb4\xc5\x3a\x02\xf8\xfc\x07\x6e\x60\x87\x1c\x1d\x90\x8a\x03\x5e\x11\x1a\x5b\x1a\x54", 3, true
+return "windows/amd64", "\x8c\x45\x9a\x1d\xa3\xa1\x9c\xfb\x9b\x3b\x50\xa0\x0f\x5d\x2c\xc5\x83\xe3\x2c\x1b\x01\x99\x1c\xf8\x58\xa1\x23\x42\x8a\x02\x8d\x2c", 3, true
 }
 if target == renvoTargetWindows386 {
 return "windows/386", "\x96\x84\xb4\x21\xf9\x6c\xbd\x61\x96\x90\x86\x17\xa2\x57\x65\x1d\x44\x2b\x22\xd6\x4e\xdc\x0e\x9c\xae\xbf\xe3\x67\xf2\xaa\x78\x0a", 3, true
@@ -35558,7 +35728,7 @@ if target == renvoTargetDarwinArm64 {
 return "darwin/arm64", "\x61\x43\xbc\x1a\x01\xd4\x0d\x9e\xdd\xef\x08\xee\x0c\x23\xfd\x24\x9b\xdd\x4a\x24\x6a\x6a\xef\x37\xf3\xd5\xe9\x27\x72\xb7\x6e\xae", 3, true
 }
 if target == renvoTargetLinuxKernelAmd64 {
-return "linux-kernel/amd64", "\x7c\x2d\xcd\x67\xe9\xfc\x06\xce\x55\x41\x96\xba\x77\x4c\x92\x4c\xa6\x19\x9d\x5f\x04\x16\x82\xb8\x5c\xc5\x6c\xf7\x81\x8c\xf6\x1f", 3, true
+return "linux-kernel/amd64", "\x53\x3b\x12\xbe\x45\x0a\x8e\x93\x87\x8c\x89\xa1\x7a\x58\x34\x8f\xf6\x8e\x95\x5b\xb1\x7b\x5c\x3d\x5d\xf5\x3a\xb2\x36\x69\x4b\x62", 3, true
 }
 if target == renvoTargetWindowsArm64 {
 return "windows/arm64", "\x59\x66\x8b\x7c\x0b\x26\x04\x8c\x4d\xd5\xc8\xee\x3a\x8d\x2f\x9b\x01\x05\x5b\x97\x5b\xd8\xf9\x7f\xc9\x24\x5f\xc6\xe1\x80\x8c\x9c", 3, true
@@ -35567,13 +35737,16 @@ if target == renvoTargetVM32 {
 return "vm/vm32", "\xf2\x73\xeb\x3a\x8d\x05\x4b\x53\xed\x2e\xb3\xcf\x65\x04\xbc\xb0\xa0\x8e\xb1\xee\x29\xd2\x72\xc9\x49\xb0\xca\xa9\xbc\x92\xd1\xfa", 3, true
 }
 if target == renvoTargetFreeBSDAmd64 {
-return "freebsd/amd64", "\x4e\xb0\xa3\xf5\x44\xa4\xdb\xc9\x99\xc7\xb6\x33\xd5\x78\x14\xde\x42\x45\xd4\x2d\x90\x36\xda\x2e\x86\x69\xc2\xc7\xeb\x15\x13\x40", 3, true
+return "freebsd/amd64", "\xf9\x0d\xf4\x73\xc0\x2a\x1d\xaa\x94\x35\x9b\xa1\x38\x36\x51\x4e\x90\xaf\x40\x7f\xd0\xba\x3c\x3f\xdb\x13\x97\x30\x33\xb4\x55\xd2", 3, true
 }
 if target == renvoTargetOpenBSDAmd64 {
-return "openbsd/amd64", "\xc9\xbb\x3e\xf9\x14\xdc\xc0\xa5\x11\x91\x69\x13\xe0\xf2\x40\xd5\x0c\xa3\x4f\xc7\x0a\xc5\xd5\x2b\x4b\x24\x38\x48\xde\x99\x7d\xe0", 3, true
+return "openbsd/amd64", "\x02\x06\xf5\xf8\x7c\xbb\x06\x1f\xa6\xea\x21\xb2\x7f\xea\x1c\xad\xcf\xcd\xa0\x05\x70\xe9\xca\xf5\xeb\x36\xd7\xc6\x55\x64\x1f\xa1", 3, true
 }
 if target == renvoTargetNetBSDAmd64 {
-return "netbsd/amd64", "\x56\x86\x32\x1a\xa5\x86\xe5\xd0\x2d\x0c\xa7\xb9\xa9\x5d\x80\x24\x5c\x97\x1b\x16\x11\x7d\xb2\xca\xb7\xa9\x02\xe5\x1c\xfc\xf1\x04", 3, true
+return "netbsd/amd64", "\x53\x17\x9f\xda\x1f\x50\x98\x25\x57\x46\x8e\x54\xfb\x24\xa1\x4b\x9b\xa0\xbc\x38\x60\xf4\x69\x12\x80\x2d\xe5\x7a\xa9\xa9\x2e\xe4", 3, true
+}
+if target == renvoTargetLinuxAmd64Desktop {
+return "linux/amd64-desktop", "\x6e\xbd\xba\x5f\xef\x88\x06\x17\x43\xf4\x4c\x27\x53\x9c\xa4\xa2\x7b\x42\xec\x96\xa5\xeb\xb3\xd5\x7b\xb7\x56\xb5\x99\x8d\xc2\xe6", 3, true
 }
 return "", "", 0, false
 }
@@ -35797,6 +35970,11 @@ return false
 }
 if options.RegParm != 0 && (options.RegParm != 3 || target != renvoTargetLinux386 || !options.ObjectFile) {
 return false
+}
+if renvoManagedTarget(target) {
+
+
+return options.ArenaSize >= 0 && !options.ObjectFile && !options.EmitImage
 }
 return options.ArenaSize == 0 || options.ArenaSize >= renvoArenaSizeMinimum && options.ArenaSize <= renvoArenaSizeMaximum
 }
@@ -37005,6 +37183,8 @@ func renvoRTGTargetHasCapability(target int, capability string) bool {
 return false
 }
 
+const renvoRTGManagedHeap = 0
+
 func renvoRTGProfileForTarget(target int) renvoTargetProfile {
 return renvoTargetProfile{}
 }
@@ -37037,6 +37217,299 @@ func renvoRTGEmitCustomSyscall(out *renvoAsm, wordCount int, number int) bool {
 return false
 }
 func renvoRTGRecordRawSyscall(out *renvoAsm, number int) {
+}
+
+func rtgNativeManagedHeap64PackageManagedHeap64Source() string { return rtgNativeManagedHeap64PackageManagedHeapSource(8) }
+func rtgNativeManagedHeap64PackageManagedHeapSource(wordBytes int) string {
+constants := "const __renvoManagedWordBytes = uintptr(8)\nconst __renvoManagedMax = uintptr(9223372036854775807)\n"
+if wordBytes == 4 {
+constants = "const __renvoManagedWordBytes = uintptr(4)\nconst __renvoManagedMax = uintptr(2147483647)\n"
+}
+return constants + `
+				// Desktop heap runtime, parsed and compiled with the application. No helper
+				// below allocates through make/new/append or calls application code.
+				var __renvoManagedState [16]uintptr
+
+				func __renvoManagedRead(p uintptr) uintptr { return *(*uintptr)(p) }
+				func __renvoManagedWrite(p uintptr, v uintptr) { *(*uintptr)(p) = v }
+				func __renvoManagedByte(p uintptr) byte { return *(*byte)(p) }
+
+				func __renvoManagedLimit(p uintptr) uintptr {
+					var value uintptr
+					var digits int
+					for __renvoManagedByte(p) >= '0' && __renvoManagedByte(p) <= '9' {
+						digit := uintptr(__renvoManagedByte(p)-'0')
+						if value > (__renvoManagedMax-digit)/10 { return 0 }
+						value = value*10+digit
+						p++
+						digits++
+					}
+					if digits == 0 || value == 0 { return 0 }
+					var shift uintptr
+					if __renvoManagedByte(p) != 0 {
+						c := __renvoManagedByte(p)
+						if c == 'K' { shift = 10 } else if c == 'M' { shift = 20 } else if c == 'G' { shift = 30 } else if c == 'T' { shift = 40 } else { return 0 }
+						if __renvoManagedByte(p+1) != 'i' || __renvoManagedByte(p+2) != 'B' || __renvoManagedByte(p+3) != 0 { return 0 }
+					}
+					if value > __renvoManagedMax>>shift { return 0 }
+					return value << shift
+				}
+
+				func __renvoManagedInit(limit uintptr, stack uintptr, globals uintptr, end uintptr) {
+					if limit == 0 { limit = __renvoManagedMax }
+					override := __renvoManagedEnvironment(stack)
+					if override != 0 {
+						limit = __renvoManagedLimit(override)
+						if limit == 0 { __renvoManagedFatal("renvo: invalid RENVO_HEAP_LIMIT\n") }
+					}
+					// State and the common allocator's 32-byte compatibility bookkeeping.
+					if limit < 160 { __renvoManagedFatal("panic: out of memory\n") }
+					__renvoManagedState[1] = limit
+					__renvoManagedState[2] = 160
+					__renvoManagedState[3] = stack
+					__renvoManagedState[6] = globals
+					__renvoManagedState[7] = end
+					__renvoManagedState[8] = 65536
+				}
+
+				// Segment header: next, mapping size, payload offset, reserved word; then one
+				// block-header index per mapped page. All of this resides in charged mappings.
+				func __renvoManagedHeader(size uintptr) uintptr { return (32+(size/__renvoManagedPageSize)*8+15)&^uintptr(15) }
+				func __renvoManagedIndex(s uintptr, b uintptr, span uintptr) {
+					first := (b-s+(__renvoManagedPageSize-1))/__renvoManagedPageSize
+					end := (b-s+span+(__renvoManagedPageSize-1))/__renvoManagedPageSize
+					for page := first; page < end; page++ { __renvoManagedWrite(s+32+page*8, b) }
+				}
+				func __renvoManagedFind(pointer uintptr) uintptr {
+					for s := __renvoManagedState[0]; s != 0; s = __renvoManagedRead(s) {
+						size := __renvoManagedRead(s+8)
+						if pointer < s+__renvoManagedRead(s+16)+16 || pointer-s >= size { continue }
+						b := __renvoManagedRead(s+32+((pointer-s)/__renvoManagedPageSize)*8)
+						for b < s+size {
+							span := __renvoManagedRead(b)
+							if pointer < b+span {
+								if pointer >= b+16 && __renvoManagedRead(b+8)&1 != 0 { return b }
+								return 0
+							}
+							b += span
+						}
+					}
+					return 0
+				}
+				func __renvoManagedMark(pointer uintptr) {
+					b := __renvoManagedFind(pointer)
+					if b != 0 && __renvoManagedRead(b+8)&2 == 0 {
+						// Block headers are 16-byte aligned. During marking the upper bits
+						// hold the next work item; low bits retain allocated/marked flags.
+						__renvoManagedWrite(b+8, __renvoManagedState[9]|3)
+						__renvoManagedState[9] = b
+					}
+				}
+				func __renvoManagedScan(start uintptr, end uintptr) {
+					for p := start; p < end; p += __renvoManagedWordBytes { __renvoManagedMark(__renvoManagedRead(p)) }
+				}
+				func __renvoManagedCollect(roots uintptr) {
+					__renvoManagedState[4] = 0
+					__renvoManagedState[5] = 0
+					__renvoManagedState[9] = 0
+					__renvoManagedRoots(roots)
+					state := uintptr(&__renvoManagedState[0])
+					__renvoManagedScan(__renvoManagedState[6], state)
+					__renvoManagedScan(state+16*__renvoManagedWordBytes, __renvoManagedState[7])
+					for __renvoManagedState[9] != 0 {
+						b := __renvoManagedState[9]
+						__renvoManagedState[9] = __renvoManagedRead(b+8)&^uintptr(15)
+						__renvoManagedWrite(b+8, 3)
+						__renvoManagedScan(b+16, b+__renvoManagedRead(b))
+					}
+					var previous uintptr
+					var live uintptr
+					for s := __renvoManagedState[0]; s != 0; {
+						size := __renvoManagedRead(s+8)
+						var free uintptr
+						used := false
+						for b := s+__renvoManagedRead(s+16); b < s+size; {
+							span := __renvoManagedRead(b)
+							if __renvoManagedRead(b+8)&2 != 0 {
+								__renvoManagedWrite(b+8, 1)
+								free = 0
+								used = true
+								live += span
+							} else {
+								__renvoManagedWrite(b+8, 0)
+								if free != 0 { __renvoManagedWrite(free, __renvoManagedRead(free)+span) } else { free = b }
+							}
+							b += span
+						}
+						next := __renvoManagedRead(s)
+						if !used {
+							if previous == 0 { __renvoManagedState[0] = next } else { __renvoManagedWrite(previous, next) }
+							if !__renvoManagedRelease(s, size) { __renvoManagedFatal("renvo: managed heap release failed\n") }
+							__renvoManagedState[2] -= size
+						} else {
+							previous = s
+							__renvoManagedWrite(s+32, s+__renvoManagedRead(s+16))
+							for b := s+__renvoManagedRead(s+16); b < s+size; b += __renvoManagedRead(b) {
+								__renvoManagedIndex(s, b, __renvoManagedRead(b))
+							}
+						}
+						s = next
+					}
+					__renvoManagedState[10]++
+					__renvoManagedState[12] = live
+				}
+				func __renvoManagedClaim(s uintptr, b uintptr, span uintptr) uintptr {
+					available := __renvoManagedRead(b)
+					__renvoManagedState[4] = 0
+					if available-span >= 32 {
+						__renvoManagedWrite(b+span, available-span)
+						__renvoManagedWrite(b+span+8, 0)
+						__renvoManagedWrite(b, span)
+						__renvoManagedState[4] = b+span
+						__renvoManagedState[5] = s
+						available = span
+					}
+					// Only occupied pages need a fresh index. An older free-page index is
+					// still a valid earlier block; lookup walks forward until sweep rebuilds it.
+					__renvoManagedIndex(s, b, available)
+					__renvoManagedWrite(b+8, 1)
+					for p := b+16; p < b+available; p += __renvoManagedWordBytes { __renvoManagedWrite(p, 0) }
+					return b+16
+				}
+				func __renvoManagedTake(span uintptr) uintptr {
+					b := __renvoManagedState[4]
+					if b != 0 && __renvoManagedRead(b) >= span {
+						return __renvoManagedClaim(__renvoManagedState[5], b, span)
+					}
+					for s := __renvoManagedState[0]; s != 0; s = __renvoManagedRead(s) {
+						end := s+__renvoManagedRead(s+8)
+						for b := s+__renvoManagedRead(s+16); b < end; b += __renvoManagedRead(b) {
+							if __renvoManagedRead(b+8) == 0 && __renvoManagedRead(b) >= span {
+								return __renvoManagedClaim(s, b, span)
+							}
+						}
+					}
+					return 0
+				}
+				func __renvoManagedRequest(size uintptr, roots uintptr) uintptr {
+					if size > __renvoManagedMax-(__renvoManagedPageSize+31) { return 0 }
+					if size == 0 { size = 16 }
+					span := ((size+15)&^uintptr(15))+16
+					result := __renvoManagedTake(span)
+					if result != 0 { return result }
+					if __renvoManagedState[0] != 0 {
+						__renvoManagedCollect(roots)
+						result = __renvoManagedTake(span)
+						if result != 0 { return result }
+					}
+					minimum := (span+48+(__renvoManagedPageSize-1))&^uintptr((__renvoManagedPageSize-1))
+					for minimum-__renvoManagedHeader(minimum) < span {
+						minimum = (span+__renvoManagedHeader(minimum)+(__renvoManagedPageSize-1))&^uintptr((__renvoManagedPageSize-1))
+					}
+					available := (__renvoManagedState[1]-__renvoManagedState[2])&^uintptr((__renvoManagedPageSize-1))
+					if minimum > available { return 0 }
+					growth := __renvoManagedState[8]
+					if growth < minimum { growth = minimum }
+					if growth > available { growth = available }
+					mapping := __renvoManagedMap(growth)
+					if mapping == 0 && growth != minimum {
+						growth = minimum
+						mapping = __renvoManagedMap(growth)
+					}
+					if mapping == 0 { return 0 }
+					base := uintptr(mapping)
+					__renvoManagedWrite(base, __renvoManagedState[0])
+					__renvoManagedWrite(base+8, growth)
+					header := __renvoManagedHeader(growth)
+					__renvoManagedWrite(base+16, header)
+					for page := uintptr(0); page < growth/__renvoManagedPageSize; page++ { __renvoManagedWrite(base+32+page*8, base+header) }
+					__renvoManagedWrite(base+header, growth-header)
+					__renvoManagedState[4] = base+header
+					__renvoManagedState[5] = base
+					__renvoManagedState[0] = base
+					__renvoManagedState[2] += growth
+					if growth < __renvoManagedMax/2 { __renvoManagedState[8] = growth*2 }
+					return __renvoManagedTake(span)
+				}
+				func __renvoManagedCollectBoundary(ignored uintptr, roots uintptr) uintptr {
+					__renvoManagedCollect(roots)
+					return 0
+				}
+				`
+}
+func rtgNativeManagedLinuxAmd64PackageLinuxAmd64ManagedSource() string {
+return rtgNativeManagedHeap64PackageManagedHeap64Source() + `
+					//renvo:intrinsic renvo_runtime_Syscall
+					func __renvoManagedSyscall(n int, a uintptr, b uintptr, c uintptr, d uintptr, e int, f uintptr) int { return -1 }
+					const __renvoManagedPageSize = uintptr(4096)
+					func __renvoManagedMap(size uintptr) uintptr {
+					 p := __renvoManagedSyscall(9, 0, size, 3, 34, -1, 0)
+					 if p < 0 { return 0 }; return uintptr(p)
+					}
+					func __renvoManagedRelease(base uintptr, size uintptr) bool { return __renvoManagedSyscall(11, base, size, 0, 0, 0, 0) == 0 }
+					func __renvoManagedFatal(message string) { print(message); __renvoManagedSyscall(60, 2, 0, 0, 0, 0, 0) }
+					func __renvoManagedEnvironment(stack uintptr) uintptr {
+					 // Linux initial process stack: argc, argv[], null, envp[], null.
+					 p := stack + 16 + __renvoManagedRead(stack)*8
+					 for __renvoManagedRead(p) != 0 {
+					  entry := __renvoManagedRead(p)
+					  matched := true
+					  prefix := "RENVO_HEAP_LIMIT="
+					  for i := 0; i < len(prefix); i++ {
+					   if __renvoManagedByte(entry+uintptr(i)) != prefix[i] { matched = false; break }
+					  }
+					  if matched { return entry+17 }
+					  p += 8
+					 }
+					 return 0
+					}
+					func __renvoManagedRoots(roots uintptr) {
+					 if roots > __renvoManagedState[3] { __renvoManagedFatal("renvo: unsupported managed stack\n") }
+					 __renvoManagedScan(roots, __renvoManagedState[3])
+					}
+					`
+}
+func rtgNativeManagedLinuxAmd64PackageLinuxAmd64ManagedStartup(out *renvoAsm, limit int, label int) {
+renvoAsmEmit2(out, 0x48, 0xb9)
+renvoAsmEmit64(out, limit)
+renvoAsmEmitText(out, "\x48\x8d\x55\x08")
+renvoAsmEmitText(out, "\x48\x8d\x35")
+at := len(out.code)
+renvoAsmEmit32(out, 0)
+renvoAsmAddAbsReloc(out, at, 0, 1)
+renvoAsmEmitText(out, "\x48\x8d\x3d")
+at = len(out.code)
+renvoAsmEmit32(out, 0)
+renvoAsmAddAbsReloc(out, at, 8, 3)
+renvoAsmEmit8(out, 0xe8)
+renvoAsmEmit32(out, 0)
+out.Reloc(label)
+}
+func rtgNativeManagedLinuxAmd64PackageLinuxAmd64ManagedBoundary(out *renvoAsm, label int) {
+renvoAsmEmitText(out, "\x50\x51\x52\x53\x55\x56\x57\x41\x50\x41\x51\x41\x52\x41\x53\x41\x54\x41\x55\x41\x56\x41\x57")
+renvoAsmEmitText(out, "\x48\x89\xc6\x48\x89\xe7")
+renvoAsmEmit8(out, 0xe8)
+renvoAsmEmit32(out, 0)
+out.Reloc(label)
+renvoAsmEmitText(out, "\x48\x89\x44\x24\x70")
+renvoAsmEmitText(out, "\x41\x5f\x41\x5e\x41\x5d\x41\x5c\x41\x5b\x41\x5a\x41\x59\x41\x58\x5f\x5e\x5d\x5b\x5a\x59\x58")
+}
+
+func renvoManagedTarget(target int) bool {
+if target == renvoParseTargetArg("linux/amd64-desktop") { return true }
+return false
+}
+func renvoManagedRuntimeSource(target int) string {
+if target == renvoParseTargetArg("linux/amd64-desktop") { return rtgNativeManagedLinuxAmd64PackageLinuxAmd64ManagedSource() }
+return ""
+}
+func renvoManagedStartup(target int, out *renvoAsm, limit int, label int) {
+if target == renvoParseTargetArg("linux/amd64-desktop") { rtgNativeManagedLinuxAmd64PackageLinuxAmd64ManagedStartup(out,limit,label); return }
+out.patchFailed = true
+}
+func renvoManagedBoundary(target int, out *renvoAsm, label int) {
+if target == renvoParseTargetArg("linux/amd64-desktop") { rtgNativeManagedLinuxAmd64PackageLinuxAmd64ManagedBoundary(out,label); return }
+out.patchFailed = true
 }
 
 func renvoReplGlobalsSupported(c *renvoCompileContext) bool {
@@ -43390,11 +43863,20 @@ renvoNonNil(g)
 renvoCompilerSelector := g.c
 renvoNonNil(renvoCompilerSelector)
 if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 || renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm {
+if renvoCompilerSelector.renvoTargetArch == renvoArchAmd64 {
+
+
+
+if g.c.objectFile || renvoManagedTarget(g.c.renvoTarget) {
+return
+}
+} else if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm {
 
 
 
 if g.c.objectFile {
 return
+}
 }
 renvoStringHeapOffsets(g)
 a := &g.asm
@@ -43444,7 +43926,6 @@ renvoAsmMarkLabel(a, small)
 renvoAsmPopPrimary(a)
 renvoAsmMarkLabel(a, plain)
 return
-
 }
 if renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 

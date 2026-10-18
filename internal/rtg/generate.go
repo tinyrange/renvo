@@ -103,7 +103,11 @@ func GenerateArchitectureKernel(packageName string, definitions []ResolveResult)
 	source = appendPreparedStaticCallPolicy(source, ResolvedTarget{})
 	source = appendPreparedOpenFlags(source, Declaration{})
 	source = appendPreparedSyscallPolicy(source, Document{}, Declaration{})
-	return appendBundledCompilerBindings(source, definitions)
+	managed := appendBundledManagedHeap(source, definitions)
+	if !managed.Ok {
+		return managed
+	}
+	return appendBundledCompilerBindings(managed.Source, definitions)
 }
 
 // GeneratePreparedBackend emits a closed definition as one package-main source
@@ -144,6 +148,7 @@ func generatePreparedBackendWithRoots(resolved ResolveResult, targetName string,
 	source = appendPreparedStaticCallPolicy(source, target)
 	source = appendPreparedOpenFlags(source, target.Runtime)
 	source = appendPreparedSyscallPolicy(source, resolved.Document, target.Runtime)
+	source = appendPreparedManagedHeap(source, resolved.Document, target)
 	source = appendArchitectureFacts(source, resolved.Document, target.Arch, true)
 	goRoots := baseTargetGoRoots(resolved.Document, target)
 	sequenceRoots := targetSequenceRoots(resolved.Document, target)
@@ -297,6 +302,12 @@ func appendPreparedTargetFacts(source []byte, descriptor TargetDescriptor, activ
 	}
 	source = append(source, "}\n"...)
 
+	source = append(source, "\nconst renvoRTGManagedHeap = "...)
+	if active && descriptor.MemoryStrategy == "desktop" {
+		source = append(source, "1\n"...)
+	} else {
+		source = append(source, "0\n"...)
+	}
 	source = append(source, "\nfunc renvoRTGProfileForTarget(target int) renvoTargetProfile {\n"...)
 	if active {
 		source = append(source, "if target != renvoTargetRTG { return renvoTargetProfile{} }\n"...)
@@ -442,7 +453,7 @@ func GenerateUniversalBackend(definitions []ResolveResult) GenerateResult {
 	sortStrings(manifest)
 	sortResolvedTargets(targets)
 	source := generateHeader(manifest, "universal")
-	source = append(source, "type RTGTargetDescriptor struct { Name string; Family string; OS string; ISA string; WordBits int; PointerBits int; CodePointerBits int; FunctionPointerBits int; MaxAlign int; ArenaDefault int; Endian string; ABI string; Runtime string; RuntimeOps []string; Executable string; Object string; OutputKind string; Definition string; Version int }\n"...)
+	source = append(source, "type RTGTargetDescriptor struct { Name string; Family string; OS string; ISA string; WordBits int; PointerBits int; CodePointerBits int; FunctionPointerBits int; MaxAlign int; ArenaDefault int; MemoryStrategy string; Endian string; ABI string; Runtime string; RuntimeOps []string; Executable string; Object string; OutputKind string; Definition string; Version int }\n"...)
 	source = append(source, "func RTGLookupTarget(name string) (RTGTargetDescriptor, bool) {\n"...)
 	source = append(source, "switch name {\n"...)
 	for i := 0; i < len(targets); i++ {
@@ -1741,7 +1752,7 @@ func trimBlockNewlines(source []byte) []byte {
 }
 
 func appendDescriptorSource(source []byte, descriptor TargetDescriptor) []byte {
-	source = append(source, "type RTGTargetDescriptor struct { Name string; Family string; OS string; ISA string; WordBits int; PointerBits int; CodePointerBits int; FunctionPointerBits int; MaxAlign int; ArenaDefault int; Endian string; ABI string; Runtime string; RuntimeOps []string; Executable string; Object string; OutputKind string; Definition string; Version int }\n"...)
+	source = append(source, "type RTGTargetDescriptor struct { Name string; Family string; OS string; ISA string; WordBits int; PointerBits int; CodePointerBits int; FunctionPointerBits int; MaxAlign int; ArenaDefault int; MemoryStrategy string; Endian string; ABI string; Runtime string; RuntimeOps []string; Executable string; Object string; OutputKind string; Definition string; Version int }\n"...)
 	source = append(source, "var RTGTarget = "...)
 	source = appendDescriptorLiteral(source, descriptor)
 	source = append(source, '\n')
@@ -1771,6 +1782,8 @@ func appendDescriptorLiteral(source []byte, descriptor TargetDescriptor) []byte 
 	source = appendDecimalFrame(source, descriptor.FunctionPointerBits)
 	source = append(source, ",MaxAlign:"...)
 	source = appendDecimalFrame(source, descriptor.MaxAlign)
+	source = append(source, ",MemoryStrategy:"...)
+	source = appendQuoted(source, descriptor.MemoryStrategy)
 	source = append(source, ",ArenaDefault:"...)
 	source = appendDecimalFrame(source, descriptor.ArenaDefault)
 	source = append(source, ",RuntimeOps:[]string{"...)

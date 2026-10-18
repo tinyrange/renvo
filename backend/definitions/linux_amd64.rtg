@@ -3,6 +3,7 @@ unit native
 implements direct_emitter_v1
 
 @import "elf_amd64.rtg"
+@import "managed_linux_amd64.rtg"
 
 go backend {
 	func linuxObjectStaticCall(
@@ -82,6 +83,11 @@ extend arch x86_64 {
 # Runtime declarations define only the supported boundary. Missing operations
 # are rejected during definition validation rather than silently emulated.
 runtime linux_x86_64 {
+	managed_heap_abi = 1
+	managed_word_bits = 64
+	managed_source = go managed_linux_amd64.linuxAmd64ManagedSource
+	managed_startup = go managed_linux_amd64.linuxAmd64ManagedStartup
+	managed_boundary = go managed_linux_amd64.linuxAmd64ManagedBoundary
 	prepare_read_write_buffer = sequence linuxPrepareReadWriteBuffer
 	move_offset_argument = sequence linuxMoveOffsetArgument
 	emit_static_call = go linuxObjectStaticCall
@@ -237,4 +243,16 @@ go backend {
 			out.Int32(argumentBytes)
 		}
 	}
+}
+
+target linux/amd64-desktop {
+	family = native_v1
+	os = linux
+	arch = x86_64
+	abi = sysv_x86_64
+	runtime = linux_x86_64
+	executable = elf64_x86_64
+	build_tags = ["linux", "unix", "amd64", "renvo_managed"]
+	capabilities = [hosted, executable, filesystem, heap, argv, environment]
+	memory_strategy = desktop
 }

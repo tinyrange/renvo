@@ -2,7 +2,7 @@
 // checked-in Go generated from their declarative architecture contracts.
 package definitions
 
-//go:generate go run ../../internal/rtg/cmd/rtggen -kernel -package main -o ../compiler_rtg_generated_impl.go x86_64_compiler.rtg x86_32_compiler.rtg aarch64_compiler.rtg arm_algorithms.rtg wasm32.rtg
+//go:generate go run ../../internal/rtg/cmd/rtggen -kernel -package main -o ../compiler_rtg_generated_impl.go x86_64_compiler.rtg x86_32_compiler.rtg aarch64_compiler.rtg arm_algorithms.rtg wasm32.rtg linux_amd64.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -algorithms -arch aarch64 -package main -o ../compiler_aarch64_impl.go aarch64_algorithms.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -compiler-integration -arch aarch64 -package main -o ../compiler_aarch64_target_impl.go aarch64_compiler.rtg
 //go:generate go run ../../internal/rtg/cmd/rtggen -target-projection -t linux/aarch64 -package main -o ../compiler_linux_aarch64_impl.go linux_aarch64.rtg

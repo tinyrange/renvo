@@ -34,6 +34,9 @@ func TestPreparedObjectCallPolicyIsDefinitionBound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// This fixture exercises the arena target's custom object ABI, not the
+	// desktop target's deliberately restricted native-stack runtime.
+	source = bytes.Split(source, []byte("target linux/amd64-desktop {"))[0]
 	const original = "object_call_layout = sysv_eightbyte"
 	for _, tc := range []struct {
 		name, policy                    string

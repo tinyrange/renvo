@@ -119,7 +119,9 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 	if result.Error == BuildErrOptions {
 		renvoSetDiagnostic(&d, "options", "RENVO-OPTION-001", "invalid command options")
 		optionError := result.Options.Error
-		if optionError == ParseErrUnknownOption {
+		if optionError == ParseErrHeapLimit {
+			renvoSetDiagnosticDetail(&d, "RENVO-OPTION-036", "invalid managed heap configuration: "+result.Options.ErrorArg)
+		} else if optionError == ParseErrUnknownOption {
 			renvoSetDiagnosticDetail(&d, "RENVO-OPTION-005", "unknown option "+result.Options.ErrorArg)
 		} else if optionError == ParseErrMixedFileList {
 			renvoSetDiagnosticDetail(&d, "RENVO-OPTION-011", "explicit source list contains a non-.go/.c argument "+result.Options.ErrorArg)

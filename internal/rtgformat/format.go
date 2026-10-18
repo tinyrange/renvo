@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"fmt"
 	"go/format"
+	"go/scanner"
+	"go/token"
 	"path/filepath"
 	"strings"
 
@@ -148,12 +150,38 @@ func writeIndentedGo(out *bytes.Buffer, body []byte) {
 	if len(body) == 0 {
 		return
 	}
+	// Go formatting preserves raw strings. Adding the RTG wrapper indentation
+	// inside those tokens changes their values and grows them on every pass.
+	// Scan tokens rather than counting backticks: comments and quoted strings
+	// can contain backticks without beginning a raw literal.
+	file := token.NewFileSet().AddFile("", -1, len(body))
+	var scan scanner.Scanner
+	scan.Init(file, body, nil, scanner.ScanComments)
+	var raw [][2]int
+	for {
+		pos, kind, literal := scan.Scan()
+		if kind == token.EOF {
+			break
+		}
+		if kind == token.STRING && len(literal) != 0 && literal[0] == '`' {
+			start := file.Offset(pos)
+			raw = append(raw, [2]int{start, start + len(literal)})
+		}
+	}
+	at, next := 0, 0
 	for _, line := range bytes.Split(body, []byte("\n")) {
+		for next < len(raw) && at >= raw[next][1] {
+			next++
+		}
+		insideRaw := next < len(raw) && at > raw[next][0]
 		if len(line) != 0 {
-			out.WriteByte('\t')
+			if !insideRaw {
+				out.WriteByte('\t')
+			}
 			out.Write(line)
 		}
 		out.WriteByte('\n')
+		at += len(line) + 1
 	}
 }
 

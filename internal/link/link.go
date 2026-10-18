@@ -1541,6 +1541,7 @@ func coreSymbolKeepsRuntimeName(name string) bool {
 		"renvo_runtime_Channel",
 		"renvo_runtime_SelectReceive",
 		"renvo_runtime_SelectSend",
+		"renvo_runtime_HeapCollect",
 		"renvo_runtime_ArenaMark",
 		"renvo_runtime_ArenaReset",
 		"renvo_runtime_ArenaPersistMark",
