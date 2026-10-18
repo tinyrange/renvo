@@ -2007,6 +2007,7 @@ func reachableEmbeddedGoParts(document Document, roots []string, excluded []stri
 		return nil
 	}
 	var parts []embeddedGoPart
+	var starts, ends []int
 	lastDeclarationStart := -1
 	lastDeclarationEnd := -1
 	for i := 0; i < len(file.Decls); i++ {
@@ -2026,6 +2027,8 @@ func reachableEmbeddedGoParts(document Document, roots []string, excluded []stri
 		}
 		declarationSource = append(declarationSource,
 			embeddedSourceRange(wrapped, file.Tokens, declaration.StartTok, declaration.EndTok)...)
+		starts = append(starts, declaration.StartTok)
+		ends = append(ends, declaration.EndTok)
 		parts = append(parts, embeddedGoPart{
 			name:   string(syntax.TokenText(wrapped, file.Tokens[declaration.NameTok])),
 			source: declarationSource,
@@ -2033,6 +2036,8 @@ func reachableEmbeddedGoParts(document Document, roots []string, excluded []stri
 	}
 	for i := 0; i < len(file.Funcs); i++ {
 		function := file.Funcs[i]
+		starts = append(starts, function.StartTok)
+		ends = append(ends, function.EndTok)
 		parts = append(parts, embeddedGoPart{
 			name:   string(syntax.TokenText(wrapped, file.Tokens[function.NameTok])),
 			source: embeddedSourceRange(wrapped, file.Tokens, function.StartTok, function.EndTok),
@@ -2043,18 +2048,17 @@ func reachableEmbeddedGoParts(document Document, roots []string, excluded []stri
 	for i := 0; i < len(parts); i++ {
 		names[i] = parts[i].name
 	}
+	// Reuse the parsed Go token ranges instead of rescanning every declaration
+	// with the RTG scanner. Names are only a membership index; output order stays
+	// in parts, so sorting this copy cannot change declaration precedence.
+	sortStrings(names)
 	for i := 0; i < len(parts); i++ {
-		tokens, diagnostics := scan(parts[i].source, "")
-		if len(diagnostics) != 0 {
-			continue
-		}
-		for j := 0; j < len(tokens); j++ {
-			if tokens[j].Kind != TokenIdent {
+		for j := starts[i]; j < ends[i]; j++ {
+			if file.Tokens[j].KindLine&255 != syntax.TokenIdent {
 				continue
 			}
-			name := tokenText(parts[i].source, tokens[j])
-			if name != parts[i].name && stringIndex(names, name) >= 0 &&
-				stringIndex(parts[i].refs, name) < 0 {
+			name := string(syntax.TokenText(wrapped, file.Tokens[j]))
+			if name != parts[i].name && compilerHookIndexContains(names, name) && stringIndex(parts[i].refs, name) < 0 {
 				parts[i].refs = append(parts[i].refs, name)
 			}
 		}
