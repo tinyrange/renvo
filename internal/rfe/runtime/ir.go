@@ -30,20 +30,65 @@ type Op struct {
 type Builder struct {
 	MemoryInstructionProgress bool                        // checkpoints group accesses into guest memory instructions
 	MemoryAddress             func(*Builder, Value) Value // optional architectural key/guard policy
+	BeforeMemoryStore         func(*Builder)              // optional architectural reservation guard, before any store checks
 	Ops                       []Op
 	state                     map[int]Value
+	stateSlots                [256]Value
+	statePresent              [8]uint32
+	dirtySlots                [8]uint32
 	masks                     []uint64
-	values                    map[Op]Value
+	valueBuckets              []Value // immutable Ops indices plus one; zero is empty
+	valueCount                int
 	dirty                     map[int]bool // stores since the previous effect checkpoint
+	finishLive                []bool
+	finishRemap               []Value
+}
+
+// Hash every component of the immutable expression. The index stores no
+// duplicate keys: exact equality against Ops resolves all hash collisions.
+// Capacity grows geometrically with the number of emitted values, not the
+// magnitude of immediates or architectural register numbers.
+func builderValueHash(op Op) uint64 {
+	value := op.Imm ^ uint64(op.Kind)*uint64(0x9e3779b97f4a7c15) ^ uint64(op.A)*uint64(0xbf58476d1ce4e5b9) ^ uint64(op.B)*uint64(0x94d049bb133111eb)
+	value = (value ^ (value >> 30)) * uint64(0xbf58476d1ce4e5b9)
+	value = (value ^ (value >> 27)) * uint64(0x94d049bb133111eb)
+	return value ^ (value >> 31)
+}
+
+func (b *Builder) valueBucket(op Op) int {
+	if len(b.valueBuckets) == 0 || b.valueCount*2 >= len(b.valueBuckets) {
+		size := len(b.valueBuckets) * 2
+		if size < 16 {
+			size = 16
+		}
+		buckets := make([]Value, size)
+		for _, entry := range b.valueBuckets {
+			if entry != 0 {
+				slot := int(builderValueHash(b.Ops[entry-1]) & uint64(size-1))
+				for buckets[slot] != 0 {
+					slot = (slot + 1) & (size - 1)
+				}
+				buckets[slot] = entry
+			}
+		}
+		b.valueBuckets = buckets
+	}
+	slot := int(builderValueHash(op) & uint64(len(b.valueBuckets)-1))
+	for b.valueBuckets[slot] != 0 && b.Ops[b.valueBuckets[slot]-1] != op {
+		slot = (slot + 1) & (len(b.valueBuckets) - 1)
+	}
+	return slot
 }
 
 func (b *Builder) emit(op Op) Value {
 	// Value numbering is limited to immutable expressions. Architectural loads
 	// are tracked by the state map, never interned across a state update.
 	pure := op.Kind == Const || op.Kind >= Add && pureOperation(op.Kind)
+	bucket := 0
 	if pure {
-		if v, ok := b.values[op]; ok {
-			return v
+		bucket = b.valueBucket(op)
+		if entry := b.valueBuckets[bucket]; entry != 0 {
+			return entry - 1
 		}
 	}
 	v := Value(len(b.Ops))
@@ -105,30 +150,79 @@ func (b *Builder) emit(op Op) Value {
 	b.Ops = append(b.Ops, op)
 	b.masks = append(b.masks, mask)
 	if pure {
-		if b.values == nil {
-			b.values = map[Op]Value{}
-		}
-		b.values[op] = v
+		b.valueBuckets[bucket] = v + 1
+		b.valueCount++
 	}
 	return v
 }
+
+// Reset reuses compilation scratch only. Finish/FinishMemory return independent
+// operation slices, so previously installed blocks and their proofs never alias
+// the next translation. No architectural or executable state lives here.
+func (b *Builder) Reset(memoryProgress bool) {
+	b.Ops = b.Ops[:0]
+	b.masks = b.masks[:0]
+	clear(b.state)
+	clear(b.statePresent[:])
+	clear(b.dirtySlots[:])
+	clear(b.valueBuckets)
+	b.valueCount = 0
+	clear(b.dirty)
+	b.MemoryAddress = nil
+	b.BeforeMemoryStore = nil
+	b.MemoryInstructionProgress = memoryProgress
+}
+func (b *Builder) finishScratch() ([]bool, []Value) {
+	if cap(b.finishLive) < len(b.Ops) {
+		b.finishLive = make([]bool, len(b.Ops))
+	} else {
+		b.finishLive = b.finishLive[:len(b.Ops)]
+		clear(b.finishLive)
+	}
+	if cap(b.finishRemap) < len(b.Ops) {
+		b.finishRemap = make([]Value, len(b.Ops))
+	} else {
+		b.finishRemap = b.finishRemap[:len(b.Ops)]
+		clear(b.finishRemap)
+	}
+	return b.finishLive, b.finishRemap
+}
 func (b *Builder) Constant(v uint64) Value { return b.emit(Op{Kind: Const, Imm: v}) }
-func (b *Builder) Load(slot int) Value {
+func (b *Builder) stateValue(slot int) (Value, bool) {
+	if slot >= 0 && slot < len(b.stateSlots) {
+		if b.statePresent[slot>>5]&(uint32(1)<<uint(slot&31)) != 0 {
+			return b.stateSlots[slot], true
+		}
+		return 0, false
+	}
+	v, ok := b.state[slot]
+	return v, ok
+}
+func (b *Builder) setStateValue(slot int, value Value) {
+	if slot >= 0 && slot < len(b.stateSlots) {
+		b.stateSlots[slot] = value
+		b.statePresent[slot>>5] |= uint32(1) << uint(slot&31)
+		return
+	}
 	if b.state == nil {
 		b.state = map[int]Value{}
 	}
-	if v, ok := b.state[slot]; ok {
+	b.state[slot] = value
+}
+func (b *Builder) Load(slot int) Value {
+	if v, ok := b.stateValue(slot); ok {
 		return v
 	}
 	v := b.emit(Op{Kind: LoadState, Imm: uint64(slot)})
-	b.state[slot] = v
+	b.setStateValue(slot, v)
 	return v
 }
 func (b *Builder) Store(slot int, v Value) {
-	if b.state == nil {
-		b.state = map[int]Value{}
+	b.setStateValue(slot, v)
+	if slot >= 0 && slot < len(b.stateSlots) {
+		b.dirtySlots[slot>>5] |= uint32(1) << uint(slot&31)
+		return
 	}
-	b.state[slot] = v
 	if b.dirty == nil {
 		b.dirty = map[int]bool{}
 	}
@@ -365,34 +459,33 @@ func (b *Builder) Choose(c, t, f Value) Value {
 // Finish drops dead values and defers state writes until all pure expressions
 // have been evaluated. Slot ordering and emitted code are deterministic.
 func (b *Builder) Finish(words int) []Op {
-	live := make([]bool, len(b.Ops))
-	var visit func(Value)
-	visit = func(v Value) {
-		if live[v] {
-			return
+	live, remap := b.finishScratch()
+	for i := 0; i < words; i++ {
+		if v, ok := b.stateValue(i); ok {
+			live[v] = true
 		}
-		live[v] = true
-		o := b.Ops[v]
+	}
+	// Every SSA operand was emitted before its consumer. One reverse pass
+	// computes the same transitive closure without recursion or closure calls.
+	for i := len(b.Ops) - 1; i >= 0; i-- {
+		if !live[i] {
+			continue
+		}
+		o := b.Ops[i]
 		if o.Kind >= Add {
-			visit(o.A)
+			live[o.A] = true
 			if o.Kind != Shl && o.Kind != Shr {
-				visit(o.B)
+				live[o.B] = true
 			}
 			if o.Kind == SelectValue {
-				visit(Value(o.Imm))
+				live[Value(o.Imm)] = true
 			}
 			if carryKind(o.Kind) {
-				visit(Value(o.Imm >> 8))
+				live[Value(o.Imm>>8)] = true
 			}
 		}
 	}
-	for i := 0; i < words; i++ {
-		if v, ok := b.state[i]; ok {
-			visit(v)
-		}
-	}
-	remap := make([]Value, len(b.Ops))
-	var out []Op
+	out := make([]Op, 0, len(b.Ops)+words)
 	for i, o := range b.Ops {
 		if !live[i] {
 			continue
@@ -413,7 +506,7 @@ func (b *Builder) Finish(words int) []Op {
 		out = append(out, o)
 	}
 	for i := 0; i < words; i++ {
-		if v, ok := b.state[i]; ok {
+		if v, ok := b.stateValue(i); ok {
 			out = append(out, Op{Kind: StoreState, A: remap[v], Imm: uint64(i)})
 		}
 	}

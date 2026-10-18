@@ -9,9 +9,10 @@ import (
 // Function values are lowered after package linking, when every possible
 // implementation is visible. The backend subset receives ordinary structs and
 // direct calls: a zero tag is nil, and each non-zero tag selects a generated
-// direct-call arm. A fixed-size descriptor holds the tag and an environment
-// interface containing a concrete environment pointer. Dispatch restores that
-// pointer's type before calling; no source-level unsafe conversion is needed.
+// direct-call arm. A descriptor holds the tag and an environment. Once all
+// implementations are known, a homogeneous environment keeps its exact pointer
+// type; mixed signatures retain an interface. Both paths are valid ordinary Go
+// and preserve the same nil, capture and deferred-call semantics.
 
 type functionValueSignature struct {
 	name          string
@@ -110,6 +111,7 @@ func lowerFunctionValuesCore(program *unit.Program, transient bool) bool {
 	edits = appendFunctionValueTypeEdits(program, signatures, edits)
 	edits = appendFunctionValuePackageEdits(program, edits)
 	edits = lowerFunctionValueInferredDeclarations(program, signatures, edits)
+	edits = lowerInferredBoundMethods(program, signatures, edits)
 	for i := 0; i < len(program.Tokens); i++ {
 		text := functionValueTokenText(program, i)
 		mark := arena.Mark()
@@ -541,6 +543,7 @@ func discoverFunctionValueTypes(program *unit.Program) ([]functionValueSignature
 			}
 		}
 	}
+	signatures = discoverInferredBoundMethods(program, signatures)
 	return signatures, fields, edits, true
 }
 
@@ -1012,6 +1015,9 @@ func lowerFunctionValueAssignment(program *unit.Program, op int, signatures []fu
 		// Each inferred initializer was matched to its own callable shape.
 		return edits, true
 	}
+	if out, ok := lowerFunctionValueParallelAssignment(program, op, signatures, fields, edits); ok {
+		return out, true
+	}
 	sigIndex := functionValueAssignmentSignature(program, op, signatures, fields)
 	if sigIndex < 0 || op+1 >= len(program.Tokens) {
 		return edits, true
@@ -1072,6 +1078,11 @@ func functionValueAssignmentSignature(program *unit.Program, op int, signatures 
 		}
 		if functionValueTokenCharIs(program, token, ';') || functionValueTokenCharIs(program, token, '=') || functionValueTokenEquals(program, token, ":=") {
 			break
+		}
+		if functionValueTokenKindIs(program, token, unit.TokenVar) && token+3 == op && program.Tokens[token+1].KindLine&255 == unit.TokenIdent && program.Tokens[token+2].KindLine&255 == unit.TokenIdent {
+			// var value NamedCallback = receiver.Method: the identifier next
+			// to '=' is the type, not a variable whose type can be inferred.
+			return functionValueSignatureByName(signatures, functionValueTokenText(program, token+2))
 		}
 		if functionValueTokenKindIs(program, token, unit.TokenFunc) {
 			candidate, end, ok := parseFunctionValueSignature(program, token, "")
@@ -1170,10 +1181,48 @@ func lowerFunctionValueBoundMethod(program *unit.Program, at int, rhs int, sigIn
 	if rhs+2 >= len(program.Tokens) || !functionValueTokenCharIs(program, rhs+1, '.') || program.Tokens[rhs].KindLine&255 != unit.TokenIdent || program.Tokens[rhs+2].KindLine&255 != unit.TokenIdent {
 		return edits
 	}
-	method := functionValueTokenText(program, rhs+2)
-	receiverType := functionValueMethodReceiverTypeForBase(program, at, functionValueTokenText(program, rhs), method)
+	if functionValueTokenCharIs(program, rhs+3, '(') {
+		return edits
+	}
+	methodTok := rhs + 2
+	for methodTok+2 < len(program.Tokens) && functionValueTokenCharIs(program, methodTok+1, '.') && program.Tokens[methodTok+2].KindLine&255 == unit.TokenIdent {
+		methodTok += 2
+	}
+	if functionValueTokenCharIs(program, methodTok+1, '(') {
+		return edits
+	}
+	method := functionValueTokenText(program, methodTok)
+	baseType := ""
+	if methodTok == rhs+2 {
+		baseType = functionValueEnclosingLocalType(program, at, functionValueTokenText(program, rhs))
+	} else {
+		baseType = functionValueFieldChainType(program, at, rhs, methodTok-1)
+	}
+	receiverType := ""
+	if baseType != "" {
+		receiverType = functionValueMethodReceiverTypeForType(program, baseType, method)
+	} else if methodTok == rhs+2 {
+		receiverType = functionValueMethodReceiverTypeForBase(program, at, functionValueTokenText(program, rhs), method)
+	}
 	if receiverType == "" {
 		return edits
+	}
+	// A value-receiver method selected through *T captures the value of T
+	// now, not the pointer for a deferred implicit dereference at invocation.
+	// Restrict this adjustment to a direct receiver; embedding keeps its own
+	// selection path and may cross a different pointer boundary.
+	if functionValueHasPrefix(baseType, "*") {
+		for i := 0; i < len(program.Funcs); i++ {
+			fn := &program.Funcs[i]
+			if fn.ReceiverStart >= fn.ReceiverEnd || !functionValueTokenEquals(program, fn.NameTok, method) {
+				continue
+			}
+			declared := functionValueReceiverType(program, fn)
+			if !functionValueHasPrefix(declared, "*") && functionValueBareType(declared) == functionValueBareType(baseType) {
+				receiverType = declared
+				break
+			}
+		}
 	}
 	implIndex := functionValueImplIndex(signatures[sigIndex], receiverType, method, "")
 	if implIndex < 0 {
@@ -1185,16 +1234,21 @@ func lowerFunctionValueBoundMethod(program *unit.Program, at int, rhs int, sigIn
 		signatures[sigIndex].storage.impls = append(signatures[sigIndex].storage.impls, functionValueImpl{receiverType: receiverType, environmentType: fieldName, method: method, nilReceiver: functionValueHasPrefix(ordinaryUnderlyingType(program, receiverType, 0), "interface")})
 	}
 	impl := signatures[sigIndex].storage.impls[implIndex]
-	receiver := functionValueTokenText(program, rhs)
-	baseType := functionValueEnclosingLocalType(program, at, receiver)
+	receiver := functionValueTokensText(program, rhs, methodTok-1)
+	if baseType == "" {
+		baseType = functionValueEnclosingLocalType(program, at, receiver)
+	}
 	if len(receiverType) > 0 && receiverType[0] == '*' && len(baseType) > 0 && baseType[0] != '*' {
 		receiver = "&" + receiver
+	}
+	if !functionValueHasPrefix(receiverType, "*") && functionValueHasPrefix(baseType, "*") && functionValueBareType(receiverType) == functionValueBareType(baseType) {
+		receiver = "*(" + receiver + ")"
 	}
 	replacement := signatures[sigIndex].name + "{kind: " + functionValueDecimal(implIndex+1) + ", data: &" + impl.environmentType + "{value: " + receiver + "}}"
 	if impl.nilReceiver {
 		replacement = "__renvo_bind_" + functionValueDecimal(sigIndex) + "_" + functionValueDecimal(implIndex) + "(" + receiver + ")"
 	}
-	edits = append(edits, functionValueTokenRangeEdit(program, rhs, rhs+3, replacement))
+	edits = append(edits, functionValueTokenRangeEdit(program, rhs, methodTok+1, replacement))
 	return edits
 }
 
@@ -1603,6 +1657,13 @@ func lowerFunctionValueCall(program *unit.Program, open int, signatures []functi
 		return edits
 	}
 	first, _ := functionValueUnparen(program, calleeStart, open)
+	// A directly invoked method is not a stored function value. Inferring its
+	// callable shape must not route the receiver selector through tagged storage.
+	if fieldIndex < 0 && fieldTok >= 2 && functionValueTokenCharIs(program, fieldTok-1, '.') {
+		if _, ok := functionValueInferredBoundMethod(program, open, calleeStart, open); ok {
+			return edits
+		}
+	}
 	if functionValueTokenEquals(program, calleeStart-1, "defer") && functionValueTokenKindIs(program, first, unit.TokenFunc) {
 		// A directly deferred literal must remain the deferred function:
 		// routing it through a dispatcher changes direct recover ownership.
@@ -1637,8 +1698,30 @@ func lowerFunctionValueCall(program *unit.Program, open int, signatures []functi
 	return edits
 }
 
+// Implementations are complete before representation emission. When every
+// environment has one exact pointer type, the callable tag already proves
+// that type: preserve it directly instead of re-boxing and asserting it.
+// Heterogeneous signatures retain their ordinary interface representation.
+func functionValueEnvironmentType(sig functionValueSignature) string {
+	typ := ""
+	for _, impl := range sig.storage.impls {
+		if impl.environmentType == "" {
+			continue
+		}
+		next := "*" + impl.environmentType
+		if typ != "" && typ != next {
+			return "interface{}"
+		}
+		typ = next
+	}
+	if typ == "" {
+		return "*byte"
+	} // no implementation has an environment
+	return typ
+}
+
 func functionValueStructText(sig functionValueSignature) string {
-	out := "struct { kind int; data interface{}"
+	out := "struct { kind int; data " + functionValueEnvironmentType(sig)
 	// Function values remain noncomparable when boxed, even though their tag
 	// and receiver storage may all be comparable. A zero-length array of a
 	// slice has that property without storing another callable or referring
@@ -1704,28 +1787,7 @@ func functionValueGeneratedText(signatures []functionValueSignature, closures []
 		if len(sig.paramTypes) > 0 && functionValueHasPrefix(functionValueCompactTypeText(sig.paramTypes[len(sig.paramTypes)-1]), "...") {
 			args += "..."
 		}
-		for j := 0; j < len(sig.storage.impls); j++ {
-			impl := sig.storage.impls[j]
-			out = appendFunctionValueString(out, "if fn.kind == "+functionValueDecimal(j+1)+" { ")
-			if sig.result != "" {
-				out = appendFunctionValueString(out, "return ")
-			}
-			if impl.method != "" {
-				out = appendFunctionValueString(out, "fn.data.(*"+impl.environmentType+").value."+impl.method+"("+args+")")
-			} else if impl.environmentType != "" {
-				callArgs := "fn.data.(" + impl.receiverType + ")"
-				if args != "" {
-					callArgs = callArgs + ", " + args
-				}
-				out = appendFunctionValueString(out, impl.function+"("+callArgs+")")
-			} else {
-				out = appendFunctionValueString(out, impl.function+"("+args+")")
-			}
-			if sig.result == "" {
-				out = appendFunctionValueString(out, "; return")
-			}
-			out = appendFunctionValueString(out, " }\n")
-		}
+		out = appendFunctionValueDispatch(out, sig, args, 0, len(sig.storage.impls))
 		// The zero representation is a nil function, not a no-op returning the
 		// result type's zero value. Retain the unreachable return below for the
 		// compact backend's structural return handling.
@@ -2010,7 +2072,7 @@ func functionValueAnonymousTypeCallee(program *unit.Program, start int, end int)
 		start++
 		end--
 	}
-	if functionValueTokenKindIs(program, start, unit.TokenFunc) && functionValueTypeEnd(program, start) == end {
+	if (functionValueTokenKindIs(program, start, unit.TokenFunc) || functionValueTokenCharIs(program, start, '[')) && functionValueTypeEnd(program, start) == end {
 		return functionValueTokensText(program, start, end)
 	}
 	return ""
@@ -3037,8 +3099,19 @@ func reparseFunctionValueProgram(original *unit.Program, text []byte, edits []fu
 }
 
 func reparseFunctionValueProgramMode(original *unit.Program, text []byte, edits []functionValueEdit, originalLength int, generatedStart int, reuse bool) bool {
+	// Keep existing tokens as a bound for unchanged source, then allow one
+	// token per replacement/generated byte. This conservative rewrite bound
+	// avoids reserving len(text)/4 tokens for long linked identifiers/strings.
+	// The scanner remains free to grow if a future edit violates the estimate.
+	tokenCapacity := len(original.Tokens)
+	for _, edit := range edits {
+		tokenCapacity += len(edit.text)
+	}
+	if generatedStart >= 0 && generatedStart <= len(text) {
+		tokenCapacity += len(text) - generatedStart
+	}
 	parseMark := arena.Mark()
-	file, lineStarts := syntax.ParseLinkedFile(text)
+	file, lineStarts := syntax.ParseLinkedFileCapacity(text, tokenCapacity)
 	if !file.Ok {
 		return false
 	}
@@ -3064,7 +3137,7 @@ func reparseFunctionValueProgramMode(original *unit.Program, text []byte, edits 
 	out.Funcs = make([]unit.Func, 0, funcCount)
 	scratchMark := arena.Mark()
 	if parseMark != 0 {
-		file, lineStarts = syntax.ParseLinkedFile(text)
+		file, lineStarts = syntax.ParseLinkedFileCapacity(text, tokenCapacity)
 		if !file.Ok {
 			return false
 		}
@@ -3355,6 +3428,10 @@ func functionValueMethodReceiverTypeForBase(program *unit.Program, at int, base 
 	if baseType == "" {
 		return functionValueMethodReceiverType(program, method)
 	}
+	return functionValueMethodReceiverTypeForType(program, baseType, method)
+}
+
+func functionValueMethodReceiverTypeForType(program *unit.Program, baseType string, method string) string {
 	if functionRangeInterfaceMethodType(program, baseType, method) != "" {
 		return baseType
 	}
@@ -3691,8 +3768,20 @@ func functionValueStructFieldType(program *unit.Program, owner string, fieldName
 			if fieldEnd > j && program.Tokens[fieldEnd-1].KindLine&255 == unit.TokenString {
 				fieldEnd--
 			}
-			if functionValueTokenEquals(program, j, fieldName) && j+1 < fieldEnd {
-				return functionValueTokensText(program, j+1, fieldEnd)
+			// A field declaration may bind several names to the same type.
+			// Do not include the remaining names/comma in a captured local's type.
+			if program.Tokens[j].KindLine&255 == unit.TokenIdent {
+				lastName := j
+				for lastName+2 < fieldEnd && functionValueTokenCharIs(program, lastName+1, ',') && program.Tokens[lastName+2].KindLine&255 == unit.TokenIdent {
+					lastName += 2
+				}
+				if lastName+1 < fieldEnd {
+					for name := j; name <= lastName; name += 2 {
+						if functionValueTokenEquals(program, name, fieldName) {
+							return functionValueTokensText(program, lastName+1, fieldEnd)
+						}
+					}
+				}
 			}
 			typeEnd := functionValueTypeEnd(program, j)
 			if typeEnd == fieldEnd {
@@ -4284,4 +4373,48 @@ func functionValueTokenKindIs(program *unit.Program, tok int, kind int) bool {
 		return false
 	}
 	return program.Tokens[tok].KindLine&255 == kind
+}
+
+// Keep every call in the original defer-forwarding routine. Partition only the
+// scalar implementation tag; captured environments and call argument/result
+// semantics are unchanged. Unmatched (including nil) tags reach the same panic.
+func appendFunctionValueDispatch(out []byte, sig functionValueSignature, args string, first, end int) []byte {
+	if end-first > 4 {
+		middle := first + (end-first)/2
+		out = appendFunctionValueString(out, "if fn.kind <= "+functionValueDecimal(middle)+" {\n")
+		out = appendFunctionValueDispatch(out, sig, args, first, middle)
+		out = appendFunctionValueString(out, "} else {\n")
+		out = appendFunctionValueDispatch(out, sig, args, middle, end)
+		return appendFunctionValueString(out, "}\n")
+	}
+	for j := first; j < end; j++ {
+		impl := sig.storage.impls[j]
+		out = appendFunctionValueString(out, "if fn.kind == "+functionValueDecimal(j+1)+" { ")
+		if sig.result != "" {
+			out = appendFunctionValueString(out, "return ")
+		}
+		if impl.method != "" {
+			receiver := "fn.data.(*" + impl.environmentType + ")"
+			if functionValueEnvironmentType(sig) != "interface{}" {
+				receiver = "fn.data"
+			}
+			out = appendFunctionValueString(out, receiver+".value."+impl.method+"("+args+")")
+		} else if impl.environmentType != "" {
+			callArgs := "fn.data.(" + impl.receiverType + ")"
+			if functionValueEnvironmentType(sig) != "interface{}" {
+				callArgs = "fn.data"
+			}
+			if args != "" {
+				callArgs += ", " + args
+			}
+			out = appendFunctionValueString(out, impl.function+"("+callArgs+")")
+		} else {
+			out = appendFunctionValueString(out, impl.function+"("+args+")")
+		}
+		if sig.result == "" {
+			out = appendFunctionValueString(out, "; return")
+		}
+		out = appendFunctionValueString(out, " }\n")
+	}
+	return out
 }

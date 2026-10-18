@@ -34,7 +34,7 @@ func (e *Engine) recordMemoryExit(pc uint64, context *emu.MemoryContext) {
 	}
 	s.Count++
 	s.Address = context.Address
-	page := context.Pages[(context.Address>>12)&63]
+	page := *context.PageSlot(context.Address >> 12)
 	s.PageMatch = page.Data != nil && page.Number == context.Address>>12
 	s.Permissions = 0
 	if s.PageMatch {
@@ -68,3 +68,7 @@ func (e *Engine) memoryExitProfile() []DispatchMemorySample {
 	}
 	return top
 }
+
+// MemoryExitProfile returns at most eight retained hot native-exit samples.
+// Disabled profiling records no samples and returns nil.
+func (e *Engine) MemoryExitProfile() []DispatchMemorySample { return e.memoryExitProfile() }

@@ -27,7 +27,10 @@ func run(args []string) error {
 	search := f.String("I", "", "dependency directory (defaults to source directory)")
 	output := f.String("o", "", "output executable")
 	root := f.String("renvo-root", "", "Renvo source/runtime checkout (defaults to current checkout)")
-	target := f.String("target", "", "Go host target, e.g. windows/amd64 or darwin/arm64")
+	target := f.String("target", "", "host target, e.g. windows/amd64 or browser/wasm32")
+	host := f.String("host", "go", "host compiler: go or renvo")
+	compiler := f.String("compiler", "", "Renvo compiler executable (required with -host renvo)")
+	arena := f.Int("arena", 512<<20, "Renvo browser linear-memory arena bytes")
 	testFilter := f.String("run", "", "test name expression")
 	bench := f.String("bench", "", "benchmark name expression")
 	if err := f.Parse(args[1:]); err != nil {
@@ -85,6 +88,15 @@ func run(args []string) error {
 		return err
 	}
 	defer os.RemoveAll(workspace)
+	if *host == "renvo" {
+		if mode != "build" || *target != "browser/wasm32" || *compiler == "" || *output == "" || *arena <= 0 {
+			return fmt.Errorf("Renvo host requires build -target browser/wasm32 -compiler PATH -o PATH and a positive arena")
+		}
+		return buildBrowser(workspace, *root, packages, *compiler, *output, *arena)
+	}
+	if *host != "go" || *compiler != "" {
+		return fmt.Errorf("invalid host/compiler combination")
+	}
 	if err = rfe.Workspace(workspace, *root, packages); err != nil {
 		return err
 	}

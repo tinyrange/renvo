@@ -11,6 +11,9 @@ const (
 
 // A pair store is one effect and one fresh generation, never two scalar stores.
 func (b *Builder) MemoryPairStore(address, first, second Value) {
+	if b.BeforeMemoryStore != nil {
+		b.BeforeMemoryStore(b)
+	}
 	address = b.checkedAddress(address)
 	b.emit(Op{Kind: MemoryPairStore, A: address, B: first, Imm: uint64(second)<<8 | 16})
 }

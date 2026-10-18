@@ -7,10 +7,12 @@ import (
 
 type EngineConfig struct {
 	Mode                   string // interpreter, ir, native; native includes both lower tiers
+	RetainBrowserIR        bool   // opt-in bounded leaf-IR cache; no established whole-boot speedup
 	DiscoveryThreshold     uint64 // optional bounded cold-PC observation before decoding
 	RecycleNative          bool   // reclaim a full arena only at quiescent dispatch entry
 	EvictCold              bool   // recycle decoded-cache slots; native arena stays bounded/append-only
 	IRThreshold            uint64
+	RegionThreshold        uint64 // optional visits before optimizing a compiled leaf into a region
 	NativeThreshold        uint64
 	MaxBlocks              int
 	MaxInstructions        int // cold block discovery width
@@ -26,12 +28,15 @@ func DefaultEngineConfig() EngineConfig {
 }
 
 type Stats struct {
-	ArenaResets                                                                   uint64 // quiescent native arena replacements within the same byte cap
-	Evictions                                                                     uint64 // decoded cache replacements, not native arena reclamation
-	LoopIterations                                                                uint64 // native loop iterations, without a Go transition
-	NativeSessions, LinkMissStops, BudgetStops, OtherStops                        uint64
-	LinkContextChanges                                                            uint64
-	ProfileMissAbsent, ProfileMissInterpreted, ProfileMissCold, ProfileMissNative uint64
+	LeafTranslations, LeafIRReuses, IRCacheStores, IRCacheBypass, IRCacheDiscarded, IRCacheEvictions uint64
+	IRCacheAllocated                                                                                 int
+	RecycledEntries                                                                                  uint64
+	ArenaResets                                                                                      uint64 // quiescent native arena replacements within the same byte cap
+	Evictions                                                                                        uint64 // decoded cache replacements, not native arena reclamation
+	LoopIterations                                                                                   uint64 // native loop iterations, without a Go transition
+	NativeSessions, LinkMissStops, BudgetStops, OtherStops                                           uint64
+	LinkContextChanges                                                                               uint64
+	ProfileMissAbsent, ProfileMissInterpreted, ProfileMissCold, ProfileMissNative                    uint64
 
 	Regions, RegionExits                               uint64 // bounded cyclic regions and successful side exits
 	ProfileErrors                                      uint64
@@ -48,15 +53,26 @@ type compiledBlock struct {
 	recent                          uint8
 	regionAttempted, region         bool
 	regionGeneration                uint64 // retry only after another native promotion
+	prefillGeneration               uint64 // optional browser successor work, never execution authority
+	prefillDirty                    bool
+	browserDemand                   bool      // private preparation hotness, never execution authority
+	linkSuccessors                  [4]uint64 // observed indirect/return targets; hints, not code proofs
+	linkSuccessorCount, linkVictim  uint8
 	regionEntry, regionInstructions int
 	regionPrefix                    [17]uint8
 	dependencies                    []codeDependency
 	context                         CodeStamp
 	instructions                    []Instruction
 	visits                          uint64
+	opStorage                       []emu.Op
+	irUnits                         int
+	irScore                         uint8 // observed compilation count, saturated; guest execution is not cache reuse
+	irSlot                          int   // one-based cache owner slot; zero means borrowed or native-owned IR
 	ops                             []emu.Op
 	prepared                        *emu.PreparedBlock
 	entry                           int
+	recycleEntry                    int // browser-only candidate, revoked before rewatch
+	recycleRegionEntry              int
 	native, attempted               bool
 	interpretOnly                   bool // cached instruction word, still architecturally executed
 	effects                         bool
@@ -71,26 +87,44 @@ type dispatchEntry struct {
 type hotObservation struct{ pc, visits uint64 }
 
 type Engine struct {
-	hot             [4096]hotObservation
-	hotVictim       uint64
-	cacheOrder      []dispatchEntry
-	cacheNext       int
-	arch            Architecture
-	config          EngineConfig
-	blocks          map[uint64]*compiledBlock
-	dispatch        [1024]dispatchEntry
-	ir              emu.IRMachine
-	native          *emu.Native
-	Stats           Stats
-	linkContext     CodeStamp
-	linkContexts    map[*emu.MemoryContext]CodeStamp
-	profileMisses   *[1024]LinkMissSample
-	profileMemory   *[256]DispatchMemorySample
-	profileTicks    uint64
-	profileLastNS   uint64
-	profileTimeline []DispatchProfileSample
-	edgeCounts      map[uint64][2]uint64 // bounded by discovered conditional instructions
-	linkReady       bool                 // immutable state ABI, prepared once for this native engine
+	fastRefillLow, fastRefillHigh int  // browser-only temporary setup scope
+	memoryRetryAllowed            bool // only the explicitly batched RunQuanta API may retry
+	inNativeBatch                 bool // host callbacks may hold the native arena lock
+	memoryRetry                   bool // bound one fresh guarded dispatch per successfully refilled exit
+	translationOps                [2048]emu.Op
+	leafIR                        translationCache
+	recycleEntries                []int
+	recycleBlocks                 []*compiledBlock
+	recycleRegions                []bool
+	translation                   emu.Builder
+	regionPartsScratch            [256]regionPart
+	regionBestScratch             [256]regionPart
+	regionCycleScratch            [256]regionPart
+	regionResultScratch           [256]regionPart
+	graph                         graphScratch
+	hot                           [4096]hotObservation
+	hotVictim                     uint64
+	blockPool                     []*compiledBlock
+	cacheOrder                    []dispatchEntry
+	cacheNext                     int
+	arch                          Architecture
+	config                        EngineConfig
+	blocks                        map[uint64]*compiledBlock
+	dispatch                      [1024]dispatchEntry
+	versionProofs                 [256]codePageProof  // bounded full-page/context proof reuse; never code ownership
+	prefillLookup                 [1024]dispatchEntry // metadata only; revoked with the owning block
+	ir                            emu.IRMachine
+	native                        *emu.Native
+	Stats                         Stats
+	linkContext                   CodeStamp
+	linkContexts                  map[*emu.MemoryContext]CodeStamp
+	profileMisses                 *[1024]LinkMissSample
+	profileMemory                 *[256]DispatchMemorySample
+	profileTicks                  uint64
+	profileLastNS                 uint64
+	profileTimeline               []DispatchProfileSample
+	edgeCounts                    map[uint64][2]uint64 // bounded by discovered conditional instructions
+	linkReady                     bool                 // immutable state ABI, prepared once for this native engine
 }
 
 func New(config EngineConfig, arch Architecture) (*Engine, error) {
@@ -113,6 +147,9 @@ func New(config EngineConfig, arch Architecture) (*Engine, error) {
 		return nil, fmt.Errorf("invalid engine budget")
 	}
 	e := &Engine{arch: arch, config: config, blocks: map[uint64]*compiledBlock{}}
+	if config.RecycleNative {
+		e.blockPool = make([]*compiledBlock, 0, config.MaxBlocks)
+	}
 	if config.EvictCold {
 		e.cacheOrder = make([]dispatchEntry, config.MaxBlocks)
 	}
@@ -131,6 +168,9 @@ func New(config EngineConfig, arch Architecture) (*Engine, error) {
 	return e, nil
 }
 func (e *Engine) Close() error {
+	for _, block := range e.blocks {
+		e.releaseInstructions(block)
+	}
 	if e.native != nil {
 		err := e.native.Close()
 		e.native = nil
@@ -162,6 +202,12 @@ func (e *Engine) block(c CPU) *compiledBlock {
 		}
 		if !valid {
 			valid = e.validVersions(c, old, context)
+			// Complex owned decoder descriptors justify parsed-semantic reuse after
+			// physical remapping, preserving discovery heat and any compiled leaf.
+			// Cheap comparable instruction words retain the ordinary rediscovery path.
+			if !valid && e.arch.EqualDecoded != nil {
+				valid = e.revalidateIdenticalBlock(c, pc, old)
+			}
 		}
 	} else {
 		valid = e.validBytes(c, pc, old)
@@ -186,7 +232,9 @@ func (e *Engine) block(c CPU) *compiledBlock {
 // Keep decoding, allocation and the large instruction descriptor out of the
 // guarded lookup's frame; none of these are needed for a hot block entry.
 func (e *Engine) discoverBlock(c CPU, pc uint64, cache *dispatchEntry) *compiledBlock {
-	defer pauseTranslationClock(c)()
+	if clock := pauseTranslationClock(c); clock != nil {
+		defer resumeTranslationClock(clock)
+	}
 	if e.config.DiscoveryThreshold > 1 {
 		observation := e.discoveryObservation(pc, true)
 		if observation.visits < e.config.DiscoveryThreshold {
@@ -199,7 +247,18 @@ func (e *Engine) discoverBlock(c CPU, pc uint64, cache *dispatchEntry) *compiled
 	if len(e.blocks) >= e.config.MaxBlocks && !e.config.EvictCold {
 		return nil
 	}
-	block := &compiledBlock{cacheSlot: -1, recent: 1}
+	var block *compiledBlock
+	if count := len(e.blockPool); count != 0 {
+		block = e.blockPool[count-1]
+		e.blockPool[count-1] = nil
+		e.blockPool = e.blockPool[:count-1]
+		instructions := block.instructions[:0]
+		dependencies := block.dependencies[:0]
+		ops := block.opStorage[:0]
+		*block = compiledBlock{cacheSlot: -1, recent: 1, instructions: instructions, dependencies: dependencies, opStorage: ops}
+	} else {
+		block = &compiledBlock{cacheSlot: -1, recent: 1}
+	}
 	nativeMemory, capable := c.MemoryBus().(NativeMemory)
 	allowMemory := capable && e.native != nil && nativeMemory.NativeContext() != nil
 	addr := pc
@@ -207,15 +266,19 @@ func (e *Engine) discoverBlock(c CPU, pc uint64, cache *dispatchEntry) *compiled
 		ins, err := e.arch.Fetch(c.MemoryBus(), addr)
 		e.Stats.CodeReads++
 		if err != nil || ins.PC != addr || ins.Length == 0 || ins.Length > 15 || uint64(ins.Length) > ^uint64(0)-addr || uint64(ins.Length)%e.arch.Alignment != 0 {
+			e.releaseInstruction(ins)
 			break
 		}
 		if ins.ScheduleBoundary && len(block.instructions) != 0 {
+			e.releaseInstruction(ins)
 			break // Clock/device scheduling reads own their host boundary.
 		}
 		if ins.InterpretOnly || ins.Memory && !allowMemory {
 			if len(block.instructions) == 0 {
 				block.instructions = append(block.instructions, ins)
 				block.interpretOnly = true
+			} else {
+				e.releaseInstruction(ins)
 			}
 			break
 		}
@@ -232,6 +295,9 @@ func (e *Engine) discoverBlock(c CPU, pc uint64, cache *dispatchEntry) *compiled
 		addr += uint64(ins.Length)
 	}
 	if len(block.instructions) == 0 {
+		if len(e.blockPool) < cap(e.blockPool) {
+			e.blockPool = append(e.blockPool, block)
+		}
 		return nil
 	}
 	e.dependencies(c, pc, block)
@@ -336,30 +402,32 @@ func (e *Engine) validateCPU(c CPU) error {
 }
 
 func (e *Engine) preparePureBlock(c CPU, block *compiledBlock) bool {
+	if block.native && e.native != nil || block.prepared != nil && (e.native == nil || block.attempted || block.visits < e.nativeThreshold(block)) {
+		return true
+	}
 	if block.ops != nil && (e.native == nil || block.attempted || block.visits < e.nativeThreshold(block)) {
 		return true
 	}
-	defer pauseTranslationClock(c)()
+	if clock := pauseTranslationClock(c); clock != nil {
+		defer resumeTranslationClock(clock)
+	}
+	if block.ops != nil {
+		e.reuseTranslation(block)
+	}
 	if block.ops == nil {
-		var b emu.Builder
+		b, low, high := e.beginTranslation(false)
 		// This translation is reachable only through its guarded PC key.
 		// Specialize PC-relative values and sequential PC updates at build time.
 		b.Store(e.arch.PC, b.Constant(c.Registers()[e.arch.PC]))
 		for i, ins := range block.instructions {
-			if !e.arch.Lower(&b, ins, i) {
+			if !e.arch.Lower(b, ins, i) {
+				e.endTranslation(low, high)
 				e.Stats.CompileFailures++
 				e.discard(c.Registers()[e.arch.PC])
 				return false
 			}
 		}
-		block.ops = b.Finish(e.arch.StateWords)
-		prepared, err := emu.Prepare(block.ops, e.arch.StateWords)
-		if err != nil {
-			e.Stats.CompileFailures++
-			e.discard(c.Registers()[e.arch.PC])
-			return false
-		}
-		block.prepared = prepared
+		block.ops = e.publishTranslation(block, e.finishTranslation(b, false, low, high))
 	}
 	if e.native != nil && !block.attempted && block.visits >= e.nativeThreshold(block) {
 		block.attempted = true
@@ -368,12 +436,22 @@ func (e *Engine) preparePureBlock(c CPU, block *compiledBlock) bool {
 			e.Stats.CompileFailures++
 		} else {
 			block.entry = entry
-			_ = e.native.NameEntry(entry, fmt.Sprintf("%s_%x_pure_%d_ops", e.arch.Name, c.Registers()[e.arch.PC], len(block.ops)))
+			e.nameEntry(entry, c.Registers()[e.arch.PC], len(block.ops), "pure")
 			e.Stats.ProfileErrors = e.native.SymbolErrors
 			block.native = true
 			e.Stats.Promotions++
 		}
 		e.Stats.NativeBytes = e.native.Bytes
 	}
+	if !block.native && block.prepared == nil {
+		prepared, err := emu.Prepare(block.ops, e.arch.StateWords)
+		if err != nil {
+			e.Stats.CompileFailures++
+			e.discard(c.Registers()[e.arch.PC])
+			return false
+		}
+		block.prepared = prepared
+	}
+	e.releaseTranslation(block)
 	return true
 }

@@ -66,10 +66,20 @@ func ParseFile(src []byte) File { file, _ := parseFileMode(src, false); return f
 // ParseLinkedFile preserves physical lines for generated text from admitted sources.
 func ParseLinkedFile(src []byte) (File, []int) { return parseFileMode(src, true) }
 
+// ParseLinkedFileCapacity accepts an allocation hint from a rewriting caller
+// that already knows its old token count. The scanner still grows normally;
+// the hint changes no parsing rule, input bound, or accepted token sequence.
+func ParseLinkedFileCapacity(src []byte, capacity int) (File, []int) {
+	return parseFileModeCapacity(src, true, capacity)
+}
+
 func parseFileMode(src []byte, linked bool) (File, []int) {
+	return parseFileModeCapacity(src, linked, scanTokenCapacity(src))
+}
+func parseFileModeCapacity(src []byte, linked bool, capacity int) (File, []int) {
 	var lineStarts []int
 	tokenArenaStart := arena.Mark()
-	tokens, scanOK, interfaceCandidates := scanTokensMode(src, linked)
+	tokens, scanOK, interfaceCandidates := scanTokensModeCapacity(src, linked, capacity)
 	tokenArenaEnd := arena.Mark()
 	tokenCapacity := cap(tokens)
 	file := File{

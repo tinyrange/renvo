@@ -1,3 +1,5 @@
+//go:build !browser
+
 package systemmemory
 
 import emu "renvo.dev/internal/rfe/runtime"
@@ -9,3 +11,6 @@ func KernelAddress(b *emu.Builder, address emu.Value) emu.Value {
 	b.Guard(b.Binary(emu.Equal, b.Shift(emu.Shr, address, 48), b.Constant(0xffff)))
 	return b.Binary(emu.And, address, b.Constant(0x0000ffffffffffff))
 }
+
+// KernelNativeAddress reconstructs the full VA from the native low-48-bit key.
+func KernelNativeAddress(key uint64) uint64 { return key | 0xffff000000000000 }

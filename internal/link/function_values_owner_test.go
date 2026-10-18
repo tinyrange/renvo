@@ -263,8 +263,8 @@ func main() {
 	}
 	if !bytes.Contains(linked.Program.Text, []byte("{value: c}")) ||
 		bytes.Count(linked.Program.Text, []byte(" struct { value *Controller }")) != 1 ||
-		!bytes.Contains(linked.Program.Text, []byte(").value.one()")) ||
-		!bytes.Contains(linked.Program.Text, []byte(").value.two()")) {
+		!bytes.Contains(linked.Program.Text, []byte("fn.data.value.one()")) ||
+		!bytes.Contains(linked.Program.Text, []byte("fn.data.value.two()")) {
 		t.Fatalf("same-receiver methods did not share function-value storage:\n%s", linked.Program.Text)
 	}
 }

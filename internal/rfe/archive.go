@@ -26,11 +26,13 @@ type Dependency struct {
 	SHA256 string `json:"sha256,omitempty"`
 }
 type Manifest struct {
-	Format   int          `json:"format"`
-	Name     string       `json:"name"`
-	Import   string       `json:"import"`
-	Entry    string       `json:"entry,omitempty"`
-	Requires []Dependency `json:"requires,omitempty"`
+	Format       int          `json:"format"`
+	Name         string       `json:"name"`
+	Import       string       `json:"import"`
+	Entry        string       `json:"entry,omitempty"`
+	BrowserEntry string       `json:"browser_entry,omitempty"`
+	BrowserStep  string       `json:"browser_step,omitempty"`
+	Requires     []Dependency `json:"requires,omitempty"`
 }
 type Package struct {
 	Manifest Manifest
@@ -53,6 +55,9 @@ func manifest(data []byte) (Manifest, error) {
 	}
 	if m.Format != 1 || !packageName.MatchString(m.Name) || m.Import == "" || strings.ContainsAny(m.Import, " \t\n\\\"") || m.Entry != "" && !token.IsIdentifier(m.Entry) {
 		return m, fmt.Errorf("invalid RFE manifest")
+	}
+	if (m.BrowserEntry == "") != (m.BrowserStep == "") || m.BrowserEntry != "" && (!token.IsIdentifier(m.BrowserEntry) || !token.IsIdentifier(m.BrowserStep)) {
+		return m, fmt.Errorf("invalid RFE browser entry/step pair")
 	}
 	seen := map[string]bool{}
 	for _, dep := range m.Requires {

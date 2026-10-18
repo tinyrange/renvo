@@ -15,8 +15,9 @@ type Memory interface {
 // Instruction describes one architectural instruction, independently of its
 // byte length. PC/Length cover every fetched byte, including a straddling page.
 // Bits is decoder-owned. Class is an optional cached-interpreter classification.
-// Decoded, when set, must be an immutable comparable value. Byte-validation
-// buses compare it along with the instruction extent and control-flow metadata.
+// Decoded, when set, must be an immutable comparable value, or an owned
+// immutable descriptor with Architecture.Release and EqualDecoded callbacks.
+// Byte validation compares it along with extent and control-flow metadata.
 type Instruction struct {
 	NativeThreshold                                   uint64 // optional cost hint; never changes instruction semantics
 	Decoded                                           any
@@ -31,6 +32,11 @@ type Instruction struct {
 type Successors struct {
 	Next, Alternate    uint64
 	Conditional, Known bool
+	// A direct call and its architectural return continuation are discovery
+	// hints only. Returns still branch on their actual complete guest PC.
+	Call, Return bool
+	IndirectCall bool
+	Continuation uint64
 }
 
 // Architecture is immutable after New. Fetch must use execute-checked reads.
@@ -42,6 +48,11 @@ type Architecture struct {
 	Alignment      uint64
 	Fetch          func(Memory, uint64) (Instruction, error)
 	Lower          func(*emu.Builder, Instruction, int) bool
+	// Optional owned decoded descriptors remain immutable until Release. The
+	// engine releases rejected fetches, validation temporaries, and evicted
+	// instructions exactly once. EqualDecoded compares their semantic values.
+	Release      func(Instruction)
+	EqualDecoded func(any, any) bool
 }
 
 // CPU retains ownership of its register array, memory and retirement counter.
@@ -85,6 +96,15 @@ type NativeMemory interface {
 	CodeContextMemory
 	NativeContext() *emu.MemoryContext
 	NativeRefill(uint64)
+}
+
+// NativeSnapshotMemory optionally observes the code stamp and native context
+// together. It must perform the same fresh domain/root/permission-lifetime
+// observation as the separate queries, not return a cache from another slice.
+// This is one coherent metadata observation, never authority for new code pages.
+type NativeSnapshotMemory interface {
+	NativeMemory
+	NativeCodeContext() (CodeStamp, *emu.MemoryContext)
 }
 
 // CodeVersionedNativeMemory owns disjoint guest RAM and maintains generations

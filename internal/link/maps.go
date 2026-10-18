@@ -52,11 +52,12 @@ func lowerMapsCore(program *unit.Program, transient bool) bool {
 	if !ok {
 		return false
 	}
+	generated := mapLowerGeneratedText(specs, literals, makes)
 	originalLength := len(program.Text)
 	if transient {
 		renvo_runtime_ArenaDiscardLinkTokens(program.Tokens)
 	}
-	text, ok := applyFunctionValueEdits(program.Text, edits)
+	text, ok := applyFunctionValueEditsCapacity(program.Text, edits, len(generated)+1)
 	if !ok {
 		return false
 	}
@@ -64,11 +65,11 @@ func lowerMapsCore(program *unit.Program, transient bool) bool {
 		text = append(text, '\n')
 	}
 	generatedStart := len(text)
-	text = appendFunctionValueString(text, mapLowerGeneratedText(specs, literals, makes))
+	text = appendFunctionValueString(text, generated)
 	if transient {
 		arena.DiscardBytes(program.Text)
 	}
-	return reparseFunctionValueProgram(program, text, edits, originalLength, generatedStart)
+	return reparseFunctionValueProgramMode(program, text, edits, originalLength, generatedStart, transient)
 }
 
 func discoverMapLowerSpecs(program *unit.Program) []mapLowerSpec {
@@ -243,7 +244,19 @@ func mapLowerEdits(program *unit.Program, specs []mapLowerSpec) ([]functionValue
 }
 
 func mapLowerAssignmentEdits(program *unit.Program, specs []mapLowerSpec, edits []functionValueEdit, covered []bool, literals *[]mapLowerLiteral) ([]functionValueEdit, []bool) {
+	// Speculative type/selector work retains nothing unless this iteration
+	// publishes an edit or generated literal/make. Reclaim only that scratch;
+	// program metadata, covered flags and prior outputs precede the mark.
+	mark := arena.Mark()
+	retainedEdits := len(edits)
+	retainedLiterals := len(*literals)
 	for assign := 0; assign < len(program.Tokens); assign++ {
+		if len(edits) == retainedEdits && len(*literals) == retainedLiterals {
+			arena.Rewind(mark)
+		}
+		mark = arena.Mark()
+		retainedEdits = len(edits)
+		retainedLiterals = len(*literals)
 		operator := functionValueTokenText(program, assign)
 		compound := mapLowerCompoundOperator(operator)
 		if covered[assign] || operator != "=" && compound == "" {
@@ -359,6 +372,9 @@ func mapLowerAssignmentEdits(program *unit.Program, specs []mapLowerSpec, edits 
 		mapLowerCover(covered, start, end)
 		assign = end - 1
 	}
+	if len(edits) == retainedEdits && len(*literals) == retainedLiterals {
+		arena.Rewind(mark)
+	}
 	return edits, covered
 }
 
@@ -430,7 +446,19 @@ func mapLowerAssignmentTarget(program *unit.Program, specs []mapLowerSpec, start
 }
 
 func mapLowerRangeEdits(program *unit.Program, specs []mapLowerSpec, edits []functionValueEdit, covered []bool, literals *[]mapLowerLiteral) ([]functionValueEdit, []bool) {
+	// Speculative type/selector work retains nothing unless this iteration
+	// publishes an edit or generated literal/make. Reclaim only that scratch;
+	// program metadata, covered flags and prior outputs precede the mark.
+	mark := arena.Mark()
+	retainedEdits := len(edits)
+	retainedLiterals := len(*literals)
 	for rangeTok := 0; rangeTok < len(program.Tokens); rangeTok++ {
+		if len(edits) == retainedEdits && len(*literals) == retainedLiterals {
+			arena.Rewind(mark)
+		}
+		mark = arena.Mark()
+		retainedEdits = len(edits)
+		retainedLiterals = len(*literals)
 		if !functionValueTokenEquals(program, rangeTok, "range") || covered[rangeTok] {
 			continue
 		}
@@ -523,12 +551,29 @@ func mapLowerRangeEdits(program *unit.Program, specs []mapLowerSpec, edits []fun
 		mapLowerCover(covered, forTok, bodyOpen+1)
 		rangeTok = bodyOpen
 	}
+	if len(edits) == retainedEdits && len(*literals) == retainedLiterals {
+		arena.Rewind(mark)
+	}
 	return edits, covered
 }
 
 func mapLowerConstructionEdits(program *unit.Program, specs []mapLowerSpec, edits []functionValueEdit, covered []bool, literals *[]mapLowerLiteral, makes *[]mapLowerMake) ([]functionValueEdit, []bool, bool) {
 	literalStarts := mapLowerLiteralTypeStarts(program)
+	// Speculative type/selector work retains nothing unless this iteration
+	// publishes an edit or generated literal/make. Reclaim only that scratch;
+	// program metadata, covered flags and prior outputs precede the mark.
+	mark := arena.Mark()
+	retainedEdits := len(edits)
+	retainedLiterals := len(*literals)
+	retainedMakes := len(*makes)
 	for i := 0; i < len(program.Tokens); i++ {
+		if len(edits) == retainedEdits && len(*literals) == retainedLiterals && len(*makes) == retainedMakes {
+			arena.Rewind(mark)
+		}
+		mark = arena.Mark()
+		retainedEdits = len(edits)
+		retainedLiterals = len(*literals)
+		retainedMakes = len(*makes)
 		if covered[i] {
 			continue
 		}
@@ -610,6 +655,9 @@ func mapLowerConstructionEdits(program *unit.Program, specs []mapLowerSpec, edit
 		mapLowerCover(covered, typeStart, replacementEnd)
 		i = replacementEnd - 1
 	}
+	if len(edits) == retainedEdits && len(*literals) == retainedLiterals && len(*makes) == retainedMakes {
+		arena.Rewind(mark)
+	}
 	return edits, covered, true
 }
 
@@ -688,7 +736,17 @@ func mapLowerLiteralTypeStarts(program *unit.Program) []int {
 }
 
 func mapLowerBuiltinEdits(program *unit.Program, specs []mapLowerSpec, edits []functionValueEdit, covered []bool) ([]functionValueEdit, []bool) {
+	// Speculative type/selector work retains nothing unless this iteration
+	// publishes an edit or generated literal/make. Reclaim only that scratch;
+	// program metadata, covered flags and prior outputs precede the mark.
+	mark := arena.Mark()
+	retainedEdits := len(edits)
 	for i := 0; i+1 < len(program.Tokens); i++ {
+		if len(edits) == retainedEdits {
+			arena.Rewind(mark)
+		}
+		mark = arena.Mark()
+		retainedEdits = len(edits)
 		if covered[i] || !functionValueTokenCharIs(program, i+1, '(') {
 			continue
 		}
@@ -724,12 +782,25 @@ func mapLowerBuiltinEdits(program *unit.Program, specs []mapLowerSpec, edits []f
 		mapLowerCover(covered, i, close+1)
 		i = close
 	}
+	if len(edits) == retainedEdits {
+		arena.Rewind(mark)
+	}
 	return edits, covered
 }
 
 func mapLowerIndexEdits(program *unit.Program, specs []mapLowerSpec, edits []functionValueEdit, covered []bool) ([]functionValueEdit, []bool, bool) {
 	indexEditStart := len(edits)
+	// Speculative type/selector work retains nothing unless this iteration
+	// publishes an edit or generated literal/make. Reclaim only that scratch;
+	// program metadata, covered flags and prior outputs precede the mark.
+	mark := arena.Mark()
+	published := true
 	for open := len(program.Tokens) - 1; open >= 0; open-- {
+		if !published {
+			arena.Rewind(mark)
+		}
+		mark = arena.Mark()
+		published = false
 		if covered[open] || !functionValueTokenCharIs(program, open, '[') {
 			continue
 		}
@@ -766,9 +837,13 @@ func mapLowerIndexEdits(program *unit.Program, specs []mapLowerSpec, edits []fun
 			edits[kept] = edits[i]
 			kept++
 		}
+		published = true
 		edits = append(edits[:kept], edit)
 		mapLowerCover(covered, baseStart, close+1)
 		open = baseStart
+	}
+	if !published {
+		arena.Rewind(mark)
 	}
 	return edits, covered, true
 }
@@ -1057,7 +1132,7 @@ func mapLowerGeneratedText(specs []mapLowerSpec, literals []mapLowerLiteral, mak
 		out += "func " + spec.length + "(mapping " + representation + ") int { if mapping == nil { return 0 }; return len(mapping[0].entries) }\n"
 		out += "func " + spec.entries + "(mapping " + representation + ") []" + spec.entry + " { if mapping == nil { return nil }; return mapping[0].entries }\n"
 		out += "func " + spec.storage + "_clear(mapping " + representation + ") { if mapping != nil { mapping[0].entries = mapping[0].entries[:0] } }\n"
-		out += "func " + spec.makeValue + "(hint int) " + representation + " { if hint < 0 { panic(\"make map: negative size\") }; mapping := make(" + representation + ",1); mapping[0] = &" + spec.storage + "{}; return mapping }\n"
+		out += "func " + spec.makeValue + "(hint int) " + representation + " { if hint < 0 { panic(\"make map: negative size\") }; mapping := make(" + representation + ",1); return mapping }\n"
 	}
 	for i := 0; i < len(makes); i++ {
 		made := makes[i]
@@ -1100,7 +1175,16 @@ func mapLowerHashStorage(spec mapLowerSpec, key string, value string, representa
 	if spec.hashKey == "string" {
 		seed = "value := uint64(14695981039346656037); for offset := 0; offset < len(key); offset++ { value = (value ^ uint64(key[offset]))*uint64(1099511628211) };"
 	}
-	out += "func " + hash + "(key " + key + ", size int) int { " + seed + " value = (value ^ (value >> 30))*uint64(0xbf58476d1ce4e5b9); value = (value ^ (value >> 27))*uint64(0x94d049bb133111eb); value = value ^ (value >> 31); return int(value & uint64(size-1)) }\n"
+	// Fixed-width keys no wider than 32 bits need no wide arithmetic. Mix
+	// their full bit pattern before masking so keys with equal low bits still
+	// spread across buckets. Native-width, wide and string keys retain the
+	// full-width path; named keys are classified by their underlying type.
+	switch spec.hashKey {
+	case "byte", "rune", "int8", "int16", "int32", "uint8", "uint16", "uint32":
+		out += "func " + hash + "(key " + key + ", size int) int { value := uint32(key); value = (value ^ (value >> 16))*uint32(0x85ebca6b); value = (value ^ (value >> 13))*uint32(0xc2b2ae35); value = value ^ (value >> 16); return int(value) & (size-1) }\n"
+	default:
+		out += "func " + hash + "(key " + key + ", size int) int { " + seed + " value = (value ^ (value >> 30))*uint64(0xbf58476d1ce4e5b9); value = (value ^ (value >> 27))*uint64(0x94d049bb133111eb); value = value ^ (value >> 31); return int(value & uint64(size-1)) }\n"
+	}
 	out += "func " + rehash + "(mapping " + representation + ", size int) { buckets := make([]int,size); entries := mapping[0].entries; next := mapping[0].next; for index := 0; index < len(entries); index++ { bucket := " + hash + "(entries[index].key,size); next[index] = buckets[bucket]; buckets[bucket] = index+1 }; mapping[0].buckets = buckets }\n"
 	out += "func " + spec.find + "(mapping " + representation + ", key " + key + ") int { if mapping == nil { return -1 }; buckets := mapping[0].buckets; if len(buckets) == 0 { return -1 }; index := buckets[" + hash + "(key,len(buckets))]; for index != 0 { if mapping[0].entries[index-1].key == key { return index-1 }; index = mapping[0].next[index-1] }; return -1 }\n"
 	out += "func " + spec.get + "(mapping " + representation + ", key " + key + ") " + value + " { index := " + spec.find + "(mapping,key); if index < 0 { var zero " + value + "; return zero }; return mapping[0].entries[index].value }\n"
@@ -1111,8 +1195,8 @@ func mapLowerHashStorage(spec mapLowerSpec, key string, value string, representa
 	out += "func " + spec.remove + "(mapping " + representation + ", key " + key + ") { index := " + spec.find + "(mapping,key); if index < 0 { return }; last := len(mapping[0].entries)-1; " + unlink + "(mapping,index,mapping[0].next[index]); if index != last { " + unlink + "(mapping,last,index+1); mapping[0].entries[index] = mapping[0].entries[last]; mapping[0].next[index] = mapping[0].next[last] }; var zero " + spec.entry + "; mapping[0].entries[last] = zero; mapping[0].entries = mapping[0].entries[:last]; mapping[0].next = mapping[0].next[:last] }\n"
 	out += "func " + spec.length + "(mapping " + representation + ") int { if mapping == nil { return 0 }; return len(mapping[0].entries) }\n"
 	out += "func " + spec.entries + "(mapping " + representation + ") []" + spec.entry + " { if mapping == nil { return nil }; return mapping[0].entries }\n"
-	out += "func " + spec.storage + "_clear(mapping " + representation + ") { if mapping != nil { mapping[0].entries = nil; mapping[0].next = nil; mapping[0].buckets = nil } }\n"
-	out += "func " + spec.makeValue + "(hint int) " + representation + " { if hint < 0 { panic(\"make map: negative size\") }; mapping := make(" + representation + ",1); mapping[0] = &" + spec.storage + "{}; return mapping }\n"
+	out += "func " + spec.storage + "_clear(mapping " + representation + ") { if mapping != nil { var zero " + spec.entry + "; for index := 0; index < len(mapping[0].entries); index++ { mapping[0].entries[index] = zero }; mapping[0].entries = mapping[0].entries[:0]; mapping[0].next = mapping[0].next[:0]; clear(mapping[0].buckets) } }\n"
+	out += "func " + spec.makeValue + "(hint int) " + representation + " { if hint < 0 { panic(\"make map: negative size\") }; mapping := make(" + representation + ",1); return mapping }\n"
 	return out
 }
 
@@ -1153,7 +1237,7 @@ func mapLowerGeneratedType(specs []mapLowerSpec, typ string) string {
 }
 
 func mapLowerRepresentation(spec mapLowerSpec) string {
-	return "[]*" + spec.storage
+	return "[]" + spec.storage
 }
 
 func mapLowerStringTypeEnd(typ string, start int) int {

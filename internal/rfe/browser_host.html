@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Renvo Linux RFE — WebAssembly</title>
+<style>body{margin:0;background:#12151a;color:#e8e8e8;font:14px monospace}header{padding:12px;display:flex;gap:12px;flex-wrap:wrap;align-items:center}pre{margin:0;padding:12px;white-space:pre-wrap;overflow-wrap:anywhere}input[type=file]{max-width:240px}#status{font-weight:bold}button,input{font:inherit}</style></head>
+<body><header><strong>Renvo Linux / WASM</strong><label>Kernel <input id="kernel" type="file"></label><label>Initramfs <input id="initrd" type="file"></label><label><input id="shell" type="checkbox">Shell after checks</label><button id="boot">Boot</button><button id="stop" disabled>Stop</button><span id="status">idle</span></header><pre id="terminal" tabindex="0" aria-label="Linux serial console"></pre>
+<script id="worker-code" type="text/plain">
+"use strict";
+let instance,memory,done=false,initializing=true,output="",input=[],inputBytes=0;
+const decode=new TextDecoder(),encode=new TextEncoder(),files=new Map(),fds=new Map();let nextFD=4,args=[];
+let cachedView,proofModule=null,proofCode=null;
+// A root slot denotes one live arena gate, not a compiled entry or proof.
+// Tokens never wrap/repeat. Reusing a root slot cannot revive an old owner.
+const gates=new WebAssembly.Table({element:"anyfunc",initial:32768,maximum:32768}),gateOwners=new Uint32Array(32768);
+let gateSequence=0,gateModule=null,gateCode=null;
+function releaseJIT(arena){if(!arena?.owner)return;new DataView(arena.metadata.buffer).setUint32(0,0,true);gates.set(arena.owner&32767,null);gateOwners[arena.owner&32767]=0;arena.owner=0}
+function installGate(arena,code){
+ if(code.length>arena.capacity-arena.bytes)throw Error("RFE gate arena budget exceeded");
+ if(!gateModule){const module=new WebAssembly.Module(code),is=WebAssembly.Module.imports(module),es=WebAssembly.Module.exports(module);
+  if(is.length!==4||is[0].module!=="env"||is[0].name!=="metadata"||is[0].kind!=="memory"||is[1].module!=="env"||is[1].name!=="table"||is[1].kind!=="table"||is[2].module!=="gate"||is[2].name!=="owner"||is[2].kind!=="global"||is[3].module!=="gate"||is[3].name!=="bytes"||is[3].kind!=="global"||es.length!==2||es[0].name!=="invoke"||es[0].kind!=="function"||es[1].name!=="prove"||es[1].kind!=="function")throw Error("Unexpected RFE arena gate module");
+  gateModule=module;gateCode=code.slice();
+ }else if(code.length!==gateCode.length||code.some((b,i)=>b!==gateCode[i]))throw Error("Changed RFE gate code");
+ let owner=0;for(let i=0;i<32768;i++){if(gateSequence===2147483647)throw Error("RFE owner token exhaustion");const candidate=++gateSequence;if(gateOwners[candidate&32767]===0){owner=candidate;break}}
+ if(owner===0)throw Error("RFE live arena gate slots full");
+ const metadata=arena.metadata||new WebAssembly.Memory({initial:4,maximum:4});
+ const gate=new WebAssembly.Instance(gateModule,{env:{metadata,table:arena.table},gate:{owner:new WebAssembly.Global({value:"i32",mutable:false},owner),bytes:new WebAssembly.Global({value:"i64",mutable:false},BigInt(memory.buffer.byteLength))}});
+ new DataView(metadata.buffer).setUint32(0,owner,true);gates.set(owner&32767,gate.exports.invoke);gateOwners[owner&32767]=owner;
+ arena.owner=owner;arena.metadata=metadata;arena.prove=gate.exports.prove;arena.proof=gate;arena.bytes+=code.length;
+}
+const view=()=>{if(!cachedView||cachedView.buffer!==memory.buffer)cachedView=new DataView(memory.buffer);return cachedView};
+const bytes=(at,len)=>new Uint8Array(memory.buffer,at,len);
+function iovs(at,count){const out=[],v=view();for(let i=0;i<count;i++){const p=v.getUint32(at+i*8,true),n=v.getUint32(at+i*8+4,true);if(p>memory.buffer.byteLength||n>memory.buffer.byteLength-p)throw Error("Invalid WASI iovec: "+JSON.stringify({at,count,p,n,memory:memory.buffer.byteLength,initializing}));out.push(bytes(p,n))}return out}
+function flush(){if(output){postMessage({type:"output",text:output});output=""}}
+function strings(values,at,data){const v=view();for(let i=0;i<values.length;i++){v.setUint32(at+i*4,data,true);const b=encode.encode(values[i]);bytes(data,b.length).set(b);bytes(data+b.length,1)[0]=0;data+=b.length+1}return 0}
+function sizes(values,count,size){view().setUint32(count,values.length,true);view().setUint32(size,values.reduce((n,s)=>n+encode.encode(s).length+1,0),true);return 0}
+function readFD(fd,at,count,used,offset){const parts=iovs(at,count);let n=0;
+ if(fd===0){for(const part of parts){let j=0;while(j<part.length&&input.length){const source=input[0],take=Math.min(part.length-j,source.length);part.set(source.subarray(0,take),j);j+=take;n+=take;inputBytes-=take;if(take===source.length)input.shift();else input[0]=source.subarray(take)}}}
+ else {const f=fds.get(fd);if(!f)return 8;if(f.service){if(!f.reply)return 8;let at=0;for(const part of parts){const take=Math.min(part.length,f.reply.length-at);part.set(f.reply.subarray(at,at+take));at+=take;n+=take}f.reply=null;view().setUint32(used,n,true);return 0}let p=offset===undefined?f.pos:Number(offset);if(!Number.isSafeInteger(p)||p<0)return 28;for(const part of parts){const take=Math.min(part.length,Math.max(0,f.data.length-p));part.set(f.data.subarray(p,p+take));p+=take;n+=take}if(offset===undefined)f.pos=p}
+ view().setUint32(used,n,true);return 0}
+// Worker-owned compiled RFE arenas. The only accepted service path is the
+// fixed runtime device; code and call arguments remain bounded and local.
+// Quiescent transfer: no compilation, no executable cache outside the
+// original cap, and no dispatcher (which captures an arena table) is retained.
+function recycleJIT(f,packet){
+ if(packet.length<12)throw Error("Invalid RFE transfer packet");
+ const v=new DataView(packet.buffer,packet.byteOffset,packet.byteLength),arena=f.jit,owner=v.getUint32(4,true),count=v.getUint32(8,true);
+ if(!arena||!arena.retired||owner===0||arena.retiredOwner!==owner||!gateModule||count>8191||packet.length!==12+count*4)return -1;
+ const selected=[],seen=new Set();let retained=0;
+ for(let i=0;i<count;i++){
+  const entry=v.getUint32(12+i*4,true),block=arena.blocks.get(entry);
+  if(!block||!block.transferable||seen.has(entry)||!Number.isSafeInteger(block.bytes)||block.bytes<=0)return -1;
+  const proof=block.proof;
+  retained+=block.bytes+(proof?proofCode.length:0);if(retained+gateCode.length>Math.floor(arena.capacity/2))return -1;
+  seen.add(entry);selected.push({entry,block,proof});
+ }
+ // Reuse fixed private storage. Clear every slot, then restore ONLY selected
+ // unchanged code and its exact same-entry immutable admission record. Old gate functions have a different immutable owner and
+ // cannot be revived by updating this private metadata to the new token.
+ const fresh={capacity:arena.capacity,bytes:retained,next:16,blocks:new Map(),table:arena.table,metadata:arena.metadata};
+ for(let i=0;i<32768;i++)fresh.table.set(i,null);
+ new Uint8Array(fresh.metadata.buffer).fill(0);
+ for(let i=0;i<count;i++){
+  const {entry,block,proof}=selected[i],m=new DataView(fresh.metadata.buffer);
+  fresh.table.set(entry/8,block.run);fresh.blocks.set(entry,block);
+  m.setUint32(entry,block.words|(block.flags<<9)|1024|(proof?2048|(proof.instructions<<12):0),true);m.setUint32(entry+4,block.contextSize,true);if(proof)m.setBigUint64(entry+8,proof.pc,true);
+ }
+ arena.blocks.clear();installGate(fresh,gateCode);
+ for(const {entry,proof} of selected)if(proof)fresh.table.set(entry/8+1,fresh.prove);
+ f.jit=fresh;return fresh.owner;
+}
+function jitRequest(f,parts){
+ let length=parts.reduce((n,p)=>n+p.length,0);if(length<4||length>1048576)throw Error("Invalid RFE JIT request size");
+ // One contiguous fixed request is consumed synchronously, before generated
+ // code runs. Installation packets still own a copy through module validation.
+ let packet;if(parts.length===1&&length<=32)packet=parts[0];else{packet=new Uint8Array(length);let at=0;for(const p of parts){packet.set(p,at);at+=p.length}}
+ const v=new DataView(packet.buffer,packet.byteOffset,packet.byteLength),command=v.getUint32(0,true);let result=0;
+ if(command===0){if(length<8)throw Error("Invalid RFE JIT initialization");const cap=v.getUint32(4,true);if(cap<4096||cap>67108864)throw Error("Invalid RFE JIT capacity");releaseJIT(f.jit);f.jit={capacity:cap,bytes:0,next:16,blocks:new Map(),table:new WebAssembly.Table({element:"anyfunc",initial:32768,maximum:32768})};if(length>8){installGate(f.jit,packet.subarray(8));result=f.jit.owner}}
+ else if(command===1){
+  if(length<16)throw Error("Invalid RFE JIT module packet");
+  const arena=f.jit,words=v.getUint32(4,true),flags=v.getUint32(8,true),contextSize=v.getUint32(12,true),code=packet.subarray(16);
+  if(arena){while(arena.blocks.has(arena.next))arena.next+=16}
+  if(!arena||arena.retired||words<1||words>256||flags>1||contextSize<64||contextSize>1048576||arena.next>=16384*16||arena.bytes+code.length>arena.capacity)throw Error("RFE JIT arena budget exceeded");
+  const module=new WebAssembly.Module(code),imports=WebAssembly.Module.imports(module),exports=WebAssembly.Module.exports(module);
+  if(imports.length<1||imports.length>2||imports[0].module!=="env"||imports[0].name!=="memory"||imports[0].kind!=="memory"||imports.length===2&&(imports[1].module!=="env"||!(imports[1].name==="table"&&imports[1].kind==="table"||imports[1].name==="service"&&imports[1].kind==="function")))throw Error("Unexpected compiled RFE imports");
+  if(exports.length!==1||exports[0].name!=="run"||exports[0].kind!=="function")throw Error("Unexpected compiled RFE exports");
+  const block=new WebAssembly.Instance(module,{env:{memory,table:arena.table,service:instance.exports.renvo_browser_service}});
+  result=arena.next;arena.next+=16;arena.bytes+=code.length;
+  arena.table.set(result/8,block.exports.run);
+  arena.blocks.set(result,{run:block.exports.run,words,flags,contextSize});
+  const stored=arena.blocks.get(result);stored.bytes=code.length;stored.transferable=!imports.some(i=>i.kind==="table");
+  if(arena.metadata){const m=new DataView(arena.metadata.buffer);m.setUint32(result,words|(flags<<9)|1024,true);m.setUint32(result+4,contextSize,true)}
+ }
+ else if(command===2){
+  if(length!==16)throw Error("Invalid compiled RFE call");
+  callJIT(f,v.getUint32(4,true),v.getUint32(8,true),v.getUint32(12,true));f.reply=null;return length
+ }
+ else if(command===3){
+  if(length<24)throw Error("Invalid compiled RFE proof packet");
+  const arena=f.jit,entry=v.getUint32(4,true),block=arena?.blocks.get(entry),code=packet.subarray(24),words=v.getUint32(16,true),instructions=v.getUint32(20,true);
+  if(!arena||arena.retired||!block||words!==block.words||instructions<1||instructions>256||arena.bytes+code.length>arena.capacity)throw Error("Invalid compiled RFE proof admission");
+  if(!proofModule){
+   const module=new WebAssembly.Module(code),imports=WebAssembly.Module.imports(module),exports=WebAssembly.Module.exports(module),names=["pc","entry","instructions","words"];
+   if(imports.length!==4||imports.some((p,i)=>p.module!=="proof"||p.name!==names[i]||p.kind!=="global")||exports.length!==1||exports[0].name!=="prove"||exports[0].kind!=="function")throw Error("Unexpected compiled RFE proof module");
+   proofModule=module;proofCode=code.slice();
+  }else if(code.length!==proofCode.length||code.some((b,i)=>b!==proofCode[i]))throw Error("Changed compiled RFE proof code");
+  const pc=v.getBigUint64(8,true),prior=block.proof;
+  if(!arena.metadata||!arena.prove||prior&&(prior.pc!==pc||prior.instructions!==instructions||prior.words!==words))throw Error("Changed compiled RFE proof admission");
+  // Same immutable tuple as the old per-entry instance, now in host-private
+  // fixed metadata. Charge every proof's full original bytes, not shared size.
+  block.proof=prior||Object.freeze({pc,instructions,words});
+  const m=new DataView(arena.metadata.buffer);m.setBigUint64(entry+8,pc,true);m.setUint32(entry,block.words|(block.flags<<9)|3072|(instructions<<12),true);
+  const proof=arena.proof;
+  arena.table.set(entry/8+1,proof.exports.prove);arena.bytes+=code.length;
+ }
+ else if(command===4){
+  if(length!==8)throw Error("Invalid RFE retirement packet");
+  const arena=f.jit,owner=v.getUint32(4,true);
+  if(!arena||owner===0||arena.retired||arena.owner!==owner)result=-1;
+  else{arena.retiredOwner=owner;releaseJIT(arena);arena.retired=true}
+ }
+ else if(command===5){result=recycleJIT(f,packet)}
+ else if(command===6){
+  if(length!==8)throw Error("Invalid RFE device-owner query");
+  const arena=f.jit,owner=v.getUint32(4,true);
+  result=arena&&owner!==0&&(arena.retired?arena.retiredOwner===owner:arena.owner===owner)?1:0;
+ }
+ else throw Error("Unknown RFE JIT request");
+ f.reply=f.replyBytes;f.replyView.setInt32(0,result,true);return length;
+}
+// Synchronous dispatch packets use the same extent checks without allocating
+// an iovec array and packet view for each bounded compiled scheduling session.
+function callJIT(f,entry,state,context){
+ const block=f.jit?.blocks.get(entry),size=memory.buffer.byteLength;
+ if(f.jit.retired||!block||state>size||block.words*8>size-state||block.flags&&(context===0||context>size||block.contextSize>size-context)||!block.flags&&context!==0)throw Error("Invalid compiled RFE call buffers "+JSON.stringify({state,context,size,block:block&&{words:block.words,flags:block.flags,contextSize:block.contextSize}}));
+ block.run(state,context)
+}
+function imports(){return {renvo_rfe:{gates},wasi_snapshot_preview1:{
+ fd_write(fd,at,count,written){const f=fds.get(fd);if(f?.service){if(count===1){const v=view(),p=v.getUint32(at,true),n=v.getUint32(at+4,true),size=memory.buffer.byteLength;if(p>size||n>size-p)throw Error("Invalid WASI iovec");if(n===16&&v.getUint32(p,true)===2){const entry=v.getUint32(p+4,true),state=v.getUint32(p+8,true),context=v.getUint32(p+12,true);callJIT(f,entry,state,context);f.reply=null;view().setUint32(written,16,true);return 0}}const n=jitRequest(f,iovs(at,count));view().setUint32(written,n,true);return 0}if(fd!==1&&fd!==2)return 8;let n=0;for(const part of iovs(at,count)){output+=decode.decode(part,{stream:true});n+=part.length}view().setUint32(written,n,true);if(fd===2||output.length>=65536)flush();return 0},
+ fd_read(fd,at,count,used){const f=fds.get(fd);if(f?.service&&count===1&&f.reply){const v=view(),p=v.getUint32(at,true),n=v.getUint32(at+4,true),size=memory.buffer.byteLength;if(p>size||n>size-p)throw Error("Invalid WASI iovec");if(n>=4){v.setUint32(p,f.replyView.getUint32(0,true),true);f.reply=null;v.setUint32(used,4,true);return 0}}return readFD(fd,at,count,used)},
+ fd_pread:(fd,at,count,offset,used)=>readFD(fd,at,count,used,offset),
+ fd_pwrite:()=>63,
+ path_open(dirfd,flags,at,len,oflags,base,inherit,fdflags,result){if(oflags&9)return 63;let name=decode.decode(bytes(at,len)).replace(/^\.\//,"").replace(/^\//,"");if(name==="dev/renvo-rfe"){const fd=nextFD++;const replyBytes=new Uint8Array(4);fds.set(fd,{service:true,jit:null,reply:null,replyBytes,replyView:new DataView(replyBytes.buffer)});view().setUint32(result,fd,true);return 0}const data=files.get(name);if(!data)return 44;const fd=nextFD++;fds.set(fd,{data,pos:0});view().setUint32(result,fd,true);return 0},
+ fd_close(fd){const f=fds.get(fd);if(!f)return 8;releaseJIT(f.jit);return fds.delete(fd)?0:8},
+ fd_fdstat_get(fd,at){if(fd>2&&!fds.has(fd))return 8;bytes(at,24).fill(0);bytes(at,1)[0]=fd<=2?2:4;return 0},
+ fd_readdir:()=>54,
+ args_sizes_get:(n,s)=>sizes(args,n,s),args_get:(p,d)=>strings(args,p,d),
+ environ_sizes_get:(n,s)=>sizes(["PWD=/"],n,s),environ_get:(p,d)=>strings(["PWD=/"],p,d),
+ proc_exit(code){throw {wasiExit:true,code:code>>>0}}
+}}}
+function fail(error){done=true;flush();postMessage({type:"state",state:"failed",error:String(error&&error.stack||error)})}
+const schedule=new MessageChannel();
+schedule.port1.onmessage=()=>{if(done)return;try{instance.exports.renvo_browser_step();flush();schedule.port2.postMessage(0)}catch(e){flush();if(e&&e.wasiExit){done=true;postMessage({type:"state",state:e.code===0?"halted":"failed",exitCode:e.code})}else fail(e)}};
+onmessage=async({data})=>{
+ if(data.type==="input"){const b=new Uint8Array(data.bytes);if(inputBytes+b.length<=4096){input.push(b);inputBytes+=b.length}return}
+ if(data.type!=="boot"||instance)return;
+ try{
+  args=data.shell?["rfe","-shell"]:["rfe"];
+  files.set("kernel",new Uint8Array(data.kernel));files.set("initramfs.cpio.gz",new Uint8Array(data.initrd));
+  const built=await WebAssembly.instantiate(data.wasm,imports());instance=built.instance;memory=instance.exports.memory;
+  if(!memory||typeof instance.exports.renvo_browser_step!=="function")throw Error("Missing cooperative WASM exports");
+  try{instance.exports._start()}catch(e){if(!e||!e.wasiExit||e.code!==0)throw e}
+  initializing=false;
+  // Boot has copied both assets into guest RAM. Do not retain host-side copies.
+  files.clear();for(const [fd,file] of fds)if(!file.service)fds.delete(fd);flush();postMessage({type:"state",state:"running"});schedule.port2.postMessage(0);
+ }catch(e){fail(e)}
+};
+</script>
+<script>
+"use strict";
+const wasm64="@@WASM@@",terminal=document.getElementById("terminal"),status=document.getElementById("status"),encoder=new TextEncoder();
+let worker=null,renderPending=false;
+function render(){if(renderPending)return;renderPending=true;requestAnimationFrame(()=>{renderPending=false;terminal.textContent=window.renvoBrowserResult.output;window.scrollTo(0,document.body.scrollHeight)})}
+window.renvoBrowserResult={state:"idle",exitCode:null,error:null,output:""};
+function state(value,extra={}){Object.assign(window.renvoBrowserResult,{state:value},extra);status.textContent=value;document.getElementById("stop").disabled=!worker}
+function stop(){if(worker)worker.terminate();worker=null;document.getElementById("boot").disabled=false;document.getElementById("stop").disabled=true}
+async function boot(kernel,initrd){if(worker)throw Error("Machine already running");terminal.textContent="";window.renvoBrowserResult={state:"loading",exitCode:null,error:null,output:""};
+ const raw=atob(wasm64),wasm=Uint8Array.from(raw,c=>c.charCodeAt(0)).buffer;
+ const url=URL.createObjectURL(new Blob([document.getElementById("worker-code").textContent],{type:"text/javascript"}));
+ worker=new Worker(url);URL.revokeObjectURL(url);document.getElementById("boot").disabled=true;
+ worker.onmessage=({data})=>{if(data.type==="output"){window.renvoBrowserResult.output+=data.text;render()}else if(data.type==="state"){state(data.state,{exitCode:data.exitCode??null,error:data.error??null});if(data.state==="halted"||data.state==="failed")stop()}};
+ worker.onerror=e=>{state("failed",{error:e.message});stop()};state("loading");
+ worker.postMessage({type:"boot",wasm,kernel,initrd,shell:document.getElementById("shell").checked},[wasm,kernel,initrd]);terminal.focus()
+}
+document.getElementById("boot").onclick=async()=>{try{const k=document.getElementById("kernel").files[0],i=document.getElementById("initrd").files[0];if(!k||!i)throw Error("Select both a kernel and initramfs");await boot(await k.arrayBuffer(),await i.arrayBuffer())}catch(e){state("failed",{error:String(e)});stop()}};
+document.getElementById("stop").onclick=()=>{stop();state("stopped")};
+function send(text){if(worker){const bytes=encoder.encode(text);worker.postMessage({type:"input",bytes:bytes.buffer},[bytes.buffer])}}
+terminal.onkeydown=e=>{let text=e.key.length===1?e.key:({Enter:"\r",Backspace:"\x7f",Tab:"\t",ArrowUp:"\x1b[A",ArrowDown:"\x1b[B",ArrowRight:"\x1b[C",ArrowLeft:"\x1b[D"})[e.key];if(e.ctrlKey&&e.key.length===1)text=String.fromCharCode(e.key.toUpperCase().charCodeAt(0)&31);if(text){e.preventDefault();send(text)}};
+terminal.onpaste=e=>{e.preventDefault();send(e.clipboardData.getData("text"))};
+// The offline validator serves only these two checksum-verified local assets.
+if(new URLSearchParams(location.search).get("boot")==="1"){
+ Promise.all(["kernel","initramfs.cpio.gz"].map(async name=>{const r=await fetch(name);if(!r.ok)throw Error("Missing boot asset: "+name);return r.arrayBuffer()})).then(([k,i])=>boot(k,i)).catch(e=>{state("failed",{error:String(e)});stop()})
+}
+</script></body></html>

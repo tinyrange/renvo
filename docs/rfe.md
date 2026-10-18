@@ -59,6 +59,14 @@ single file is printed to standard output. `-l` lists changed files and
 `.rfe` alongside existing `.rtg` and `.rbe` files. Formatting is idempotent and
 does not write a file when its validation fails.
 
+## Backend architecture direction
+
+The long-term goal is **RBE-only target code generation**: any RBE should become
+a usable RFE code-generation backend through a common block/region contract,
+without another independent RFE target emitter. The current specialized native
+and browser emitters are transitional. See [RFE backend direction](rfe-backend-direction.md)
+for ownership boundaries, migration requirements and execution-adapter limits.
+
 ## Instruction lowering
 
 A `.lower` section describes pure state transformations using Go-shaped
@@ -96,8 +104,9 @@ feeds a small, architecture-neutral SSA IR. Grouped dispatch is emitted directly
 into each entry point to avoid a second runtime dispatch. Constant folding,
 mask propagation and dead-value elimination remove
 overwritten intermediate flags. State stores commit at the end of the block.
-Renvo emits call-free native state transformations from this IR using its
-existing amd64 and arm64 code generators. Memory, devices, traps and syscalls
+The current transitional native path emits call-free state transformations
+through RFE-specific optimizing emitters in the compiler backend. The browser
+path uses a separate RFE-to-WASM emitter; neither is yet universal RBE integration. Memory, devices, traps and syscalls
 remain in the architectural Go implementation and end a pure block.
 
 The initial PDP-11 engine lowers selected register instructions, excluding PC

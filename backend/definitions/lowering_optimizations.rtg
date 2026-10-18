@@ -479,7 +479,7 @@ go compiler {
 			}
 			renvoAsmPushPrimary(a)
 			renvoAsmPushSecondary(a)
-			if !renvoEmitIntExpr(g, ep, e.right) {
+			if !renvoEmitIndexValuePrimary(g, ep, e.right) {
 				return false
 			}
 			renvoAsmPopTertiary(a)
@@ -659,7 +659,7 @@ go compiler {
 		}
 		renvoAsmPushPrimary(a)
 		renvoAsmPushTertiary(a)
-		if !renvoEmitIntExpr(g, ep, indexExpr.right) {
+		if !renvoEmitIndexValuePrimary(g, ep, indexExpr.right) {
 			return false
 		}
 		if g.boundedIndexLocal > 0 && baseExpr.kind == renvoExprIdent &&

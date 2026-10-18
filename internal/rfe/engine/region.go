@@ -1,7 +1,7 @@
 package engine
 
 import (
-	"fmt"
+	"renvo.dev/internal/arena"
 	emu "renvo.dev/internal/rfe/runtime"
 )
 
@@ -22,7 +22,8 @@ func (e *Engine) regionParts(c CPU, first *compiledBlock) []regionPart {
 		// Indirect/call/return leaves cannot grow a statically discovered
 		// trace, but can still use the owned one-shot region compiler. Their
 		// dynamic successor is published/validated by the ordinary dispatcher.
-		return []regionPart{{root, first}}
+		e.regionResultScratch[0] = regionPart{root, first}
+		return e.regionResultScratch[:1]
 	}
 	memory, ok := c.MemoryBus().(CodeContextMemory)
 	if !ok {
@@ -32,14 +33,18 @@ func (e *Engine) regionParts(c CPU, first *compiledBlock) []regionPart {
 	if stamp.Identity == nil || first.context != stamp || len(first.dependencies) == 0 {
 		return nil
 	}
-	parts := []regionPart{{root, first}}
-	seen := map[uint64]bool{root: true}
+	// Search reads only already-owned block/context metadata. Its closure
+	// environments and recursive call scratch do not escape; selected parts
+	// are copied into the engine's preexisting result storage before reclaim.
+	lowMark, highMark := arena.Mark(), arena.PersistMark()
+	parts := e.regionPartsScratch[:1]
+	parts[0] = regionPart{root, first}
 	// Explore both legal direct edges, but cap cold discovery independently of
 	// native execution. A failed taken edge must not hide a fallthrough cycle.
 	attempts := 0
-	best := []regionPart(nil)
+	best := e.regionBestScratch[:0]
 	bestScore := float64(0)
-	bestCycle := []regionPart(nil)
+	bestCycle := e.regionCycleScratch[:0]
 	bestCycleScore := float64(0)
 	// A region avoids a dispatcher transition per reached block, not per
 	// guest instruction. Weight each additional block by observed reach;
@@ -47,7 +52,7 @@ func (e *Engine) regionParts(c CPU, first *compiledBlock) []regionPart {
 	var search func(int, float64, float64) []regionPart
 	search = func(total int, score, probability float64) []regionPart {
 		if len(parts) > 1 && score > bestScore {
-			best = append([]regionPart(nil), parts...)
+			best = append(best[:0], parts...)
 			bestScore = score
 		}
 		current := parts[len(parts)-1]
@@ -56,25 +61,28 @@ func (e *Engine) regionParts(c CPU, first *compiledBlock) []regionPart {
 		}
 		flow := current.block.instructions[len(current.block.instructions)-1].Flow
 		next, alternate, conditional := flow.Next, flow.Alternate, flow.Conditional
-		targets := []uint64{next}
+		targets := [2]uint64{next, alternate}
+		targetCount := 1
 		if conditional && alternate != next {
+			targetCount = 2
 			// Prefer the conventional loop back edge, otherwise fallthrough.
 			// This is only discovery order: every selected edge is still guarded.
 			if next > current.pc && alternate < next {
-				targets = []uint64{alternate, next}
+				targets = [2]uint64{alternate, next}
 			} else {
-				targets = append(targets, alternate)
+				targets[1] = alternate
 			}
 		}
 		counts := e.edgeCounts[current.block.instructions[len(current.block.instructions)-1].PC]
 		if conditional && counts[0]+counts[1] != 0 {
 			if counts[1] > counts[0] {
-				targets = []uint64{alternate, next}
+				targets = [2]uint64{alternate, next}
 			} else {
-				targets = []uint64{next, alternate}
+				targets = [2]uint64{next, alternate}
 			}
 		}
-		for _, target := range targets {
+		for targetIndex := 0; targetIndex < targetCount; targetIndex++ {
+			target := targets[targetIndex]
 			attempts++
 			if attempts > 256 {
 				return nil
@@ -96,20 +104,25 @@ func (e *Engine) regionParts(c CPU, first *compiledBlock) []regionPart {
 				}
 				cycleScore := score / (1 - reach)
 				if cycleScore > bestCycleScore {
-					bestCycle = append([]regionPart(nil), parts...)
+					bestCycle = append(bestCycle[:0], parts...)
 					bestCycleScore = cycleScore
 				}
 				continue
 			}
 			candidate := e.blocks[target]
-			if seen[target] || candidate == nil || !candidate.native || candidate.context != stamp || len(candidate.dependencies) == 0 || len(candidate.instructions) == 0 || candidate.instructions[0].ScheduleBoundary || total+len(candidate.instructions) > e.config.MaxRegionInstructions {
+			seen := false
+			for _, part := range parts {
+				if part.pc == target {
+					seen = true
+					break
+				}
+			}
+			if seen || candidate == nil || !candidate.native || candidate.context != stamp || len(candidate.dependencies) == 0 || len(candidate.instructions) == 0 || candidate.instructions[0].ScheduleBoundary || total+len(candidate.instructions) > e.config.MaxRegionInstructions {
 				continue
 			}
-			seen[target] = true
 			parts = append(parts, regionPart{target, candidate})
 			result := search(total+len(candidate.instructions), score+reach, reach)
 			parts = parts[:len(parts)-1]
-			delete(seen, target)
 			if len(result) != 0 {
 				return result
 			}
@@ -117,21 +130,40 @@ func (e *Engine) regionParts(c CPU, first *compiledBlock) []regionPart {
 		return nil
 	}
 	if cycle := search(len(first.instructions), 1, 1); len(cycle) != 0 {
-		return cycle
+		return e.finishRegionParts(cycle, lowMark, highMark)
 	}
 	if bestCycleScore >= bestScore && len(bestCycle) != 0 {
-		return bestCycle
+		return e.finishRegionParts(bestCycle, lowMark, highMark)
 	}
-	return best
+	return e.finishRegionParts(best, lowMark, highMark)
+}
+
+func (e *Engine) finishRegionParts(parts []regionPart, lowMark, highMark int) []regionPart {
+	count := copy(e.regionResultScratch[:], parts)
+	arena.Rewind(lowMark)
+	arena.PersistReset(highMark)
+	return e.regionResultScratch[:count]
 }
 
 func (e *Engine) prepareRegion(c CPU, block *compiledBlock) {
-	if !block.native || e.native == nil || block.regionAttempted && block.regionGeneration == e.Stats.Promotions {
+	if !block.native || e.native == nil || block.visits < e.config.RegionThreshold || block.regionAttempted && block.regionGeneration == e.Stats.Promotions {
 		return
 	}
-	defer pauseTranslationClock(c)()
+	if block.region && block.regionInstructions == e.config.MaxRegionInstructions {
+		// Replacement below requires a strictly larger region. A validated
+		// current-arena region at the fixed cap cannot grow after another
+		// unrelated leaf promotion, so no graph search can change its entry.
+		block.regionGeneration = e.Stats.Promotions
+		return
+	}
+	if clock := pauseTranslationClock(c); clock != nil {
+		defer resumeTranslationClock(clock)
+	}
 	block.regionAttempted = true
 	block.regionGeneration = e.Stats.Promotions
+	if e.prepareGraph(c, block) {
+		return
+	}
 	parts := e.regionParts(c, block)
 	if len(parts) == 0 {
 		return
@@ -143,14 +175,15 @@ func (e *Engine) prepareRegion(c CPU, block *compiledBlock) {
 	if count > e.config.MaxRegionInstructions || block.region && count <= block.regionInstructions {
 		return
 	}
-	b := emu.Builder{MemoryInstructionProgress: true}
+	b, low, high := e.beginTranslation(true)
 	pc := c.Registers()[e.arch.PC]
 	b.Store(e.arch.PC, b.Constant(pc))
 	completed := 0
 	prefix := [17]uint8{}
 	for index, part := range parts {
 		for i, ins := range part.block.instructions {
-			if !e.arch.Lower(&b, ins, completed) {
+			if !e.arch.Lower(b, ins, completed) {
+				e.endTranslation(low, high)
 				return
 			}
 			completed++
@@ -183,7 +216,7 @@ func (e *Engine) prepareRegion(c CPU, block *compiledBlock) {
 		context := memory.NativeContext()
 		direct = context != nil && context.DirectSize == 64<<20
 	}
-	ops := b.FinishMemory(e.arch.StateWords)
+	ops := e.finishTranslation(b, true, low, high)
 	var entry int
 	var err error
 	if memory, ok := c.MemoryBus().(CodeVersionedNativeMemory); ok && memory.NativeCodeVersions() {
@@ -221,7 +254,7 @@ func (e *Engine) prepareRegion(c CPU, block *compiledBlock) {
 	block.regionPrefix = prefix
 	e.Stats.Regions++
 	e.Stats.NativeBytes = e.native.Bytes
-	_ = e.native.NameEntry(entry, fmt.Sprintf("%s_%x_region_%d_instructions", e.arch.Name, pc, count))
+	e.nameEntry(entry, pc, count, "region")
 	e.Stats.ProfileErrors = e.native.SymbolErrors
 }
 

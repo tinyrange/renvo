@@ -6,6 +6,8 @@ RFE 1
   "name": "linux-amd64-machine",
   "import": "renvo.dev/emulators/amd64machine",
   "entry": "Main",
+  "browser_entry": "BrowserMain",
+  "browser_step": "BrowserStep",
   "requires": [
     {
       "name": "amd64"
@@ -46,6 +48,401 @@ func TestBootRejectsOversizedInitramfsWithoutPlacementUnderflow(t *testing.T) {
 	}
 }
 
+-- boot_browser.go --
+//go:build browser
+
+package amd64machine
+
+import (
+	"encoding/binary"
+	"fmt"
+	"renvo.dev/emulators/amd64"
+	"renvo.dev/internal/rfe/systemboot"
+)
+
+func (m *Machine) Boot(kernel, initrd []byte, command string) error {
+	if len(command) > 2047 {
+		return fmt.Errorf("command line exceeds 2047 bytes")
+	}
+	image, header, e := systemboot.KernelELF(kernel, (256<<20)-1)
+	if e != nil {
+		return e
+	}
+	entry, highest, e := systemboot.LoadELF64X86(image, m.RAM)
+	if e != nil {
+		return e
+	}
+	if uint64(len(initrd))+0x1000000 > uint64(len(m.RAM)) {
+		return fmt.Errorf("initramfs exceeds RAM")
+	}
+	initAddr := (uint64(len(m.RAM)) - uint64(len(initrd)) - 0x1000000) &^ 4095
+	if initAddr <= highest {
+		return fmt.Errorf("initramfs overlaps kernel")
+	}
+	copy(m.RAM[initAddr:], initrd)
+	const params = 0x90000
+	const cmd = 0x20000
+	const tables = 0x10000
+	const gdt = 0x18000
+	clear(m.RAM[params : params+4096])
+	if header != nil {
+		copy(m.RAM[params+0x1f1:params+0x290], header[0x1f1:0x290])
+	}
+	p := m.RAM[params : params+4096]
+	p[0x210] = 0xff
+	p[0x211] |= 0x80
+	binary.LittleEndian.PutUint32(p[0x218:], uint32(initAddr))
+	binary.LittleEndian.PutUint32(p[0x21c:], uint32(len(initrd)))
+	binary.LittleEndian.PutUint32(p[0x228:], cmd)
+	binary.LittleEndian.PutUint64(p[0x250:], 0)
+	binary.LittleEndian.PutUint32(p[0x238:], 2048)
+	copy(m.RAM[cmd:], command)
+	m.RAM[cmd+len(command)] = 0
+	// Legacy E820 excludes the PC ROM/VGA hole. No firmware services are needed.
+	p[0x1e8] = 3
+	regions := [][3]uint64{{0, 0x9f000, 1}, {0x9f000, 0x61000, 2}, {0x100000, uint64(len(m.RAM)) - 0x100000, 1}}
+	for j, r := range regions {
+		o := 0x2d0 + j*20
+		binary.LittleEndian.PutUint64(p[o:], r[0])
+		binary.LittleEndian.PutUint64(p[o+8:], r[1])
+		binary.LittleEndian.PutUint32(p[o+16:], uint32(r[2]))
+	}
+	clear(m.RAM[tables : tables+0x6000])
+	m.Write(tables, 8, tables+0x1000|3)
+	for g := 0; g < 4; g++ {
+		m.Write(tables+0x1000+uint64(g)*8, 8, tables+0x2000+uint64(g)*0x1000|3)
+		for j := 0; j < 512; j++ {
+			m.Write(tables+0x2000+uint64(g)*0x1000+uint64(j)*8, 8, (uint64(g)<<30)|(uint64(j)<<21)|0x83)
+		}
+	}
+	m.Write(gdt+16, 8, 0x00af9a000000ffff)
+	m.Write(gdt+24, 8, 0x00cf92000000ffff)
+	s := m.System
+	s.CR[0] = 0x80010033
+	s.CR[3] = tables
+	s.CR[4] = 0x20
+	s.EFER = 0x500
+	s.GDTR = amd64.Table{Base: gdt, Limit: 31}
+	s.Segments[1] = amd64.Segment{Selector: 16, Limit: 0xffffffff, Flags: 0xaf9a}
+	for _, j := range []int{0, 2, 3} {
+		s.Segments[j] = amd64.Segment{Selector: 24, Limit: 0xffffffff, Flags: 0xcf92}
+	}
+	m.CPU.PC = entry
+	m.CPU.Flags = 2
+	m.CPU.R[amd64.RSI] = params
+	m.CPU.R[amd64.RSP] = 0x80000
+	return nil
+}
+
+-- boot_native.go --
+//go:build !browser
+
+package amd64machine
+
+import (
+	"bytes"
+	"compress/gzip"
+	"debug/elf"
+	"encoding/binary"
+	"fmt"
+	"io"
+	"renvo.dev/emulators/amd64"
+)
+
+func (m *Machine) Boot(kernel, initrd []byte, command string) error {
+	if len(command) > 2047 {
+		return fmt.Errorf("command line exceeds 2047 bytes")
+	}
+	const initReserve = uint64(0x1000000)
+	if uint64(len(m.RAM)) < initReserve || uint64(len(initrd)) > uint64(len(m.RAM))-initReserve {
+		return fmt.Errorf("initramfs does not fit guest RAM")
+	}
+	image := kernel
+	header := []byte(nil)
+	if len(kernel) > 0x268 && string(kernel[0x202:0x206]) == "HdrS" {
+		if len(kernel) < 4096 {
+			return fmt.Errorf("truncated bzImage boot header")
+		}
+		header = kernel[:4096]
+		off := (uint64(kernel[0x1f1]) + 1) * 512
+		if kernel[0x1f1] == 0 {
+			off = 5 * 512
+		}
+		po := uint64(binary.LittleEndian.Uint32(kernel[0x248:]))
+		pn := uint64(binary.LittleEndian.Uint32(kernel[0x24c:]))
+		if off+po > uint64(len(kernel)) || pn > uint64(len(kernel))-off-po {
+			return fmt.Errorf("invalid kernel payload range")
+		}
+		zr, e := gzip.NewReader(bytes.NewReader(kernel[off+po : off+po+pn]))
+		if e != nil {
+			return fmt.Errorf("kernel ELF gzip payload: %w", e)
+		}
+		image, e = io.ReadAll(io.LimitReader(zr, 256<<20))
+		closeErr := zr.Close()
+		if e != nil {
+			return e
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		if len(image) >= 256<<20 {
+			return fmt.Errorf("kernel payload too large")
+		}
+	}
+	f, e := elf.NewFile(bytes.NewReader(image))
+	if e != nil {
+		return e
+	}
+	defer f.Close()
+	if f.Machine != elf.EM_X86_64 || f.Class != elf.ELFCLASS64 || f.Data != elf.ELFDATA2LSB {
+		return fmt.Errorf("kernel must be little-endian x86-64 ELF")
+	}
+	entry := f.Entry
+	highest := uint64(0)
+	for _, p := range f.Progs {
+		if p.Type != elf.PT_LOAD {
+			continue
+		}
+		if p.Paddr > uint64(len(m.RAM)) || p.Memsz > uint64(len(m.RAM))-p.Paddr || p.Filesz > p.Memsz || p.Off > uint64(len(image)) || p.Filesz > uint64(len(image))-p.Off {
+			return fmt.Errorf("kernel load range outside RAM")
+		}
+		copy(m.RAM[p.Paddr:p.Paddr+p.Filesz], image[p.Off:p.Off+p.Filesz])
+		if end := p.Paddr + p.Memsz; end > highest {
+			highest = end
+		}
+		if entry >= p.Vaddr && entry-p.Vaddr < p.Memsz {
+			entry = p.Paddr + (entry - p.Vaddr)
+		}
+	}
+	if entry >= uint64(len(m.RAM)) {
+		return fmt.Errorf("kernel entry outside RAM")
+	}
+	initAddr := (uint64(len(m.RAM)) - uint64(len(initrd)) - 0x1000000) &^ 4095
+	if initAddr <= highest {
+		return fmt.Errorf("initramfs overlaps kernel")
+	}
+	copy(m.RAM[initAddr:], initrd)
+	const params = 0x90000
+	const cmd = 0x20000
+	const tables = 0x10000
+	const gdt = 0x18000
+	clear(m.RAM[params : params+4096])
+	if header != nil {
+		copy(m.RAM[params+0x1f1:params+0x290], header[0x1f1:0x290])
+	}
+	p := m.RAM[params : params+4096]
+	p[0x210] = 0xff
+	p[0x211] |= 0x80
+	binary.LittleEndian.PutUint32(p[0x218:], uint32(initAddr))
+	binary.LittleEndian.PutUint32(p[0x21c:], uint32(len(initrd)))
+	binary.LittleEndian.PutUint32(p[0x228:], cmd)
+	binary.LittleEndian.PutUint64(p[0x250:], 0)
+	binary.LittleEndian.PutUint32(p[0x238:], 2048)
+	copy(m.RAM[cmd:], command)
+	m.RAM[cmd+len(command)] = 0
+	// Legacy E820 excludes the PC ROM/VGA hole. No firmware services are needed.
+	p[0x1e8] = 3
+	regions := [][3]uint64{{0, 0x9f000, 1}, {0x9f000, 0x61000, 2}, {0x100000, uint64(len(m.RAM)) - 0x100000, 1}}
+	for j, r := range regions {
+		o := 0x2d0 + j*20
+		binary.LittleEndian.PutUint64(p[o:], r[0])
+		binary.LittleEndian.PutUint64(p[o+8:], r[1])
+		binary.LittleEndian.PutUint32(p[o+16:], uint32(r[2]))
+	}
+	clear(m.RAM[tables : tables+0x6000])
+	m.Write(tables, 8, tables+0x1000|3)
+	for g := 0; g < 4; g++ {
+		m.Write(tables+0x1000+uint64(g)*8, 8, tables+0x2000+uint64(g)*0x1000|3)
+		for j := 0; j < 512; j++ {
+			m.Write(tables+0x2000+uint64(g)*0x1000+uint64(j)*8, 8, (uint64(g)<<30)|(uint64(j)<<21)|0x83)
+		}
+	}
+	m.Write(gdt+16, 8, 0x00af9a000000ffff)
+	m.Write(gdt+24, 8, 0x00cf92000000ffff)
+	s := m.System
+	s.CR[0] = 0x80010033
+	s.CR[3] = tables
+	s.CR[4] = 0x20
+	s.EFER = 0x500
+	s.GDTR = amd64.Table{Base: gdt, Limit: 31}
+	s.Segments[1] = amd64.Segment{Selector: 16, Limit: 0xffffffff, Flags: 0xaf9a}
+	for _, j := range []int{0, 2, 3} {
+		s.Segments[j] = amd64.Segment{Selector: 24, Limit: 0xffffffff, Flags: 0xcf92}
+	}
+	m.CPU.PC = entry
+	m.CPU.Flags = 2
+	m.CPU.R[amd64.RSI] = params
+	m.CPU.R[amd64.RSP] = 0x80000
+	return nil
+}
+
+-- browser.go --
+//go:build browser
+
+package amd64machine
+
+import (
+	"fmt"
+	"os"
+	"renvo.dev/emulators/amd64"
+	"renvo.dev/internal/arena"
+	emu "renvo.dev/internal/rfe/runtime"
+)
+
+var browserMachine *Machine
+var browserInstructions uint64
+
+const browserInstructionLimit uint64 = 2000000000
+const browserQuantum = 65536
+
+func BrowserMain(args []string) int {
+	if err := emu.BrowserCompilerProbe(); err != nil {
+		fmt.Fprintln(os.Stderr, "WASM compiled backend:", err)
+		return 1
+	}
+	if err := amd64.ProbeCompiledStrings(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	command := "console=ttyS0,115200 rdinit=/init panic=-1 nokaslr noapic nolapic acpi=off"
+	cache := "default"
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "-shell" {
+			command += " rfe.shell=1"
+		} else if arg == "-jit-cache" && i+1 < len(args) {
+			i++
+			cache = args[i]
+		} else {
+			fmt.Fprintln(os.Stderr, "unsupported browser argument:", arg)
+			return 1
+		}
+	}
+	m, err := New(256, os.Stdout)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	m.JITCache = cache
+	low, high := arena.Mark(), arena.PersistMark()
+	kernel, err := os.ReadFile("/kernel")
+	if err != nil {
+		m.Close()
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	initrd, err := os.ReadFile("/initramfs.cpio.gz")
+	if err != nil {
+		m.Close()
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if err = m.Boot(kernel, initrd, command); err != nil {
+		m.Close()
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	kernel, initrd = nil, nil
+	arena.Rewind(low)
+	arena.PersistReset(high)
+	if err = m.enableSystemJIT("native", true); err != nil {
+		m.Close()
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if !m.JIT.NativeAvailable() || !m.KernelJIT.NativeAvailable() {
+		m.Close()
+		fmt.Fprintln(os.Stderr, "compiled WASM engine unavailable")
+		return 1
+	}
+	browserMachine, browserInstructions = m, 0
+	fmt.Fprintf(os.Stderr, "RENVO-RFE-BROWSER: ready pc=%d ram=%d\n", m.CPU.PC, len(m.RAM))
+	return 0
+}
+
+func BrowserStep() int {
+	m := browserMachine
+	if m == nil {
+		return 2
+	}
+	var input [256]byte
+	n, _ := os.Stdin.Read(input[:])
+	if n > 0 && len(m.rx)+n <= 4096 {
+		m.rx = append(m.rx, input[:n]...)
+		m.serialIRQ()
+	}
+	for used := uint64(0); used < browserQuantum && !m.Stopped; {
+		if browserInstructions >= browserInstructionLimit {
+			return browserFail(fmt.Errorf("instruction budget exhausted"))
+		}
+		before := m.CPU.Retired
+		budget := uint64(browserQuantum) - used
+		if budget > browserInstructionLimit-browserInstructions {
+			budget = browserInstructionLimit - browserInstructions
+		}
+		m.syncClock()
+		if m.System.Halted {
+			if m.CPU.Flags&amd64.FlagIF == 0 {
+				m.Stopped = true
+				break
+			}
+			pending := m.PIC[0].irr &^ m.PIC[0].mask
+			if pending == 0 || m.PIC[0].isr != 0 {
+				if !m.pitTimerActive {
+					return browserFail(fmt.Errorf("halted CPU has no scheduled timer event"))
+				}
+				m.advanceIdleClock(m.nextTimer)
+			}
+		} else if err := m.RunQuantum(budget); err != nil {
+			return browserFail(err)
+		}
+		consumed := m.CPU.Retired - before
+		if consumed == 0 {
+			consumed = 1
+		} // architectural fault/idle attempt
+		if consumed > budget {
+			return browserFail(fmt.Errorf("invalid compiled scheduling progress"))
+		}
+		used += consumed
+		browserInstructions += consumed
+		m.servicePIT()
+		if m.System.Interruptible() {
+			c := &m.PIC[0]
+			pending := c.irr &^ c.mask
+			for j := 0; j < 8; j++ {
+				if pending&(1<<j) != 0 && c.isr == 0 {
+					c.irr &^= 1 << j
+					c.isr |= 1 << j
+					if err := m.System.Interrupt(c.vector+byte(j), 0, false); err != nil {
+						return browserFail(err)
+					}
+					if j == 0 {
+						m.pitDelivered++
+					}
+					break
+				}
+			}
+		}
+	}
+	if m.Stopped {
+		native := m.JIT.Stats.Native + m.KernelJIT.Stats.Native
+		fmt.Fprintf(os.Stderr, "RENVO-RFE-BROWSER: compiled retired=%d memory=%d\n", native, m.JIT.Stats.NativeMemory+m.KernelJIT.Stats.NativeMemory)
+		if native == 0 {
+			return browserFail(fmt.Errorf("no compiled WASM guest retirement"))
+		}
+		m.Close()
+		browserMachine = nil
+		return 1
+	}
+	return 0
+}
+func browserFail(err error) int {
+	fmt.Fprintln(os.Stderr, "browser machine:", err)
+	browserMachine.Close()
+	browserMachine = nil
+	return 2
+}
+
 -- clock.go --
 package amd64machine
 
@@ -74,6 +471,7 @@ func (m *Machine) syncClock() {
 	}
 }
 
+func (c *nativeCPU) TranslationClockEnabled() bool { return c.m.Clock != nil }
 func (c *nativeCPU) PauseTranslationClock() {
 	if c.m.Clock != nil {
 		c.m.Clock.Pause()
@@ -201,6 +599,22 @@ func (m *Machine) CodeEpoch(address uint64) uint64 {
 	return m.versions[address>>12]
 }
 
+-- instruction_window.go --
+package amd64machine
+
+// Exposes no devices or speculative reads: just a bounded ordinary RAM view.
+// The caller may use it only within one synchronous instruction decode.
+func (m *Machine) InstructionBytes(address uint64) []byte {
+	if address >= uint64(len(m.RAM)) {
+		return nil
+	}
+	end := address | 4095
+	if end >= uint64(len(m.RAM)) {
+		end = uint64(len(m.RAM)) - 1
+	}
+	return m.RAM[address : end+1]
+}
+
 -- invlpg_native_test.go --
 package amd64machine
 
@@ -213,6 +627,19 @@ func TestINVLPGRevokesNativeDescriptorsRefilledBeforeArchitecturalFlush(t *testi
 	m := jitMachine(t, "native")
 	jitRun(t, m, 4096)
 	m.System.CPL = 0
+	// Selective invalidation only revokes code contexts that observed this
+	// virtual execute page. Establish that dependency explicitly; the original
+	// data-only fixture relied on conservative global code invalidation.
+	if err := m.Write(0x4048, 8, 0x11067); err != nil {
+		t.Fatal(err)
+	}
+	m.System.Flush()
+	if _, _, err := m.System.NativeMapping(0x9000, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.NativeRAM.CodeVersion(0x9000); err != nil {
+		t.Fatal(err)
+	}
 	m.CPU.R[amd64.RBX] = 0x9000
 	m.CPU.PC = 0x8000
 	// PTE mutation revokes native grants, but the old architectural TLB may
@@ -325,16 +752,22 @@ func (m *Machine) InvalidateMappings() {
 	}
 }
 
-// A single-page TLB invalidation keeps other cached translations live. Revoke
-// native authority without retiring any of their page-table write barriers.
-func (m *Machine) InvalidateNativeMappings() {
+// InvalidatePage retains table watches for surviving TLB entries. The native
+// memory owner tracks conservative execute-page dependencies under exact root
+// and privilege lifetimes, and forgets all data aliases before another entry.
+func (m *Machine) InvalidatePage(address uint64) {
 	if m.NativeRAM != nil {
-		m.NativeRAM.InvalidateMappings()
+		m.NativeRAM.InvalidatePage(address)
 	}
 }
 func (m *Machine) SwitchAddressSpace() {
 	if m.NativeRAM != nil {
 		m.NativeRAM.SwitchAddressSpace()
+	}
+}
+func (m *Machine) MarkPageTableEntry(address uint64) {
+	if m.NativeRAM != nil {
+		m.NativeRAM.MarkPageTableEntry(address)
 	}
 }
 func (m *Machine) MarkPageTable(address uint64) {
@@ -378,6 +811,8 @@ func (m *Machine) newJIT(config engine.EngineConfig) (*engine.Engine, error) {
 	return engine.New(config, arch)
 }
 func (m *Machine) printJITStats() {
+	schedule := m.schedule
+	fmt.Fprintf(os.Stderr, "scheduler calls=%d inactive=%d imports=%d exports=%d slow_stops=%d continuations=%d skipped_exports=%d\n", schedule.calls, schedule.inactive, schedule.imports, schedule.exports, schedule.slow, schedule.continued, schedule.skippedExports)
 	fmt.Fprintf(os.Stderr, "page-table hardware metadata updates=%d\n", m.ADUpdates)
 	fmt.Fprintf(os.Stderr, "mapping changes [page-table code-write root-switch invalidation]=%v\n", m.NativeRAM.ProfileMappingCounters())
 	if m.Clock != nil {
@@ -402,16 +837,26 @@ func (m *Machine) printJITStats() {
 	}
 }
 
+type x86ScheduleStats struct {
+	calls, inactive, imports, exports, slow, continued, budgetStops, zeroStops uint64
+	skippedExports                                                             uint64
+}
+
 type nativeCPU struct {
 	*amd64.SystemAdapter
 	m         *Machine
 	accounted uint64
+	boundary  bool
+	dirty     bool // native register results have not yet been exported to CPU
 }
 
 func (c *nativeCPU) Registers() []uint64      { return c.SystemAdapter.TimedRegisters() }
 func (c *nativeCPU) MemoryBus() engine.Memory { return c.m.NativeRAM }
 func (c *nativeCPU) sync() {
 	count := c.m.CPU.Retired - c.accounted
+	if count != 0 {
+		c.dirty = true
+	}
 	if c.m.Clock == nil {
 		c.m.ticks += count
 		c.m.System.TSC += count * amd64.TSCTicksPerInstruction
@@ -421,30 +866,47 @@ func (c *nativeCPU) sync() {
 	c.accounted = c.m.CPU.Retired
 }
 func (c *nativeCPU) Step() error {
-	c.Export()
+	before, io, interrupt := c.m.CPU.Retired, c.m.ioEpoch, c.m.System.InterruptEpoch
 	c.sync()
+	c.exportState()
 	err := c.m.CPU.Step()
+	c.boundary = c.boundary || c.m.CPU.Retired == before || c.m.ioEpoch != io || c.m.System.InterruptEpoch != interrupt
 	if err == nil && c.m.Clock == nil {
 		c.m.ticks++
 	}
 	c.accounted = c.m.CPU.Retired
-	c.Import()
+	c.importState()
 	return err
 }
 func (c *nativeCPU) ExecuteInstruction(ins engine.Instruction) error {
-	c.Export()
+	before, io, interrupt := c.m.CPU.Retired, c.m.ioEpoch, c.m.System.InterruptEpoch
 	c.sync()
-	err := c.m.CPU.ExecuteCachedInstruction(ins.Decoded.(amd64.Instruction))
+	c.exportState()
+	err := c.m.CPU.ExecuteCachedInstruction(amd64.DecodedInstruction(ins))
+	c.boundary = c.boundary || ins.ScheduleBoundary || c.m.CPU.Retired == before || c.m.ioEpoch != io || c.m.System.InterruptEpoch != interrupt
 	if err == nil && c.m.Clock == nil {
 		c.m.ticks++
 	}
 	c.accounted = c.m.CPU.Retired
-	c.Import()
+	c.importState()
 	return err
 }
+func (c *nativeCPU) importState() { c.m.schedule.imports++; c.Import(); c.dirty = false }
+func (c *nativeCPU) exportState() {
+	if !c.dirty {
+		c.m.schedule.skippedExports++
+		return
+	}
+	c.m.schedule.exports++
+	c.Export()
+	c.dirty = false
+}
+
 func (m *Machine) RunQuantum(remaining uint64) error {
+	m.schedule.calls++
 	m.syncClock()
 	if m.JIT == nil || !m.nativeActive() {
+		m.schedule.inactive++
 		err := m.CPU.Step()
 		if err == nil && m.Clock == nil {
 			m.ticks++
@@ -473,11 +935,35 @@ func (m *Machine) RunQuantum(remaining uint64) error {
 		m.adapter = &nativeCPU{SystemAdapter: amd64.NewSystemAdapter(&m.CPU), m: m}
 	}
 	cpu := m.adapter
-	cpu.Import()
-	cpu.accounted = m.CPU.Retired
-	err := m.activeJIT().RunQuanta(cpu, budget)
-	cpu.sync()
-	cpu.Export()
+	cpu.importState()
+	cpu.accounted, cpu.boundary = m.CPU.Retired, false
+	start, domain := m.CPU.Retired, m.nativeDomain()
+	var err error
+	for {
+		before := m.CPU.Retired
+		err = m.activeJIT().RunQuanta(cpu, budget-(before-start))
+		cpu.sync()
+		used := m.CPU.Retired - start
+		if err != nil || cpu.boundary || m.Clock != nil || !m.nativeActive() || m.nativeDomain() != domain || used >= budget || m.CPU.Retired == before || cpu.NativeInterruptible() && m.PIC[0].isr == 0 && m.PIC[0].irr & ^m.PIC[0].mask != 0 {
+			if cpu.boundary {
+				m.schedule.slow++
+			}
+			if used >= budget {
+				m.schedule.budgetStops++
+			}
+			if m.CPU.Retired == before {
+				m.schedule.zeroStops++
+			}
+			break
+		}
+		// Ordinary architectural instructions may continue with the adapter
+		// authoritative. I/O, faults, IRQ shadow, privilege/mode changes and
+		// deliverable interrupts retain host boundaries. The original timer,
+		// console, caller and native-session ceiling bounds this entire group.
+		m.schedule.continued++
+		cpu.RefreshTime()
+	}
+	cpu.exportState()
 	return err
 }
 
@@ -492,7 +978,7 @@ import (
 func TestCheckedCachedKernelControlInstructionsKeepTimeShadowAndLiveState(t *testing.T) {
 	native, interpreted := jitKernelMachine(t, "native"), jitKernelMachine(t, "interpreter")
 	// CLI; SWAPGS; RDMSR GSBASE; STI; NOP; JMP back. Control operations
-	// remain interpreted, and STI's shadow requires its old scheduling edge.
+	// that mutate system state remain interpreted; STI keeps its shadow edge.
 	code := []byte{0xfa, 0x0f, 0x01, 0xf8, 0x0f, 0x32, 0xfb, 0x90, 0xeb, 0xf6}
 	for _, m := range []*Machine{native, interpreted} {
 		for n, b := range code {
@@ -528,6 +1014,62 @@ func TestCheckedCachedKernelControlInstructionsKeepTimeShadowAndLiveState(t *tes
 	nativeErr, interpErr := native.RunQuantum(1), interpreted.RunQuantum(1)
 	if nativeErr == nil || interpErr == nil || native.System.GSBase != beforeGS || native.CPU.Flags != beforeFlags || native.CPU.Retired != interpreted.CPU.Retired {
 		t.Fatal("cached opcode bypassed execute revoke", nativeErr, interpErr)
+	}
+}
+
+-- jit_continuation_boundary_test.go --
+package amd64machine
+
+import (
+	"encoding/binary"
+	"testing"
+)
+
+func TestMixedNativeContinuationAmortizesOrdinaryInterpretedInstructions(t *testing.T) {
+	m := jitMachine(t, "native")
+	copy(m.RAM[0x10000:], []byte{0x49, 0xff, 0xc1, 0x0f, 0xa2, 0xeb, 0xf9}) // INC R9; CPUID; JMP
+	m.nextTimer = 1000000
+	jitRun(t, m, 8193)
+	m.CPU.PC = 0x8000
+	before := m.CPU.Retired
+	if err := m.RunQuantum(960); err != nil || m.CPU.Retired-before != 960 {
+		t.Fatal("ordinary slow path defeated bounded continuation", err, m.CPU.Retired-before)
+	}
+	m.nextTimer = m.ticks + 37
+	before = m.CPU.Retired
+	if err := m.RunQuantum(65536); err != nil || m.CPU.Retired-before > 37 || m.ticks > m.nextTimer {
+		t.Fatal("continued interpreter crossed timer", err, m.CPU.Retired-before)
+	}
+}
+func TestMixedNativeContinuationStopsAtSamePrivilegeTrap(t *testing.T) {
+	m := jitMachine(t, "native")
+	m.System.CPL = 0
+	m.System.GDTR.Base, m.System.GDTR.Limit = 0x9400, 31
+	m.System.IDTR.Base, m.System.IDTR.Limit = 0x9000, 1023
+	binary.LittleEndian.PutUint64(m.RAM[0x11408:], 0x00af9a000000ffff)
+	binary.LittleEndian.PutUint64(m.RAM[0x11030:], 0x00008e0000088100)
+	m.CPU.R[4] = 0x9ff0
+	m.CPU.PC = 0x8000
+	copy(m.RAM[0x10000:], []byte{0x49, 0xff, 0xc1, 0xcc}) // INC R9; INT3
+	copy(m.RAM[0x10100:], []byte{0x49, 0xff, 0xc2})       // handler INC R10 must not run yet
+	before := m.CPU.Retired
+	if err := m.RunQuantum(65536); err != nil || m.CPU.Retired-before != 2 || m.CPU.PC != 0x8100 || m.CPU.R[10] != 0 || m.System.InterruptEpoch != 1 {
+		t.Fatal("same-CPL trap lost scheduling boundary", err, m.CPU.PC, m.CPU.Retired-before, m.System.InterruptEpoch)
+	}
+}
+
+func TestMixedNativeContinuationReturnsAtPortIO(t *testing.T) {
+	m := jitMachine(t, "native")
+	copy(m.RAM[0x10000:], []byte{0x49, 0xff, 0xc1, 0xec, 0xeb, 0xfa}) // INC R9; IN AL,DX; JMP
+	m.System.CPL = 0
+	m.CPU.R[2] = 0x3fd
+	m.nextTimer = 1000000
+	m.kernelThreshold = 64
+	jitRun(t, m, 8193)
+	m.CPU.PC = 0x8000
+	before, io := m.CPU.Retired, m.ioEpoch
+	if err := m.RunQuantum(65536); err != nil || m.CPU.Retired-before != 2 || m.ioEpoch != io+1 || m.CPU.PC != 0x8004 {
+		t.Fatal("port access lost host polling boundary", err, m.CPU.Retired-before, m.CPU.PC)
 	}
 }
 
@@ -607,6 +1149,63 @@ func TestSystemDecodeCacheStraddlingSecondPageRemap(t *testing.T) {
 	}
 }
 
+-- jit_dirty_export_test.go --
+package amd64machine
+
+import "testing"
+
+func TestNativeExportsOnlyChangedStateAcrossInterpretedBoundaries(t *testing.T) {
+	native, interpreted := jitMachine(t, "native"), jitMachine(t, "interpreter")
+	for _, m := range []*Machine{native, interpreted} {
+		// Native arithmetic followed by an interpreted CPUID boundary.
+		copy(m.RAM[0x10000:], []byte{0x49, 0xff, 0xc1, 0x0f, 0xa2, 0xeb, 0xf9})
+		m.nextTimer = 1000000
+		jitRun(t, m, 8192)
+	}
+	before := native.schedule
+	retired := native.JIT.Stats.Native
+	for i := 0; i < 1000; i++ {
+		jitRun(t, native, 1)
+		jitRun(t, interpreted, 1)
+		if native.CPU.R != interpreted.CPU.R || native.CPU.PC != interpreted.CPU.PC || native.CPU.Flags != interpreted.CPU.Flags || native.CPU.Retired != interpreted.CPU.Retired || native.System.TSC != interpreted.System.TSC || native.ticks != interpreted.ticks {
+			t.Fatal("dirty register ownership lost architectural state", i, native.CPU, interpreted.CPU)
+		}
+	}
+	if native.schedule.skippedExports == before.skippedExports || native.schedule.exports-before.exports > native.JIT.Stats.Native-retired {
+		t.Fatal("unchanged slow-path state still exported", native.schedule, before)
+	}
+}
+func TestNativeDirtyPrefixExportedBeforeSlowMemoryFault(t *testing.T) {
+	native, interpreted := jitMachine(t, "native"), jitMachine(t, "interpreter")
+	for _, m := range []*Machine{native, interpreted} {
+		copy(m.RAM[0x10000:], []byte{0x49, 0xff, 0xc1, 0x48, 0x8b, 0x03, 0xeb, 0xf8})
+		m.nextTimer = 1000000
+		jitRun(t, m, 8192)
+		m.CPU.PC = 0x8000
+		if err := m.Write(0x4048, 8, 0); err != nil {
+			t.Fatal(err)
+		}
+		m.System.Flush()
+	}
+	var before [2]uint64
+	for i, m := range []*Machine{native, interpreted} {
+		before[i] = m.CPU.Retired
+		failed := false
+		for n := 0; n < 4; n++ {
+			if err := m.RunQuantum(32); err != nil {
+				failed = true
+				break
+			}
+		}
+		if !failed || m.CPU.Retired-before[i] != 1 {
+			t.Fatal("fault crossed precise native prefix", i, m.CPU.Retired-before[i])
+		}
+	}
+	if native.CPU.R != interpreted.CPU.R || native.CPU.PC != interpreted.CPU.PC || native.CPU.Flags != interpreted.CPU.Flags || native.CPU.PC != 0x8003 || native.System.CR[2] != interpreted.System.CR[2] || native.System.CR[2] != 0x9000 {
+		t.Fatal("dirty prefix was not exported before fault", native.CPU, interpreted.CPU)
+	}
+}
+
 -- jit_domains.go --
 package amd64machine
 
@@ -622,7 +1221,9 @@ func (m *Machine) activeJIT() *engine.Engine {
 	}
 	return m.JIT
 }
-func (m *Machine) EnableSystemJIT(mode string) error {
+func (m *Machine) EnableSystemJIT(mode string) error { return m.enableSystemJIT(mode, false) }
+
+func (m *Machine) enableSystemJIT(mode string, eager bool) error {
 	cache, err := engine.SystemCachePreset(m.JITCache)
 	if err != nil {
 		return err
@@ -640,6 +1241,16 @@ func (m *Machine) EnableSystemJIT(mode string) error {
 	kernel.DiscoveryThreshold = 64
 	kernel.MaxBlocks, kernel.NativeBytes = cache.KernelBlocks, cache.KernelBytes
 	kernel.MaxRegionInstructions = 64
+	if eager {
+		// Compile admitted leaves immediately. Separate bounded hotness policies
+		// avoid churning the small kernel arena with one-off regions, while
+		// short user programs still reach the compiled tier promptly.
+		m.kernelThreshold = 1
+		user.DiscoveryThreshold, kernel.DiscoveryThreshold = 8, 8
+		user.IRThreshold, kernel.IRThreshold = 1, 1
+		user.NativeThreshold, kernel.NativeThreshold = 1, 1
+		user.RegionThreshold, kernel.RegionThreshold = 128, 1024
+	}
 	first, err := m.newJIT(user)
 	if err != nil {
 		return err
@@ -719,6 +1330,97 @@ func TestSystemJITSeparateDomainsDifferential(t *testing.T) {
 	}
 }
 
+-- jit_invlpg_test.go --
+package amd64machine
+
+import (
+	"renvo.dev/emulators/amd64"
+	"testing"
+)
+
+func TestINVLPGRevokesProofRevalidatedThroughStaleTLB(t *testing.T) {
+	m := jitMachine(t, "native")
+	m.kernelThreshold = 64
+	m.System.CPL = 0
+	// INVLPG lives in an independent translation, not the page being remapped.
+	if err := m.Write(0x4050, 8, 0x14067); err != nil {
+		t.Fatal(err)
+	}
+	copy(m.RAM[0x14000:], []byte{0x0f, 0x01, 0x3f}) // INVLPG [RDI]
+	copy(m.RAM[0x12000:], m.RAM[0x10000:0x1000b])
+	m.RAM[0x12002] = 0xc8 // same loop, DEC RAX instead of INC RAX
+	jitRun(t, m, 4096)
+	// A PTE write revokes proofs, but does not itself evict the CPU's TLB.
+	if err := m.Write(0x4040, 8, 0x12067); err != nil {
+		t.Fatal(err)
+	}
+	x, native := m.CPU.R[amd64.RAX], m.JIT.Stats.Native
+	jitRun(t, m, 4096)
+	if m.CPU.R[amd64.RAX] != x+1024 || m.JIT.Stats.Native == native {
+		t.Fatal("failed to revalidate native old code through stale architectural TLB", x, m.CPU.R[amd64.RAX], native, m.JIT.Stats.Native)
+	}
+	stale := m.NativeRAM.CodeContext()
+	m.CPU.PC, m.CPU.R[amd64.RDI] = 0xa000, 0x8000
+	if err := m.CPU.Step(); err != nil {
+		t.Fatal(err)
+	}
+	if m.NativeRAM.CodeContext() == stale {
+		t.Fatal("INVLPG preserved native authority revalidated after the PTE write")
+	}
+	m.CPU.PC = 0x8000
+	x = m.CPU.R[amd64.RAX]
+	jitRun(t, m, 4096)
+	if m.CPU.R[amd64.RAX] != x-1024 {
+		t.Fatal("INVLPG executed stale native physical code")
+	}
+	// Single-page eviction must keep other architectural translations AND their
+	// table dependencies. A full table-watch clear here would lose authority.
+	if off, _, err := m.System.NativeMapping(0x9000, false); err != nil || off != 0x11000 {
+		t.Fatal("missing unrelated cached data mapping", off, err)
+	}
+	before := m.NativeRAM.CodeContext()
+	if err := m.Write(0x4048, 8, 0x13067|1<<63); err != nil {
+		t.Fatal(err)
+	}
+	if m.NativeRAM.CodeContext() == before {
+		t.Fatal("INVLPG released unrelated live table watch")
+	}
+	if off, _, err := m.System.NativeMapping(0x9000, false); err != nil || off != 0x11000 {
+		t.Fatal("INVLPG unexpectedly evicted unrelated architectural translation", off, err)
+	}
+}
+
+func TestProtectionFaultRevokesProofRevalidatedThroughStaleTLB(t *testing.T) {
+	m := jitMachine(t, "native")
+	if err := m.Write(0x4040, 8, 0x10065); err != nil {
+		t.Fatal(err)
+	} // RO code
+	copy(m.RAM[0x12000:], m.RAM[0x10000:0x1000b])
+	m.RAM[0x12002] = 0xc8
+	jitRun(t, m, 4096)
+	if err := m.Write(0x4040, 8, 0x12067); err != nil {
+		t.Fatal(err)
+	}
+	native := m.JIT.Stats.Native
+	jitRun(t, m, 4096)
+	if m.JIT.Stats.Native == native {
+		t.Fatal("stale code was not revalidated")
+	}
+	stale := m.NativeRAM.CodeContext()
+	if err := m.System.Write(0x8000, 1, 0x48); err == nil {
+		t.Fatal("expected stale RO protection fault")
+	}
+	if m.NativeRAM.CodeContext() == stale {
+		t.Fatal("protection-fault eviction preserved stale native authority")
+	}
+	m.CPU.PC = 0x8000
+	x := m.CPU.R[amd64.RAX]
+	jitRun(t, m, 4096)
+	if m.CPU.R[amd64.RAX] != x-1024 {
+		t.Fatal("protection eviction executed stale native physical code")
+	}
+}
+
 -- jit_kernel_test.go --
 package amd64machine
 
@@ -762,6 +1464,49 @@ func TestKernelJITHighVirtualRAMAndDomainRevocation(t *testing.T) {
 	native.NativeRAM.NativeRefill(key)
 	if context.Pages[(key>>12)&63].Data != nil {
 		t.Fatal("noncanonical user address admitted kernel RAM")
+	}
+}
+
+-- jit_leave_test.go --
+package amd64machine
+
+import (
+	"renvo.dev/emulators/amd64"
+	"testing"
+)
+
+func TestNativeLEAVEStackAndFramePointerDifferential(t *testing.T) {
+	a, b := jitMachine(t, "interpreter"), jitMachine(t, "native")
+	for _, m := range []*Machine{a, b} {
+		// MOV RBP,RBX; LEAVE; JMP back. LEAVE is the only memory instruction.
+		copy(m.RAM[0x10000:], []byte{0x48, 0x89, 0xdd, 0xc9, 0xeb, 0xfa})
+		if err := m.Write(0x11000, 8, 0x123456789abcdef0); err != nil {
+			t.Fatal(err)
+		}
+		m.CPU.R[amd64.RSP], m.CPU.R[amd64.RBP] = 0x87654321, 0xfedcba9876543210
+	}
+	for _, n := range []uint64{1, 2, 3, 1, 63, 4096} {
+		jitRun(t, a, n)
+		jitRun(t, b, n)
+		if a.CPU.R != b.CPU.R || a.CPU.PC != b.CPU.PC || a.CPU.Flags != b.CPU.Flags || a.CPU.Retired != b.CPU.Retired || a.ticks != b.ticks {
+			t.Fatal("LEAVE native state/retirement mismatch", n, a.CPU.R, b.CPU.R)
+		}
+	}
+	if b.JIT.Stats.NativeMemory == 0 {
+		t.Fatal("LEAVE was never executed natively")
+	}
+	// Force a load spanning a present first page and absent second page. No
+	// stack/frame-pointer mutation is permitted on a fault, even if a prefix
+	// instruction in the same native leaf already retired.
+	b.CPU.PC = 0x8000
+	b.CPU.R[amd64.RBX], b.CPU.R[amd64.RSP] = 0x9ffc, 0x98765432
+	before, faults := b.CPU.Retired, b.System.FaultCount
+	_ = b.RunQuantum(3)
+	if b.System.FaultCount <= faults || b.System.CR[2] != 0xa000 {
+		t.Fatal("LEAVE did not exercise cross-page fault")
+	}
+	if b.CPU.R[amd64.RBP] != 0x9ffc || b.CPU.R[amd64.RSP] != 0x98765432 || b.CPU.Retired != before+1 {
+		t.Fatal("faulting LEAVE committed stack/frame pointer or lost prefix", b.CPU.R, before, b.CPU.Retired)
 	}
 }
 
@@ -834,6 +1579,209 @@ func TestNativeTimestampReadsExactPrefixesAndWrap(t *testing.T) {
 			t.Fatal("stale native clock base")
 		}
 	}
+}
+
+-- jit_native_system_flags_test.go --
+package amd64machine
+
+import (
+	"bytes"
+	"renvo.dev/emulators/amd64"
+	"testing"
+)
+
+func equalSystemNative(t *testing.T, a, b *Machine) {
+	t.Helper()
+	if a.CPU.R != b.CPU.R || a.CPU.PC != b.CPU.PC || a.CPU.Flags != b.CPU.Flags || a.CPU.Retired != b.CPU.Retired || a.ticks != b.ticks || a.System.TSC != b.System.TSC || a.System.IRQShadow != b.System.IRQShadow || !bytes.Equal(a.RAM[0x11000:0x12000], b.RAM[0x11000:0x12000]) {
+		t.Fatal("native system state differs", a.CPU.PC, b.CPU.PC, a.CPU.Retired, b.CPU.Retired, a.CPU.Flags, b.CPU.Flags)
+	}
+}
+
+func TestNativeSystemSelectorSnapshotsRemainDynamic(t *testing.T) {
+	for _, cpl := range []uint8{0, 3} {
+		a, b := jitMachine(t, "native"), jitMachine(t, "interpreter")
+		// Six MOV R8W..R13W,Sreg, followed by FS and GS memory destinations.
+		var code []byte
+		for n := byte(0); n < 6; n++ {
+			code = append(code, 0x41, 0x8c, 0xc0|n<<3|n)
+		}
+		code = append(code, 0x64, 0x8c, 0x03, 0x65, 0x8c, 0x6b, 2)
+		code = append(code, 0xeb, byte(-len(code)-2))
+		for _, m := range []*Machine{a, b} {
+			copy(m.RAM[0x10000:], code)
+			m.System.CPL = cpl
+			m.kernelThreshold = 64
+			m.System.FSBase, m.System.GSBase = 0x9000, 0x9000
+			m.CPU.R[amd64.RBX] = 0
+			m.System.Flush()
+		}
+		jitRun(t, a, 8192)
+		jitRun(t, b, 8192)
+		equalSystemNative(t, a, b)
+		for phase := uint16(1); phase <= 3; phase++ {
+			for _, m := range []*Machine{a, b} {
+				m.CPU.PC = 0x8000
+				for n := 0; n < 6; n++ {
+					m.System.Segments[n].Selector = phase*0x1000 + uint16(n)*0x111 + 0x83
+					m.CPU.R[8+n] = 0xfedcba9876540000
+				}
+			}
+			nativeBefore := a.JIT.Stats.Native
+			jitRun(t, a, 9)
+			jitRun(t, b, 9)
+			equalSystemNative(t, a, b)
+			for n := 0; n < 6; n++ {
+				if a.CPU.R[8+n] != 0xfedcba9876540000|uint64(a.System.Segments[n].Selector) {
+					t.Fatal("selector or upper bits", cpl, phase, n, a.CPU.R[8+n])
+				}
+			}
+			if a.JIT.Stats.Native <= nativeBefore {
+				t.Fatal("cached selector loop did not execute natively")
+			}
+		}
+		for _, m := range []*Machine{a, b} {
+			if err := m.Write(0x4048, 8, 0x11065|1<<63); err != nil {
+				t.Fatal(err)
+			}
+			m.System.Flush()
+			m.CPU.PC = 0x8000
+		}
+		before := a.CPU.Retired
+		ea, eb := a.RunQuantum(64), b.RunQuantum(64)
+		if ea == nil || eb == nil || a.CPU.Retired != before+6 || a.System.CR[2] != 0x9000 || b.System.CR[2] != 0x9000 {
+			t.Fatal("selector store precise fault", ea, eb, a.CPU.Retired-before)
+		}
+		equalSystemNative(t, a, b)
+	}
+}
+
+func TestNativeSystemPOPFPrivilegeFaultAndPendingIRQ(t *testing.T) {
+	for _, cpl := range []uint8{0, 3} {
+		for _, word := range []bool{false, true} {
+			a, b := jitMachine(t, "native"), jitMachine(t, "interpreter")
+			code := []byte{0x9c, 0xfa, 0x9d, 0xeb, 0xfb} // PUSHF;CLI;POPF;JMP
+			if cpl != 0 {
+				code = []byte{0x9c, 0x9d, 0xeb, 0xfc}
+			}
+			if word {
+				if cpl == 0 {
+					code = []byte{0x66, 0x9c, 0xfa, 0x66, 0x9d, 0xeb, 0xf9}
+				} else {
+					code = []byte{0x66, 0x9c, 0x66, 0x9d, 0xeb, 0xfa}
+				}
+			}
+			for _, m := range []*Machine{a, b} {
+				copy(m.RAM[0x10000:], code)
+				m.System.CPL = cpl
+				m.kernelThreshold = 64
+				m.System.Flush()
+				m.CPU.R[amd64.RSP] = 0x9ff0
+				m.CPU.Flags = 2 | amd64.FlagIF | 0x3000 | amd64.CF
+			}
+			jitRun(t, a, 8192)
+			jitRun(t, b, 8192)
+			equalSystemNative(t, a, b)
+			width := uint64(8)
+			if word {
+				width = 2
+			}
+			popPC := uint64(0x8001)
+			if cpl == 0 {
+				popPC++
+			}
+			if word {
+				popPC++
+			}
+			for _, flags := range []uint64{0, 0xffffffffffffffff, 2 | amd64.FlagIF, 2 | amd64.FlagDF} {
+				for _, m := range []*Machine{a, b} {
+					m.CPU.PC = popPC
+					m.CPU.R[amd64.RSP] = 0x9f00
+					m.CPU.Flags = 0x3002
+					if err := m.Write(0x11f00, int(width), flags); err != nil {
+						t.Fatal(err)
+					}
+				}
+				before := a.JIT.Stats.Native
+				jitRun(t, a, 1)
+				jitRun(t, b, 1)
+				equalSystemNative(t, a, b)
+				if a.JIT.Stats.Native != before+1 {
+					t.Fatal("POPF never native")
+				}
+			}
+			// An IF-enabling native POPF must return before the next guest instruction
+			// when a PIC request was previously blocked by IF=0. CPU.Flags is stale
+			// until the adapter is exported; this catches using it in continuation.
+			if cpl == 0 {
+				for _, m := range []*Machine{a, b} {
+					m.CPU.PC = popPC
+					m.CPU.R[amd64.RSP] = 0x9f00
+					m.CPU.Flags = 2
+					m.PIC[0].irr, m.PIC[0].mask, m.PIC[0].isr = 1, 0, 0
+					if err := m.Write(0x11f00, int(width), 2|amd64.FlagIF); err != nil {
+						t.Fatal(err)
+					}
+				}
+				retired := a.CPU.Retired
+				if err := a.RunQuantum(64); err != nil || a.CPU.Retired != retired+1 {
+					t.Fatal("native POPF crossed IRQ boundary", err, a.CPU.Retired-retired)
+				}
+				if err := b.RunQuantum(64); err != nil {
+					t.Fatal(err)
+				}
+				equalSystemNative(t, a, b)
+			}
+			for _, m := range []*Machine{a, b} {
+				m.CPU.PC = popPC
+				m.CPU.R[amd64.RSP] = 0xb000
+				m.CPU.Flags = 2
+				m.PIC[0].irr = 0
+			}
+			retired := a.CPU.Retired
+			ea, eb := a.RunQuantum(1), b.RunQuantum(1)
+			if ea == nil || eb == nil || a.CPU.Retired != retired || a.System.CR[2] != 0xb000 || b.System.CR[2] != 0xb000 {
+				t.Fatal("POPF stack fault committed state", ea, eb)
+			}
+			equalSystemNative(t, a, b)
+		}
+	}
+}
+
+func TestNativeSystemCLIGuardAndInvalidSelector(t *testing.T) {
+	a, b := jitMachine(t, "native"), jitMachine(t, "interpreter")
+	for _, m := range []*Machine{a, b} {
+		copy(m.RAM[0x10000:], []byte{0xfa, 0xeb, 0xfd})
+		m.System.CPL = 0
+		m.kernelThreshold = 64
+		m.System.Flush()
+		m.CPU.Flags = 2 | amd64.FlagIF
+	}
+	jitRun(t, a, 8192)
+	jitRun(t, b, 8192)
+	equalSystemNative(t, a, b)
+	for _, m := range []*Machine{a, b} {
+		m.System.CPL = 3
+		m.System.Flush()
+		m.CPU.PC = 0x8000
+		m.CPU.Flags = 2 | amd64.FlagIF
+	}
+	retired := a.CPU.Retired
+	ea, eb := a.RunQuantum(1), b.RunQuantum(1)
+	if ea == nil || eb == nil || a.CPU.Retired != retired || a.CPU.Flags&amd64.FlagIF == 0 {
+		t.Fatal("CLI privilege guard bypassed", ea, eb)
+	}
+	equalSystemNative(t, a, b)
+	for _, m := range []*Machine{a, b} {
+		if err := m.Write(0x10000, 2, 0xf08c); err != nil {
+			t.Fatal(err)
+		}
+		m.CPU.PC = 0x8000
+	}
+	ea, eb = a.RunQuantum(1), b.RunQuantum(1)
+	if ea == nil || eb == nil || a.CPU.Retired != retired {
+		t.Fatal("invalid selector admitted", ea, eb)
+	}
+	equalSystemNative(t, a, b)
 }
 
 -- jit_rmw_test.go --
@@ -1191,10 +2139,6 @@ func TestUserJITTimerSliceAndKernelBoundary(t *testing.T) {
 package amd64machine
 
 import (
-	"bytes"
-	"compress/gzip"
-	"debug/elf"
-	"encoding/binary"
 	"flag"
 	"fmt"
 	"io"
@@ -1210,6 +2154,8 @@ type pic struct {
 	readISR                       bool
 }
 type Machine struct {
+	ioEpoch         uint64
+	schedule        x86ScheduleStats
 	JITCache        string // empty/default preserves correctness budgets; named performance presets are opt-in
 	ProfileJIT      bool   // opt-in diagnostic perf symbols/JIT dump; disabled for scoring
 	NativeRAM       *systemmemory.RAM
@@ -1290,7 +2236,10 @@ func newMachine(memoryMiB int, output io.Writer, direct bool) (*Machine, error) 
 	}
 	m.versions = make([]uint64, len(m.RAM)/4096)
 	m.NativeRAM.ReadGuest, m.NativeRAM.WriteGuest = m.System.NativeRead, m.System.Write
+	m.NativeRAM.CodeWindow = m.System.InstructionBytes
+	m.NativeRAM.EnablePageInvalidation()
 	m.NativeRAM.Domain, m.NativeRAM.NativeAddress = m.nativeDomain, m.nativeAddress
+	m.NativeRAM.CachedMapping = m.System.NativeCachedMapping
 	m.NativeRAM.AddressSpace = func() uint64 { return m.System.CR[3] }
 	m.UART[5] = 0x60
 	m.PIC[0].mask = 255
@@ -1340,6 +2289,7 @@ func (m *Machine) serialIRQ() {
 	}
 }
 func (m *Machine) In(p uint16, n int) uint32 {
+	m.ioEpoch++
 	if p >= 0x3f8 && p <= 0x3ff {
 		r := p - 0x3f8
 		if m.UART[3]&0x80 != 0 && r < 2 {
@@ -1451,6 +2401,7 @@ func (m *Machine) In(p uint16, n int) uint32 {
 	return 0
 }
 func (m *Machine) Out(p uint16, n int, v uint32) {
+	m.ioEpoch++
 	b := byte(v)
 	if p >= 0x3f8 && p <= 0x3ff {
 		r := p - 0x3f8
@@ -1634,135 +2585,6 @@ func (m *Machine) Run(limit uint64) error {
 	return fmt.Errorf("instruction budget exhausted after %d instructions at pc=%#x; faults=%d fault-trace=%#x cr=%#x cpl=%d pic=%+v", m.CPU.Retired, m.CPU.PC, m.System.FaultCount, m.System.FaultTrace, m.System.CR, m.System.CPL, m.PIC)
 }
 
-// Boot loads an unmodified ELF kernel, or the gzip ELF payload of a Linux
-// bzImage, at its ELF physical addresses. The documented startup_64 entry
-// accepts the same boot_params and identity mapping as its decompressor.
-func (m *Machine) Boot(kernel, initrd []byte, command string) error {
-	if len(command) > 2047 {
-		return fmt.Errorf("command line exceeds 2047 bytes")
-	}
-	const initReserve = uint64(0x1000000)
-	if uint64(len(m.RAM)) < initReserve || uint64(len(initrd)) > uint64(len(m.RAM))-initReserve {
-		return fmt.Errorf("initramfs does not fit guest RAM")
-	}
-	image := kernel
-	header := []byte(nil)
-	if len(kernel) > 0x268 && string(kernel[0x202:0x206]) == "HdrS" {
-		if len(kernel) < 4096 {
-			return fmt.Errorf("truncated bzImage boot header")
-		}
-		header = kernel[:4096]
-		off := (uint64(kernel[0x1f1]) + 1) * 512
-		if kernel[0x1f1] == 0 {
-			off = 5 * 512
-		}
-		po := uint64(binary.LittleEndian.Uint32(kernel[0x248:]))
-		pn := uint64(binary.LittleEndian.Uint32(kernel[0x24c:]))
-		if off+po > uint64(len(kernel)) || pn > uint64(len(kernel))-off-po {
-			return fmt.Errorf("invalid kernel payload range")
-		}
-		zr, e := gzip.NewReader(bytes.NewReader(kernel[off+po : off+po+pn]))
-		if e != nil {
-			return fmt.Errorf("kernel ELF gzip payload: %w", e)
-		}
-		image, e = io.ReadAll(io.LimitReader(zr, 256<<20))
-		closeErr := zr.Close()
-		if e != nil {
-			return e
-		}
-		if closeErr != nil {
-			return closeErr
-		}
-		if len(image) >= 256<<20 {
-			return fmt.Errorf("kernel payload too large")
-		}
-	}
-	f, e := elf.NewFile(bytes.NewReader(image))
-	if e != nil {
-		return e
-	}
-	defer f.Close()
-	if f.Machine != elf.EM_X86_64 || f.Class != elf.ELFCLASS64 || f.Data != elf.ELFDATA2LSB {
-		return fmt.Errorf("kernel must be little-endian x86-64 ELF")
-	}
-	entry := f.Entry
-	highest := uint64(0)
-	for _, p := range f.Progs {
-		if p.Type != elf.PT_LOAD {
-			continue
-		}
-		if p.Paddr > uint64(len(m.RAM)) || p.Memsz > uint64(len(m.RAM))-p.Paddr || p.Filesz > p.Memsz || p.Off > uint64(len(image)) || p.Filesz > uint64(len(image))-p.Off {
-			return fmt.Errorf("kernel load range outside RAM")
-		}
-		copy(m.RAM[p.Paddr:p.Paddr+p.Filesz], image[p.Off:p.Off+p.Filesz])
-		if end := p.Paddr + p.Memsz; end > highest {
-			highest = end
-		}
-		if entry >= p.Vaddr && entry-p.Vaddr < p.Memsz {
-			entry = p.Paddr + (entry - p.Vaddr)
-		}
-	}
-	if entry >= uint64(len(m.RAM)) {
-		return fmt.Errorf("kernel entry outside RAM")
-	}
-	initAddr := (uint64(len(m.RAM)) - uint64(len(initrd)) - 0x1000000) &^ 4095
-	if initAddr <= highest {
-		return fmt.Errorf("initramfs overlaps kernel")
-	}
-	copy(m.RAM[initAddr:], initrd)
-	const params = 0x90000
-	const cmd = 0x20000
-	const tables = 0x10000
-	const gdt = 0x18000
-	clear(m.RAM[params : params+4096])
-	if header != nil {
-		copy(m.RAM[params+0x1f1:params+0x290], header[0x1f1:0x290])
-	}
-	p := m.RAM[params : params+4096]
-	p[0x210] = 0xff
-	p[0x211] |= 0x80
-	binary.LittleEndian.PutUint32(p[0x218:], uint32(initAddr))
-	binary.LittleEndian.PutUint32(p[0x21c:], uint32(len(initrd)))
-	binary.LittleEndian.PutUint32(p[0x228:], cmd)
-	binary.LittleEndian.PutUint64(p[0x250:], 0)
-	binary.LittleEndian.PutUint32(p[0x238:], 2048)
-	copy(m.RAM[cmd:], command)
-	m.RAM[cmd+len(command)] = 0
-	// Legacy E820 excludes the PC ROM/VGA hole. No firmware services are needed.
-	p[0x1e8] = 3
-	regions := [][3]uint64{{0, 0x9f000, 1}, {0x9f000, 0x61000, 2}, {0x100000, uint64(len(m.RAM)) - 0x100000, 1}}
-	for j, r := range regions {
-		o := 0x2d0 + j*20
-		binary.LittleEndian.PutUint64(p[o:], r[0])
-		binary.LittleEndian.PutUint64(p[o+8:], r[1])
-		binary.LittleEndian.PutUint32(p[o+16:], uint32(r[2]))
-	}
-	clear(m.RAM[tables : tables+0x6000])
-	m.Write(tables, 8, tables+0x1000|3)
-	for g := 0; g < 4; g++ {
-		m.Write(tables+0x1000+uint64(g)*8, 8, tables+0x2000+uint64(g)*0x1000|3)
-		for j := 0; j < 512; j++ {
-			m.Write(tables+0x2000+uint64(g)*0x1000+uint64(j)*8, 8, (uint64(g)<<30)|(uint64(j)<<21)|0x83)
-		}
-	}
-	m.Write(gdt+16, 8, 0x00af9a000000ffff)
-	m.Write(gdt+24, 8, 0x00cf92000000ffff)
-	s := m.System
-	s.CR[0] = 0x80010033
-	s.CR[3] = tables
-	s.CR[4] = 0x20
-	s.EFER = 0x500
-	s.GDTR = amd64.Table{Base: gdt, Limit: 31}
-	s.Segments[1] = amd64.Segment{Selector: 16, Limit: 0xffffffff, Flags: 0xaf9a}
-	for _, j := range []int{0, 2, 3} {
-		s.Segments[j] = amd64.Segment{Selector: 24, Limit: 0xffffffff, Flags: 0xcf92}
-	}
-	m.CPU.PC = entry
-	m.CPU.Flags = 2
-	m.CPU.R[amd64.RSI] = params
-	m.CPU.R[amd64.RSP] = 0x80000
-	return nil
-}
 func Main(args []string) int {
 	f := flag.NewFlagSet("linux-amd64-machine", flag.ContinueOnError)
 	kernel := f.String("kernel", "", "Linux x86-64 bzImage or ELF")
