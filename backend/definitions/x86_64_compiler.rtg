@@ -2361,7 +2361,7 @@ go compiler {
 		// Object writers require relocations to name storage inside a section;
 		// the executable fast path also references the arena's one-past end.
 		// Keep ordinary zeroing for objects, including prepared object targets.
-		if g.c.objectFile {
+		if g.c.objectFile || renvoManagedTarget(g.c.renvoTarget) {
 			return
 		}
 		renvoStringHeapOffsets(g)

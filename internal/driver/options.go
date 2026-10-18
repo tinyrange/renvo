@@ -40,6 +40,7 @@ const (
 	ParseErrObjectRequiresLinuxAmd64
 	ParseErrObjectFileCount
 	ParseErrMissingIncludePath
+	ParseErrHeapLimit
 )
 
 const ModeExecutable = "executable"
@@ -67,6 +68,8 @@ type Options struct {
 	Mode                 string
 	ModuleLicense        string
 	ArenaSize            int
+	HeapLimit            int
+	MemoryStrategy       string
 	BinaryLimit          int
 	System               string
 	SystemName           string
@@ -514,6 +517,18 @@ func parseOptions(args []string, requireAdvertisedTarget bool, requireObjectTarg
 			i++
 			continue
 		}
+		if arg == "-heap-limit" {
+			if i+1 >= len(args) {
+				return parseFail(options, ParseErrHeapLimit, "missing value", i)
+			}
+			size, ok := parseHeapLimit(args[i+1])
+			if !ok {
+				return parseFail(options, ParseErrHeapLimit, args[i+1], i+1)
+			}
+			options.HeapLimit = size
+			i += 2
+			continue
+		}
 		if arg == "-arena-size" {
 			if i+1 >= len(args) {
 				return parseFail(options, ParseErrMissingArenaSize, arg, i)
@@ -626,6 +641,17 @@ func parseOptions(args []string, requireAdvertisedTarget bool, requireObjectTarg
 	}
 	if options.Output == "" {
 		return parseFail(options, ParseErrMissingOutput, "-o", len(args))
+	}
+	// External definitions resolve their own allocator policy after parsing;
+	// their public names need not match the built-in registry's semantics.
+	if requireAdvertisedTarget {
+		options.MemoryStrategy = targetinfo.MemoryStrategy(options.Target)
+	}
+	if options.MemoryStrategy == "desktop" && (arenaAt >= 0 || options.System != "" || options.CCompiler || options.EmitImage || options.Mode != ModeExecutable) {
+		return parseFail(options, ParseErrHeapLimit, "desktop requires a Go executable without -arena-size or -system", len(args))
+	}
+	if options.HeapLimit != 0 && options.MemoryStrategy != "desktop" && requireAdvertisedTarget && options.BackendDefinition == "" {
+		return parseFail(options, ParseErrHeapLimit, "requires a desktop target or -backend definition", len(args))
 	}
 	if options.Package == "" {
 		return parseFail(options, ParseErrMissingPackage, "", len(args))

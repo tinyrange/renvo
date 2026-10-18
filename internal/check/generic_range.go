@@ -31,7 +31,7 @@ func (e *genericEnvironment) rangeTypes(value genericArgument) ([]int, bool) {
 			return nil, false
 		}
 		yield := e.types.get(e.coreType(v.params[0]))
-		if yield.kind != genericFunc || len(yield.params) > 2 || len(yield.results) != 1 || yield.results[0] != e.types.basic("bool") {
+		if yield.kind != genericFunc || yield.variadic || len(yield.params) > 2 || len(yield.results) != 1 || yield.results[0] != e.types.basic("bool") {
 			return nil, false
 		}
 		return yield.params, true

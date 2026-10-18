@@ -18,6 +18,8 @@ type RTGLabel struct {
 	Valid bool
 }
 
+func RTGLabelFromCode(code int) RTGLabel { return RTGLabel{Code: code, Valid: code >= 0} }
+
 type RTGAddress struct {
 	Target RTGLabel
 	Kind int

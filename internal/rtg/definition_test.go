@@ -72,9 +72,13 @@ func TestNativeDefinitionEmbeddedGoMetrics(t *testing.T) {
 			t.Fatalf("ResolveDefinitions(%s) failed: %#v",
 				filename, resolved.Diagnostics)
 		}
-		if len(resolved.Targets) != 1 {
-			t.Fatalf("%s exports %d targets, want exactly one",
-				filename, len(resolved.Targets))
+		wantTargets := 1
+		if filename == nativeDefinitionEntrypoints["linux/amd64"] {
+			wantTargets = 2 // arena and opt-in desktop share physical glue
+		}
+		if len(resolved.Targets) != wantTargets {
+			t.Fatalf("%s exports %d targets, want %d",
+				filename, len(resolved.Targets), wantTargets)
 		}
 		source = append(source, resolved.Document.Source...)
 		parts := reachableEmbeddedGoParts(
@@ -961,11 +965,13 @@ func resolveNativeTarget(t *testing.T, target string) ResolveResult {
 	if !resolved.Ok {
 		t.Fatalf("resolve %s: %#v", filename, resolved.Diagnostics)
 	}
-	if len(resolved.Targets) != 1 ||
-		resolved.Targets[0].Descriptor.Name != target {
-		t.Fatalf("%s resolved targets = %#v, want only %s",
-			filename, resolved.Targets, target)
+	for _, candidate := range resolved.Targets {
+		if candidate.Descriptor.Name == target {
+			resolved.Targets = []ResolvedTarget{candidate}
+			return resolved
+		}
 	}
+	t.Fatalf("%s does not export %s", filename, target)
 	return resolved
 }
 
@@ -1083,7 +1089,7 @@ func TestWasm32DefinitionAndCheckedInArchitectureOutput(t *testing.T) {
 
 func TestCheckedInArchitectureKernelOutput(t *testing.T) {
 	var definitions []ResolveResult
-	for _, name := range []string{"x86_64_compiler.rtg", "x86_32_compiler.rtg", "aarch64_compiler.rtg", "arm_algorithms.rtg", "wasm32.rtg"} {
+	for _, name := range []string{"x86_64_compiler.rtg", "x86_32_compiler.rtg", "aarch64_compiler.rtg", "arm_algorithms.rtg", "wasm32.rtg", "linux_amd64.rtg"} {
 		definitions = append(definitions, ResolveArchitectureDefinition(parseDefinitionFile(t, "../../backend/definitions/"+name)))
 	}
 	generated := GenerateArchitectureKernel("main", definitions)

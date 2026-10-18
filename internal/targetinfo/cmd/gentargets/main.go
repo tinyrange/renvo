@@ -15,6 +15,7 @@ import (
 )
 
 type sourceDescriptor struct {
+	MemoryStrategy      string         `json:"-"`
 	Name                string         `json:"name"`
 	Backend             string         `json:"backend"`
 	BackendID           int            `json:"backend_id"`
@@ -167,6 +168,7 @@ func mergeMachineDefinitions(root string, descriptors []sourceDescriptor) error 
 		delete(targets, descriptors[i].Name)
 		machine := resolved.descriptor
 		descriptors[i].Aliases = append([]string(nil), machine.Aliases...)
+		descriptors[i].MemoryStrategy = machine.MemoryStrategy
 		descriptors[i].Family = machine.Family
 		descriptors[i].OS = machine.OS
 		descriptors[i].ISA = machine.ISA
@@ -239,14 +241,14 @@ func contains(values []string, value string) bool {
 }
 
 func driverHelpSource(descriptors []sourceDescriptor) []byte {
-	const prefix = "Usage: renvo -o <file> [-t <target>] [-backend <file.rtg|file.rbe|file.rtgb>] [-system <file.rtg>] [-mode=<mode>] [-tags <list>] [-arena-size <bytes>] [-s] [-emit-unit] [-emit-image] [-windows-gui] <package | source files...>\n" +
+	const prefix = "Usage: renvo -o <file> [-t <target>] [-backend <file.rtg|file.rbe|file.rtgb>] [-system <file.rtg>] [-mode=<mode>] [-tags <list>] [-arena-size <bytes>] [-heap-limit <size>] [-s] [-emit-unit] [-emit-image] [-windows-gui] <package | source files...>\n" +
 		"       renvo cc -c [-I <dir>] [-isystem <dir>] <source.c> -o <object.o>\n" +
 		"       renvo cc <object.o...> -o <linux-executable>\n" +
 		"       renvo make [-f Makefile] [target...]\n" +
 		"       renvo run [build options] <script.go> [-- script arguments...]\n" +
 		"       renvo test [build options] [package]\n" +
 		"Options:\n" +
-		"  -arena-size  set the generated program arena limit in bytes (256..1073741824)\n" +
+		"  -arena-size  set the generated program arena limit in bytes (256..1073741824)\n  -heap-limit  cap a desktop managed heap (bytes or KiB/MiB/GiB/TiB); RENVO_HEAP_LIMIT overrides at startup\n" +
 		"  -backend     select and prepare a backend definition or prepared artifact\n" +
 		"  -system      load target, binary-size, and arena limits from a hosted system profile\n" +
 		"  -emit-unit   write the canonical linked Renvo unit without invoking a backend\n" +
@@ -342,43 +344,52 @@ func frontendSource(descriptors []sourceDescriptor) []byte {
 	out.WriteString("out := make([]Descriptor, descriptorCount)\n")
 	out.WriteString("for i := 0; i < len(out); i++ { out[i] = descriptorAt(i) }\n")
 	out.WriteString("return out\n}\n\n")
-	out.WriteString("func Lookup(name string) (Descriptor, bool) {\n")
+	out.WriteString("func Lookup(name string) (Descriptor, bool) {\nindex := descriptorIndex(name, true)\nif index < 0 { return Descriptor{}, false }\nreturn descriptorAt(index), true\n}\n\n")
+	out.WriteString("func descriptorIndex(name string, aliases bool) int {\n")
 	for i, descriptor := range descriptors {
-		fmt.Fprintf(&out, "if name == %q", descriptor.Name)
-		for _, alias := range descriptor.Aliases {
-			fmt.Fprintf(&out, " || name == %q", alias)
-		}
-		fmt.Fprintf(&out, " { return descriptorAt(%d), true }\n", i)
+		fmt.Fprintf(&out, "if name == %q { return %d }\n", descriptor.Name, i)
 	}
-	out.WriteString("return Descriptor{}, false\n}\n\n")
-	out.WriteString("func descriptorAt(index int) Descriptor {\n")
+	out.WriteString("if aliases {\n")
+	for i, descriptor := range descriptors {
+		for _, alias := range descriptor.Aliases {
+			fmt.Fprintf(&out, "if name == %q { return %d }\n", alias, i)
+		}
+	}
+	out.WriteString("}\nreturn -1\n}\n\n")
+	out.WriteString("func descriptorAt(index int) Descriptor {\ndata := descriptorData(index)\nif data == \"\" { return Descriptor{} }\nreturn decodeDescriptor(data)\n}\n\n")
+	out.WriteString("func descriptorData(index int) string {\n")
 	for i, descriptor := range descriptors {
 		fmt.Fprintf(&out, "if index == %d { return ", i)
 		writeFrontendDescriptor(&out, descriptor)
 		out.WriteString(" }\n")
 	}
-	out.WriteString("return Descriptor{}\n}\n\n")
-	out.WriteString("func Binding(name string) (string, string, int, bool) {\n")
-	for _, descriptor := range descriptors {
-		fmt.Fprintf(&out, "if name == %q", descriptor.Name)
-		for _, alias := range descriptor.Aliases {
-			fmt.Fprintf(&out, " || name == %q", alias)
-		}
-		fmt.Fprintf(&out, " { return %q, %s, %d, true }\n",
-			descriptor.Name, quotedDefinition(descriptor.Definition), descriptor.Descriptor)
+	out.WriteString("return \"\"\n}\n\n")
+	out.WriteString("func Binding(name string) (string, string, int, bool) {\ndata := bindingData(descriptorIndex(name, true))\nif data == \"\" { return \"\", \"\", 0, false }\nr := descriptorReader{data: data}\ncanonical := r.text()\nfingerprint := r.text()\nversion := r.number()\nreturn canonical, fingerprint, version, true\n}\n\n")
+	out.WriteString("func bindingData(index int) string {\n")
+	for i, descriptor := range descriptors {
+		var record bytes.Buffer
+		writeDescriptorNumber(&record, len(descriptor.Name))
+		record.WriteString(descriptor.Name)
+		writeDescriptorNumber(&record, len(descriptor.Definition))
+		record.Write(descriptor.Definition[:])
+		writeDescriptorNumber(&record, descriptor.Descriptor)
+		fmt.Fprintf(&out, "if index == %d { return %q }\n", i, record.String())
 	}
-	out.WriteString("return \"\", \"\", 0, false\n}\n\n")
-	out.WriteString("func IsAdvertised(name string) bool { return ")
+	out.WriteString("return \"\"\n}\n\n")
+	out.WriteString("func IsAdvertised(name string) bool {\nindex := descriptorIndex(name, false)\nreturn ")
 	first := true
-	for _, descriptor := range descriptors {
+	for i, descriptor := range descriptors {
 		if !descriptor.Advertised {
 			continue
 		}
 		if !first {
 			out.WriteString(" || ")
 		}
-		fmt.Fprintf(&out, "name == %q", descriptor.Name)
+		fmt.Fprintf(&out, "index == %d", i)
 		first = false
+	}
+	if first {
+		out.WriteString("false")
 	}
 	out.WriteString(" }\n\n")
 	out.WriteString("func Backend(name string) string {\n")
@@ -391,57 +402,45 @@ func frontendSource(descriptors []sourceDescriptor) []byte {
 		}
 	}
 	out.WriteString("return name\n}\n\n")
-	out.WriteString("func HasBuildTag(name string, tag string) bool {\n")
-	for _, descriptor := range descriptors {
-		fmt.Fprintf(&out, "if name == %q { return ", descriptor.Name)
-		for i, tag := range descriptor.Tags {
-			if i > 0 {
-				out.WriteString(" || ")
-			}
-			fmt.Fprintf(&out, "tag == %q", tag)
-		}
-		out.WriteString(" }\n")
+	out.WriteString("func HasBuildTag(name string, tag string) bool {\nindex := descriptorIndex(name, false)\n")
+	for i, descriptor := range descriptors {
+		fmt.Fprintf(&out, "if index == %d { return descriptorSetContains(%q, tag) }\n", i, descriptorSet(descriptor.Tags))
 	}
 	out.WriteString("return false\n}\n\n")
-	out.WriteString("func HasCapability(name string, capability string) bool {\n")
-	for _, descriptor := range descriptors {
-		fmt.Fprintf(&out, "if name == %q", descriptor.Name)
-		for _, alias := range descriptor.Aliases {
-			fmt.Fprintf(&out, " || name == %q", alias)
-		}
-		out.WriteString(" { return ")
-		for i, capability := range descriptor.Capabilities {
-			if i > 0 {
-				out.WriteString(" || ")
-			}
-			fmt.Fprintf(&out, "capability == %q", capability)
-		}
-		out.WriteString(" }\n")
+	out.WriteString("func HasCapability(name string, capability string) bool {\nindex := descriptorIndex(name, true)\n")
+	for i, descriptor := range descriptors {
+		fmt.Fprintf(&out, "if index == %d { return descriptorSetContains(%q, capability) }\n", i, descriptorSet(descriptor.Capabilities))
 	}
 	out.WriteString("return false\n}\n\n")
-	out.WriteString("func SupportsInPlaceEntry(name string) bool { return ")
+	out.WriteString("func SupportsInPlaceEntry(name string) bool {\n")
 	first = true
-	for _, descriptor := range descriptors {
+	for i, descriptor := range descriptors {
 		if !contains(descriptor.Capabilities, "in_place_entry") {
 			continue
 		}
-		if !first {
+		if first {
+			out.WriteString("index := descriptorIndex(name, true)\nreturn ")
+		} else {
 			out.WriteString(" || ")
 		}
-		fmt.Fprintf(&out, "name == %q", descriptor.Name)
-		for _, alias := range descriptor.Aliases {
-			fmt.Fprintf(&out, " || name == %q", alias)
-		}
+		fmt.Fprintf(&out, "index == %d", i)
 		first = false
 	}
 	if first {
-		out.WriteString("false")
+		out.WriteString("return false")
 	}
 	out.WriteString(" }\n\n")
-	out.WriteString("func DefaultArena(name string) int {\n")
-	for _, descriptor := range descriptors {
+	out.WriteString("func MemoryStrategy(name string) string {\nindex := descriptorIndex(name, false)\n")
+	for i, descriptor := range descriptors {
+		if descriptor.MemoryStrategy != "" {
+			fmt.Fprintf(&out, "if index == %d { return %q }\n", i, descriptor.MemoryStrategy)
+		}
+	}
+	out.WriteString("return \"\"\n}\n\n")
+	out.WriteString("func DefaultArena(name string) int {\nindex := descriptorIndex(name, false)\n")
+	for i, descriptor := range descriptors {
 		if descriptor.DefaultArena != 0 {
-			fmt.Fprintf(&out, "if name == %q { return %d }\n", descriptor.Name, descriptor.DefaultArena)
+			fmt.Fprintf(&out, "if index == %d { return %d }\n", i, descriptor.DefaultArena)
 		}
 	}
 	out.WriteString("return 0\n}\n\n")
@@ -461,13 +460,75 @@ func frontendSource(descriptors []sourceDescriptor) []byte {
 	return out.Bytes()
 }
 
+// Descriptors are immutable generated data. Store their fields in a compact
+// length-prefixed record rather than emitting a separate constructor (including
+// every slice element and fingerprint byte) for each target in every compiler.
 func writeFrontendDescriptor(out *bytes.Buffer, descriptor sourceDescriptor) {
-	fmt.Fprintf(out, "Descriptor{Name:%q, Backend:%q, Aliases:%#v, Family:%q, OS:%q, ISA:%q, WordBits:%d, PointerBits:%d, CodePointerBits:%d, FunctionPointerBits:%d, MaxAlign:%d, Endian:%q, ABI:%q, Image:%q, Runtime:%#v, Tags:%#v, Capabilities:%#v, Definition:%#v, DescriptorVersion:%d, Advertised:%t, Virtual:%t, DefaultArena:%d, ReleaseArtifact:%q, IDE:%t}",
-		descriptor.Name, descriptor.Backend, descriptor.Aliases, descriptor.Family, descriptor.OS, descriptor.ISA, descriptor.WordBits,
-		descriptor.PointerBits, descriptor.CodePointerBits, descriptor.FunctionPointerBits, descriptor.MaxAlign,
-		descriptor.Endian, descriptor.ABI, descriptor.Image, descriptor.Runtime, descriptor.Tags,
-		descriptor.Capabilities, descriptor.Definition, descriptor.Descriptor, descriptor.Advertised,
-		descriptor.Virtual, descriptor.DefaultArena, descriptor.ReleaseArtifact, descriptor.IDE)
+	var record bytes.Buffer
+	text := func(value string) {
+		writeDescriptorNumber(&record, len(value))
+		record.WriteString(value)
+	}
+	list := func(values []string) {
+		if values == nil {
+			writeDescriptorNumber(&record, 0)
+			return
+		}
+		writeDescriptorNumber(&record, len(values)+1)
+		for _, value := range values {
+			text(value)
+		}
+	}
+	text(descriptor.Name)
+	text(descriptor.Backend)
+	list(descriptor.Aliases)
+	text(descriptor.Family)
+	text(descriptor.OS)
+	text(descriptor.ISA)
+	for _, value := range []int{descriptor.WordBits, descriptor.PointerBits,
+		descriptor.CodePointerBits, descriptor.FunctionPointerBits, descriptor.MaxAlign} {
+		writeDescriptorNumber(&record, value)
+	}
+	text(descriptor.Endian)
+	text(descriptor.ABI)
+	text(descriptor.Image)
+	list(descriptor.Runtime)
+	list(descriptor.Tags)
+	list(descriptor.Capabilities)
+	record.Write(descriptor.Definition[:])
+	writeDescriptorNumber(&record, descriptor.Descriptor)
+	flags := 0
+	if descriptor.Advertised {
+		flags |= 1
+	}
+	if descriptor.Virtual {
+		flags |= 2
+	}
+	if descriptor.IDE {
+		flags |= 4
+	}
+	writeDescriptorNumber(&record, flags)
+	writeDescriptorNumber(&record, descriptor.DefaultArena)
+	text(descriptor.ReleaseArtifact)
+	fmt.Fprintf(out, "%q", record.String())
+}
+
+func descriptorSet(values []string) string {
+	var record bytes.Buffer
+	for _, value := range values {
+		writeDescriptorNumber(&record, len(value))
+		record.WriteString(value)
+	}
+	return record.String()
+}
+
+func writeDescriptorNumber(out *bytes.Buffer, value int) {
+	if value < 0 || uint64(value) > 0x7fffffff {
+		panic("target descriptor value does not fit a nonnegative 32-bit int")
+	}
+	for shift := 0; shift < 32; shift += 8 {
+		out.WriteByte(byte(uint32(value) >> shift))
+	}
 }
 
 func backendSource(descriptors []sourceDescriptor) []byte {

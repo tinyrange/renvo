@@ -1,0 +1,49 @@
+@import "managed_heap64.rtg"
+@import "managed_linux.rtg"
+go backend {
+	func linux386ManagedSource() string {
+		return managed_heap64.managedHeap32Source() + managed_linux.linuxManagedSource() + `
+		const __renvoManagedPageSize = uintptr(4096)
+		const __renvoManagedMapNumber = 192
+		const __renvoManagedReleaseNumber = 91
+		const __renvoManagedExitNumber = 1
+		const __renvoManagedMapFlags = uintptr(34)
+		`
+	}
+	func linux386ManagedStartup(out *RTGEmitter, limit int, label int) {
+		out.Byte(0xb9)
+		out.Int32(limit)
+		out.Text("\x8d\x55\x04")
+		x86_32.asmMovRegPCRel(out, 6, 0, RTGRelocationAbsoluteBSS)
+		x86_32.asmMovRegPCRel(out, 3, out.BSSSize(), RTGRelocationAbsoluteBSS)
+		out.Byte(0xe8)
+		out.Int32(0)
+		out.Reloc(label)
+	}
+	func linux386ManagedBoundary(out *RTGEmitter, label int) {
+		out.Byte(0x60)               // PUSHAD, including saved original ESP
+		out.Text("\x89\xc6\x89\xe3") // size in ESI, roots in EBX
+		out.Byte(0xe8)
+		out.Int32(0)
+		out.Reloc(label)
+		out.Text("\x89\x44\x24\x1c\x61") // replace saved EAX, POPAD
+	}
+	func linux386RawSyscall(out *RTGEmitter, count int, number int) bool {
+		_ = number
+		if count < 1 || count > 7 {
+			return false
+		}
+		registers := []int{0, 3, 1, 2, 6, 7}
+		for i := 0; i < count && i < 6; i++ {
+			out.AppendByte(0x58 + registers[i])
+		}
+		if count == 7 {
+			out.Text("\x87\x2c\x24")
+		} // exchange arg6 for saved EBP
+		out.Text("\xcd\x80")
+		if count == 7 {
+			out.Byte(0x5d)
+		}
+		return true
+	}
+}

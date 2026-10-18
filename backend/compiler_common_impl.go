@@ -1026,6 +1026,12 @@ func renvoAsmPatchDataDisplacements32(a *renvoAsm) {
 		if kind == renvoAbsBssReloc {
 			target = renvoAsmBssOffset(a) + off
 		}
+		if kind == RTGRelocationAbsoluteBSSEnd {
+			if off <= 0 {
+				off = 1
+			}
+			target = renvoAsmBssOffset(a) + ((a.bssSize+off-1)/off)*off
+		}
 		next := a.codeOffset + at + 4
 		disp := target - next
 		renvoPut32At(a.code, at, disp)
@@ -1377,18 +1383,19 @@ type renvoPackageTable struct {
 }
 
 type renvoProgram struct {
-	src           []byte
-	toks          renvoTokens
-	decls         []renvoDecl
-	funcs         []renvoFuncDecl
-	packageTable  *renvoPackageTable
-	ok            bool
-	parsedIntHigh int
-	compilerInt32 bool
-	c             renvoCompileContext
-	c11Semantics  bool
-	entryFunc     int
-	foreign       *renvoForeignProgram
+	managedRuntime bool
+	src            []byte
+	toks           renvoTokens
+	decls          []renvoDecl
+	funcs          []renvoFuncDecl
+	packageTable   *renvoPackageTable
+	ok             bool
+	parsedIntHigh  int
+	compilerInt32  bool
+	c              renvoCompileContext
+	c11Semantics   bool
+	entryFunc      int
+	foreign        *renvoForeignProgram
 }
 
 type renvoForeignProgram struct {
@@ -5300,6 +5307,7 @@ func renvoBuildMeta(pp *renvoProgram) renvoMeta {
 func renvoBuildMetaInto(pp *renvoProgram, m *renvoMeta) {
 	renvoNonNil(pp, m)
 	renvoPrepareSoftFloatProgram(pp)
+	renvoPrepareManagedProgram(pp)
 	if !pp.ok {
 		return
 	}
@@ -8377,6 +8385,15 @@ func renvoPrepareFunctionControl(g *renvoLinearGen) bool {
 	g.deferSites = nil
 	g.emittingDefers = false
 	g.suppressPanicCheck = false
+	if renvoManagedTarget(g.c.renvoTarget) && g.currentFunc >= 0 && g.currentFunc < len(g.meta.funcs) {
+		fn := &g.meta.funcs[g.currentFunc]
+		if fn.nameEnd-fn.nameStart >= 14 && renvoBytesEqualText(g.prog.src, fn.nameStart, fn.nameStart+14, "__renvoManaged") {
+			// Collector helpers cannot panic or call application code, and must
+			// not consume a deferred call's pending recovery permission.
+			g.suppressPanicCheck = true
+			return true
+		}
+	}
 	if !g.meta.panicEnabled {
 		return true
 	}
@@ -11549,7 +11566,7 @@ func renvoLinearInitGlobal(g *renvoLinearGen, index int) bool {
 		renvoEmitCopyStackToBss(g, tempOffset, off, renvoTypeCopySize(meta, s.typ))
 		g.localCount = localBase
 		g.stackUsed = stackBase
-	} else if renvoTypeIsSlice(meta, s.typ) {
+	} else if !renvoManagedTarget(g.c.renvoTarget) && renvoTypeIsSlice(meta, s.typ) {
 		renvoEmitInitEmptySliceBss(g, s.typ, off)
 	}
 	if renvoFixedTarget == 0 {
@@ -11609,6 +11626,9 @@ func renvoLinearInitGlobals(g *renvoLinearGen) bool {
 		if renvoFixedTarget == 0 {
 			renvoLinearAddReplGlobal(g, i, off, size)
 		}
+	}
+	if renvoManagedTarget(g.c.renvoTarget) {
+		renvoEmitManagedStartup(g)
 	}
 	for i := 0; i < len(meta.globals); i++ {
 		if meta.globals[i].kind == renvoTokVar && !renvoLinearInitGlobal(g, i) {
@@ -13396,7 +13416,7 @@ func renvoInferParsedExprTypeUncached(g *renvoLinearGen, ep *renvoExprParse, idx
 		if callee == renvoIdentNew && e.argCount == 1 {
 			targetType := renvoTypeFromExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg))
 			if targetType != 0 {
-				return renvoAddType(meta, renvoTypePointer, targetType, 0, 0, renvoBackendValueSlotSize, 0, 0)
+				return renvoAddPointerType(meta, targetType, renvoPointerSpaceData)
 			}
 		}
 		if callee == renvoIdentCap || callee == renvoIdentLen || callee == renvoIdentOpen || callee == renvoIdentClose || callee == renvoIdentRead || callee == renvoIdentWrite || callee == renvoIdentChmod || callee == renvoIdentCopy || callee == renvoIdentSyscall {
@@ -15308,6 +15328,9 @@ func renvoEmitMakeSliceRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) bool
 	// capacities before multiplying: a wrapped byte count must never allocate
 	// a small buffer for a huge logical slice.
 	maxCapacity := renvoStringArenaSize(g) / elemSize
+	if renvoManagedTarget(g.c.renvoTarget) {
+		maxCapacity = 9223372036854771679 / elemSize
+	}
 	if !capacity.ok || capacity.value > maxCapacity {
 		done := renvoAsmNewLabel(a)
 		renvoEmitStackLessImmJump(g, capOffset, maxCapacity+1, done)
@@ -16806,6 +16829,25 @@ func renvoEmitRuntimeArenaCall(g *renvoLinearGen, ep *renvoExprParse, idx int, f
 	p := g.prog
 	renvoNonNil(p)
 	intrinsic := renvoRuntimeIntrinsicID(p.src, fn.nameStart, fn.nameEnd)
+	if intrinsic == 24 {
+		if ep.exprs[idx].argCount != 0 {
+			return false
+		}
+		if renvoManagedTarget(g.c.renvoTarget) {
+			renvoEmitManagedBoundary(g, "__renvoManagedCollectBoundary")
+		}
+		return true
+	}
+	if renvoManagedTarget(g.c.renvoTarget) && ((intrinsic >= 2 && intrinsic <= 8) || intrinsic == 12 || intrinsic == 13 || intrinsic == 16 || intrinsic == 23) {
+		// GC owns lifetime. Use the ordinary zero-mark/no-op/identity bodies;
+		// never reinterpret an arena offset as a managed pointer to free.
+		return false
+	}
+	if renvoManagedTarget(g.c.renvoTarget) && (intrinsic == 17 || intrinsic == 18) {
+		renvoPrintErr("renvo: stack-switch operations are unavailable with the desktop heap\n")
+		g.asm.patchFailed = true
+		return false
+	}
 	if intrinsic == 1 {
 		e := &ep.exprs[idx]
 		if e.argCount != 1 || !renvoEmitIntExpr(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg)) {
@@ -16939,6 +16981,9 @@ func renvoEmitRuntimeStack(g *renvoLinearGen, ep *renvoExprParse, idx int) bool 
 const renvoRuntimeIntrinsicTable = "\x9f\x85\x31\x61\x01\xcb\x5d\x4c\x2e\x02\x03\x1e\x4f\x00\x03\x67\x75\x10\x6e\x04\xaf\xd8\xf6\x20\x05\x1b\xfe\x37\x3f\x06\xe7\x1a\x8d\x21\x07\x15\x6b\xc1\x4f\x08\x07\xf9\x8f\x0d\x08\x8b\x07\x40\x3f\x08\x3b\x59\x62\x4e\x08\x47\x47\xc5\x5f\x0c\x47\x02\x93\x57\x0d\xc5\x07\xc6\x53\x0d\xad\xfc\x67\x17\x0d\x0b\x3b\x57\x66\x0d\x4f\x60\xcb\x57\x0d\x8b\xd1\xdd\x57\x0d\x95\xc5\x1f\x2c\x0e\x71\xbf\x72\x5d\x10\xbb\x84\xa2\x5b\x11\x31\xdd\xa5\x1c\x12\x3d\x21\xa6\x45\x13\x1f\x36\x4c\x7f\x14\xd9\x61\xdf\x55\x15\xe3\xec\x79\x7a\x16\x51\x35\x60\x42\x17"
 
 func renvoRuntimeIntrinsicID(src []byte, start int, end int) int {
+	if renvoBytesEqualText(src, start, end, "renvo_runtime_HeapCollect") {
+		return 24
+	}
 	hash1 := 5381
 	hash2 := 0
 	for i := start; i < end; i++ {
@@ -17116,6 +17161,9 @@ func renvoEmitUncaughtFaultHelperBody(g *renvoLinearGen, outOfMemory bool) {
 	message := "panic\n"
 	if outOfMemory {
 		message = "out of memory\n"
+		if renvoManagedTarget(g.c.renvoTarget) {
+			message = "panic: out of memory\n"
+		}
 	}
 	renvoEmitStaticWrite(g, message, 2)
 	renvoAsmPrimaryImm(&g.asm, 2)
@@ -21897,6 +21945,9 @@ func renvoStringHeapOffsets(g *renvoLinearGen) {
 }
 
 func renvoStringArenaSize(g *renvoLinearGen) int {
+	if renvoManagedTarget(g.c.renvoTarget) {
+		return 0
+	}
 	renvoNonNil(g)
 	if g.arenaSize > 0 {
 		return g.arenaSize
@@ -21973,6 +22024,17 @@ func renvoEnsureDirectionalArenaAllocHelper(g *renvoLinearGen, persistent bool) 
 }
 
 func renvoEmitArenaAllocHelperBody(g *renvoLinearGen, persistent bool) {
+	if renvoManagedTarget(g.c.renvoTarget) {
+		renvoEmitManagedBoundary(g, "__renvoManagedRequest")
+		if !g.meta.panicEnabled {
+			ok := renvoAsmNewLabel(&g.asm)
+			renvoAsmJnzPrimary(&g.asm, ok)
+			renvoEmitUncaughtFaultTransfer(g, true)
+			renvoAsmMarkLabel(&g.asm, ok)
+		}
+		renvoAsmRet(&g.asm)
+		return
+	}
 	a := &g.asm
 	belowOrEqual := renvoConditionSignedLessEqual
 	aboveOrEqual := renvoConditionSignedGreaterEqual
@@ -24608,6 +24670,11 @@ func renvoEmitIntExpr(g *renvoLinearGen, ep *renvoExprParse, idx int) bool {
 	if e.kind == renvoExprCall {
 		if renvoFixedTarget == 0 {
 			if renvoExprIsIdentText(g.prog, ep, e.left, "renvo_runtime_CallJIT") {
+				if renvoManagedTarget(g.c.renvoTarget) {
+					renvoPrintErr("renvo: JIT stacks are unavailable with the desktop heap\n")
+					g.asm.patchFailed = true
+					return false
+				}
 				return renvoEmitJITCall(g, ep, idx)
 			}
 		}
@@ -31970,4 +32037,52 @@ func renvoRFEGuardReadSpan(a *renvoAsm, records []int, locations []int, span ren
 	renvoRFESpanLoad(a, records, locations, span.base, 0, false)
 	renvoRFERegBinary(a, 3, 6, 0)
 	renvoRFERegStore(a, 6, 5, span.offset, 8)
+}
+
+// Desktop policy and runtime source come from the resolved definition.
+// Startup and collection boundaries are emitted by its managed ABI hooks.
+func renvoPrepareManagedProgram(prog *renvoProgram) {
+	if !renvoManagedTarget(prog.c.renvoTarget) || prog.managedRuntime {
+		return
+	}
+	if prog.c.objectFile || prog.c.emitImage || prog.c11Semantics {
+		renvoPrintErr("renvo: desktop heap requires a Go process executable\n")
+		prog.ok = false
+		return
+	}
+	for _, fn := range prog.funcs {
+		if fn.nameEnd-fn.nameStart >= 14 && renvoBytesEqualText(prog.src, fn.nameStart, fn.nameStart+14, "__renvoManaged") {
+			renvoPrintErr("renvo: reserved managed runtime name\n")
+			prog.ok = false
+			return
+		}
+	}
+	runtimeSource := renvoManagedRuntimeSource(prog.c.renvoTarget)
+	source := make([]byte, 0, len(prog.src)+len(runtimeSource))
+	source = append(source, prog.src...)
+	source = append(source, runtimeSource...)
+	parsed := renvoParseProgramWithContext(source, &prog.c)
+	parsed.entryFunc = prog.entryFunc
+	parsed.packageTable = prog.packageTable
+	parsed.foreign = prog.foreign
+	parsed.managedRuntime = true
+	*prog = parsed
+}
+
+func renvoManagedFunctionLabel(g *renvoLinearGen, name string) int {
+	fn := renvoFindMetaFunctionText(g.meta, name)
+	if fn < 0 {
+		g.asm.patchFailed = true
+		return 0
+	}
+	renvoLinearMarkFunc(g, fn)
+	return g.funcLabels[fn]
+}
+
+func renvoEmitManagedStartup(g *renvoLinearGen) {
+	renvoManagedStartup(g.c.renvoTarget, &g.asm, g.arenaSize, renvoManagedFunctionLabel(g, "__renvoManagedInit"))
+}
+
+func renvoEmitManagedBoundary(g *renvoLinearGen, name string) {
+	renvoManagedBoundary(g.c.renvoTarget, &g.asm, renvoManagedFunctionLabel(g, name))
 }

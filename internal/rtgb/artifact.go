@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	Version    = 5
+	Version    = 6
 	HeaderSize = 80
 	MaxPayload = 64 << 20
 	MaxMeta    = 20 << 20
@@ -57,6 +57,7 @@ func Encode(artifact Artifact) ([]byte, bool) {
 	metadata = appendStrings(metadata, artifact.Descriptor.BuildTags)
 	metadata = appendStrings(metadata, artifact.Descriptor.Capabilities)
 	metadata = appendStrings(metadata, artifact.Descriptor.RuntimeOps)
+	metadata = appendString(metadata, artifact.Descriptor.MemoryStrategy)
 	metadata = appendVarint(metadata, len(artifact.DefinitionFiles))
 	for i := 0; i < len(artifact.DefinitionFiles); i++ {
 		metadata = appendString(metadata, artifact.DefinitionFiles[i].Filename)
@@ -144,6 +145,7 @@ func Decode(source []byte) (Artifact, bool) {
 	artifact.Descriptor.BuildTags = reader.strings()
 	artifact.Descriptor.Capabilities = reader.strings()
 	artifact.Descriptor.RuntimeOps = reader.strings()
+	artifact.Descriptor.MemoryStrategy = reader.string()
 	definitionCount := reader.integer()
 	if definitionCount < 0 || definitionCount > 4096 {
 		reader.ok = false
@@ -201,6 +203,7 @@ func validArtifactMetadata(artifact Artifact) bool {
 		descriptor.FunctionPointerBits > 0 && descriptor.FunctionPointerBits <= 65535 &&
 		descriptor.MaxAlign > 0 && descriptor.MaxAlign <= 65535 &&
 		descriptor.ArenaDefault >= 0 &&
+		(descriptor.MemoryStrategy == "" || descriptor.MemoryStrategy == "desktop") &&
 		(descriptor.Endian == "little" || descriptor.Endian == "big") &&
 		descriptor.ABI != "" && descriptor.Runtime != "" &&
 		descriptor.OutputKind != "" &&

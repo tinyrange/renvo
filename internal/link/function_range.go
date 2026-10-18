@@ -48,12 +48,17 @@ func lowerRangesCore(program *unit.Program, transient bool, functions bool, inte
 				continue
 			}
 			iterator, ok := functionValueSignatureFromTypeText(underlying)
-			if !ok || len(iterator.paramTypes) != 1 || len(iterator.resultTypes) != 0 {
+			if !ok || len(iterator.paramTypes) != 1 || len(iterator.resultTypes) != 0 || functionValueHasPrefix(functionValueCompactTypeText(iterator.paramTypes[0]), "...") {
 				return false
 			}
 			yield, ok := functionValueSignatureFromTypeText(ordinaryUnderlyingType(program, iterator.paramTypes[0], 0))
 			if !ok || len(yield.paramTypes) > 2 || len(yield.resultTypes) != 1 || ordinaryUnderlyingType(program, yield.resultTypes[0], 0) != "bool" {
 				return false
+			}
+			for _, param := range yield.paramTypes {
+				if functionValueHasPrefix(functionValueCompactTypeText(param), "...") {
+					return false
+				}
 			}
 			close := functionValueFindMatchingBrace(program, open)
 			if close < 0 {

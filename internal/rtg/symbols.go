@@ -242,6 +242,10 @@ func generatedArchitectureCodeIndexed(groups [][]generatedSymbol, local string) 
 
 func appendArchitectureFacts(out []byte, document Document, arch Declaration, mangle bool) []byte {
 	symbols := architectureSymbols(document, arch)
+	var groups [][]generatedSymbol
+	if mangle {
+		groups = generatedArchitectureSymbols(document)
+	}
 	var declared []string
 	for i := 0; i < len(symbols); i++ {
 		symbol := symbols[i]
@@ -265,7 +269,7 @@ func appendArchitectureFacts(out []byte, document Document, arch Declaration, ma
 		} else if symbol.Kind == "location" {
 			value := symbol.Value
 			if mangle {
-				if replacement, found := generatedArchitectureOutput(document, value); found {
+				if replacement, found := generatedArchitectureOutputIndexed(groups, value); found {
 					value = replacement
 				}
 			}

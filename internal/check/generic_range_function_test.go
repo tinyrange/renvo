@@ -22,8 +22,6 @@ func TestGenericRangeFunctionSignatures(t *testing.T) {
 		{"indexed_declaration", `func Walk(seq func(func(int)bool)){var a [1]int;for a[0]:=range seq{}};func main(){}`, false},
 		{"named_yield", `type Yield[V any]func(V)bool;type Sequence[V any]func(Yield[V]);func Values[V any](v V)Sequence[V]{return func(yield Yield[V]){yield(v)}};func main(){for v:=range Values(42){_=v}}`, true},
 		{"parameter_yield", `func Walk[Y ~func(int)bool](seq func(Y)){for v:=range seq{_=v}};func main(){}`, true},
-		{"variadic_yield", `func Walk(seq func(func(...int)bool)){for values:=range seq{_=len(values)}};func main(){}`, true},
-		{"named_variadic_yield", `type Yield[V any]func(...V)bool;func Walk[V any](seq func(Yield[V])){for values:=range seq{_=len(values)}};func main(){}`, true},
 		{"zero_yield", `func Walk(seq func(func()bool)){for range seq{}};func main(){}`, true},
 		{"two_yield", `func Walk[K,V any](seq func(func(K,V)bool)){for k,v:=range seq{_,_=k,v}};func main(){}`, true},
 		{"boolean_alias", `type Boolean=bool;func Walk(seq func(func(int)Boolean)){for v:=range seq{_=v}};func main(){}`, true},
@@ -87,5 +85,24 @@ func TestGenericRangeLanguageVersions(t *testing.T) {
 				t.Fatalf("ok=%v want=%v: %s", prepared.Ok, tc.valid, prepared.Message)
 			}
 		})
+	}
+}
+
+// Older go/types versions accepted variadic yields even though the compiler
+// could not lower them. Check these invalid signatures directly instead of
+// treating that historical host-toolchain bug as the language contract.
+func TestRangeRejectsVariadicYield(t *testing.T) {
+	for _, body := range []string{
+		`func Walk(seq func(func(...int)bool)){for values:=range seq{_=values}}`,
+		`type Yield[V any]func(...V)bool;func Walk[V any](seq func(Yield[V])){for values:=range seq{_=values}}`,
+		`func Walk[Y ~func(...int)bool](seq func(Y)){for values:=range seq{_=values}}`,
+		`func Walk(seq func(func(int,...string)bool)){for k,v:=range seq{_,_=k,v}}`,
+		`func Walk(seq func(func(...int)bool)){for range seq{}}`,
+	} {
+		source := []byte("package main;func Identity[T any](v T)T{return v};" + body + ";func main(){}")
+		graph := genericTestGraph(t, []load.SourceFile{{Path: "/repo/case/cmd/app/main.go", Src: source}})
+		if prepared := PrepareGenerics(graph); prepared.Ok {
+			t.Fatalf("accepted variadic yield: %s", body)
+		}
 	}
 }

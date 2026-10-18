@@ -1,0 +1,34 @@
+@import "managed_heap64.rtg"
+@import "managed_linux.rtg"
+go backend {
+	func linuxAarch64ManagedSource() string {
+		return managed_heap64.managedHeap64Source() + managed_linux.linuxManagedSource() + `
+						const __renvoManagedPageSize = uintptr(4096)
+				const __renvoManagedMapNumber = 222
+				const __renvoManagedReleaseNumber = 215
+				const __renvoManagedExitNumber = 93
+				const __renvoManagedMapFlags = uintptr(34)
+				`
+	}
+	func linuxAarch64ManagedStartup(out *RTGEmitter, limit int, label int) {
+		aarch64.asmMovRegImm(out, 3, limit)
+		aarch64.asmAddRegImm(out, 2, 29, 16)
+		aarch64.asmMovRegAbs(out, 1, 0, RTGRelocationAbsoluteBSS)
+		aarch64.asmMovRegAbs(out, 0, out.BSSSize(), RTGRelocationAbsoluteBSS)
+		aarch64.asmCallLabel(out, label)
+	}
+	func linuxAarch64ManagedBoundary(out *RTGEmitter, label int) {
+		aarch64.asmAddRegImm(out, 31, 31, -256)
+		for reg := 0; reg < 31; reg++ {
+			aarch64.asmStoreRegMem(out, reg, 31, reg*8, 8)
+		}
+		aarch64.asmMovRegReg(out, 1, 0)
+		// ADD (not ORR) reads SP rather than the zero register.
+		aarch64.asmEmit(out, 0x910003e0)
+		aarch64.asmCallLabel(out, label)
+		for reg := 1; reg < 31; reg++ {
+			aarch64.asmLoadRegMem(out, reg, 31, reg*8, 8)
+		}
+		aarch64.asmAddRegImm(out, 31, 31, 256)
+	}
+}

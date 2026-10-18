@@ -1631,7 +1631,50 @@ coremark_x86 = module("coremark_x86", host_profile = coremark_x86_host_profile, 
     profile_code = coremark_x86_profile_code, profile_ips = coremark_x86_profile_ips,
     native_disassemble = coremark_native_disassemble)
 
+
+def preflight_unicode_oracle():
+    """Regenerate only the Unicode 15 test oracle using the pinned Go 1.25.5 toolchain.
+
+    Review cmd/genunicodeoracle first. The toolchain may be downloaded by Go.
+    No caller commands, paths, flags, environment, or resource-gate changes.
+    """
+    return privileged.run("go", "run", "./cmd/genunicodeoracle",
+        env = {"GOTOOLCHAIN": "go1.25.5"}, cwd = _work(),
+        timeout_ms = 180000, output_limit = 1048576)
+
+# Linux QEMU validation: fixed checked-in workloads only.
+def qemu_heap_smoke(targets = ()):
+    """Run the unchanged checked-in Linux QEMU smoke matrix or selected rows.
+
+    No compiler/path/timeout/environment overrides. Review the runner and matrix
+    before invocation. Missing emulators and skipped targets are not passes.
+    """
+    allowed = ["aarch64", "aarch64_be", "alpha", "arm", "armeb", "hexagon", "hppa", "i386", "loongarch64", "m68k", "microblaze", "microblazeel", "mips", "mips64", "mips64el", "mipsel", "mipsn32", "mipsn32el", "or1k", "ppc", "ppc64", "ppc64le", "riscv32", "riscv64", "s390x", "sh4", "sh4eb", "sparc", "sparc32plus", "sparc64", "x86_64", "xtensa", "xtensaeb"]
+    args = ["python3", _work().path("tools/qemu-smoke/run")]
+    for target in targets:
+        if target not in allowed:
+            fail("Target must be in the checked-in QEMU matrix")
+        args += ["--target", target]
+    return privileged.run(cwd = _work(), timeout_ms = 2400000, output_limit = 2097152, *args)
+
+def qemu_heap_managed():
+    """Run only the Linux managed-heap QEMU acceptance matrix.
+
+    Review TestManagedHeapQEMU before invoking. It must enumerate the checked-in
+    matrix, enforce per-compile/run deadlines, and fail unsupported or missing
+    targets rather than skip them. No shell, arbitrary program, flags, paths,
+    environment overrides or resource-gate changes.
+    """
+    return privileged.run("go", "test", "./frontend_tests", "-run", "^TestManagedHeapQEMU$", "-count=1", "-v", "-timeout=35m",
+        cwd = _work(), env = {"RENVO_QEMU_MANAGED": "1"}, timeout_ms = 2160000, output_limit = 2097152)
+
+qemu_heap = module("qemu_heap", smoke = qemu_heap_smoke, managed = qemu_heap_managed)
+
+
 environment = {
+    "qemu_heap": qemu_heap,
+    "preflight_work": module("preflight_work", unicode_oracle = preflight_unicode_oracle),
+    "heap_work": module("heap_work", regenerate = regenerate_backends, expectations = repo_sync_expectations),
     "coremark_x86": coremark_x86,
     "compiler_perf": compiler_perf,
     "workspace": workspace, "git": git, "go": go, "repo": repo, "coremark": coremark,
@@ -1653,3 +1696,4 @@ default = privileged.model("gpt-6-astra").create(default_repl, prompt_addons = [
     "Preserve user changes. Additional capabilities require a new user-approved " +
     "configuration; do not bypass these restrictions through existing tools.",
 ])
+

@@ -21,7 +21,8 @@ const renvoTargetVM32 = 11
 const renvoTargetFreeBSDAmd64 = 12
 const renvoTargetOpenBSDAmd64 = 13
 const renvoTargetNetBSDAmd64 = 14
-const renvoTargetRTG = 15
+const renvoTargetLinuxAmd64Desktop = 15
+const renvoTargetRTG = 16
 const renvoContextDefaultTarget = renvoTargetLinuxAmd64
 const renvoContextDefaultTargetOS = 1
 const renvoContextDefaultTargetArch = 1
@@ -36,15 +37,15 @@ const renvoResolvedLinuxAmd64SysClose = 3
 const renvoResolvedLinuxAmd64SysFchmod = 91
 const renvoResolvedLinuxAmd64SysExit = 60
 
-const targetOSTable = "\x00\x01\x01\x01\x01\x02\x02\x04\x03\x01\x02\x05\a\b\t"
-const targetArchTable = "\x00\x01\x02\x03\x04\x01\x02\x05\x03\x01\x03\x05\x01\x01\x01"
-const renvoTargetIntBitsTable = "\x00@ @ @  @@@ @@@"
-const renvoTargetRuntimeCapsTable = "\x00\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f?\x7f\x7f\x7f\x7f\x7f"
-const renvoTargetKernelModuleTable = "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00"
-const renvoTargetPointerBitsTable = "\x00@ @ @  @@@ @@@"
-const renvoTargetCodePointerBitsTable = "\x00@ @ @  @@@ @@@"
-const renvoTargetFunctionPointerBitsTable = "\x00@ @ @  @@@ @@@"
-const renvoTargetEndianTable = "\x00\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01"
+const targetOSTable = "\x00\x01\x01\x01\x01\x02\x02\x04\x03\x01\x02\x05\a\b\t\x01"
+const targetArchTable = "\x00\x01\x02\x03\x04\x01\x02\x05\x03\x01\x03\x05\x01\x01\x01\x01"
+const renvoTargetIntBitsTable = "\x00@ @ @  @@@ @@@@"
+const renvoTargetRuntimeCapsTable = "\x00\x7f\x7f\x7f\x7f\x7f\x7f\x7f\x7f?\x7f\x7f\x7f\x7f\x7f\x7f"
+const renvoTargetKernelModuleTable = "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00"
+const renvoTargetPointerBitsTable = "\x00@ @ @  @@@ @@@@"
+const renvoTargetCodePointerBitsTable = "\x00@ @ @  @@@ @@@@"
+const renvoTargetFunctionPointerBitsTable = "\x00@ @ @  @@@ @@@@"
+const renvoTargetEndianTable = "\x00\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01"
 
 func renvoBundledTargetMaxAlign(target int) int {
 	if target == renvoTargetLinuxAmd64 {
@@ -87,6 +88,9 @@ func renvoBundledTargetMaxAlign(target int) int {
 		return 8
 	}
 	if target == renvoTargetNetBSDAmd64 {
+		return 8
+	}
+	if target == renvoTargetLinuxAmd64Desktop {
 		return 8
 	}
 	return 0
@@ -133,6 +137,9 @@ func renvoBundledDefaultArenaSize(target int) int {
 		return 0
 	}
 	if target == renvoTargetNetBSDAmd64 {
+		return 0
+	}
+	if target == renvoTargetLinuxAmd64Desktop {
 		return 0
 	}
 	return 0
@@ -484,6 +491,9 @@ func renvoDefaultArenaSize(target int) int {
 }
 
 func renvoResolveArenaSize(target int, requested int) int {
+	if renvoManagedTarget(target) {
+		return requested
+	}
 	if requested == 0 {
 		return renvoDefaultArenaSize(target)
 	}

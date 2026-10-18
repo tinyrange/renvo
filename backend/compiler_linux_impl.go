@@ -35,6 +35,9 @@ func renvoLinuxSysReadSeq(renvoTargetOS int, renvoTargetArch int) int {
 		if renvoFixedTarget == renvoTargetNetBSDAmd64 {
 			return 3
 		}
+		if renvoFixedTarget == renvoTargetLinuxAmd64Desktop {
+			return 0
+		}
 		return 0
 	}
 	if renvoTargetOS == 7 && renvoTargetArch == 1 {
@@ -85,6 +88,9 @@ func renvoLinuxSysWriteSeq(renvoTargetOS int, renvoTargetArch int) int {
 		}
 		if renvoFixedTarget == renvoTargetNetBSDAmd64 {
 			return 4
+		}
+		if renvoFixedTarget == renvoTargetLinuxAmd64Desktop {
+			return 1
 		}
 		return 0
 	}
@@ -137,6 +143,9 @@ func renvoLinuxSysReadAt(renvoTargetOS int, renvoTargetArch int) int {
 		if renvoFixedTarget == renvoTargetNetBSDAmd64 {
 			return 173
 		}
+		if renvoFixedTarget == renvoTargetLinuxAmd64Desktop {
+			return 17
+		}
 		return 0
 	}
 	if renvoTargetOS == 7 && renvoTargetArch == 1 {
@@ -187,6 +196,9 @@ func renvoLinuxSysWriteAt(renvoTargetOS int, renvoTargetArch int) int {
 		}
 		if renvoFixedTarget == renvoTargetNetBSDAmd64 {
 			return 174
+		}
+		if renvoFixedTarget == renvoTargetLinuxAmd64Desktop {
+			return 18
 		}
 		return 0
 	}
@@ -239,6 +251,9 @@ func renvoLinuxSysOpen(renvoTargetOS int, renvoTargetArch int) int {
 		if renvoFixedTarget == renvoTargetNetBSDAmd64 {
 			return 5
 		}
+		if renvoFixedTarget == renvoTargetLinuxAmd64Desktop {
+			return 2
+		}
 		return 0
 	}
 	if renvoTargetOS == 7 && renvoTargetArch == 1 {
@@ -289,6 +304,9 @@ func renvoLinuxSysClose(renvoTargetOS int, renvoTargetArch int) int {
 		}
 		if renvoFixedTarget == renvoTargetNetBSDAmd64 {
 			return 6
+		}
+		if renvoFixedTarget == renvoTargetLinuxAmd64Desktop {
+			return 3
 		}
 		return 0
 	}
@@ -341,6 +359,9 @@ func renvoLinuxSysFchmod(renvoTargetOS int, renvoTargetArch int) int {
 		if renvoFixedTarget == renvoTargetNetBSDAmd64 {
 			return 124
 		}
+		if renvoFixedTarget == renvoTargetLinuxAmd64Desktop {
+			return 91
+		}
 		return 0
 	}
 	if renvoTargetOS == 7 && renvoTargetArch == 1 {
@@ -382,6 +403,9 @@ func renvoHostedAmd64SysExit(renvoTargetOS int) int {
 		}
 		if renvoFixedTarget == renvoTargetNetBSDAmd64 {
 			return 1
+		}
+		if renvoFixedTarget == renvoTargetLinuxAmd64Desktop {
+			return 60
 		}
 		return 0
 	}

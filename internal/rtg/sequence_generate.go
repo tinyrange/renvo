@@ -131,10 +131,19 @@ func architectureSequenceFunction(sequence architectureSequence) embeddedFunctio
 }
 
 func findArchitectureSequence(arch Declaration, name string) (architectureSequence, bool) {
-	sequences := architectureSequences(arch)
-	for i := 0; i < len(sequences); i++ {
-		if sequences[i].Name == name {
-			return sequences[i], true
+	block, ok := declarationBlock(arch, "sequences")
+	if !ok {
+		return architectureSequence{}, false
+	}
+	// Hook validation asks for one signature at a time. Do not decode and
+	// allocate every unrelated signature on each lookup. Still skip malformed
+	// matching declarations, preserving the bulk decoder's first-valid rule.
+	for i := 0; i < len(block.Children); i++ {
+		statement := block.Children[i]
+		if len(statement.Tokens) != 0 && statement.Tokens[0] == name {
+			if sequence, valid := decodeArchitectureSequence(statement); valid {
+				return sequence, true
+			}
 		}
 	}
 	return architectureSequence{}, false

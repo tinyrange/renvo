@@ -25,14 +25,14 @@ type Diagnostic struct {
 
 const renvoCheckMessageBlob = "duplicate declarationinvalid import declarationinvalid method declarationinvalid function bodyinvalid name or scopereturn value count does not match function resultsassignment value is not assignable to its destinationfeature is not supported by RENVOimport is not usedcalled expression is not a functionleft side of assignment is not assignableassignment count does not matchbreak is not inside a loop or switchcontinue is not inside a loopcall argument is not assignable to its parametergo statement requires a function callchannel direction does not permit this operationselect has an invalid communication clause or multiple defaultslocal variable is declared but not usedpackage main has no top-level func main()func main must have no parameters or resultsmethod main does not define the package entry pointcannot slice an unaddressable array valueconstant array index is out of boundsdeferred builtin call discards a resultinvalid number of arguments to builtininvalid operand type for builtinundefined identifierinvalid operation for operand typesreturn value is not assignable to the function resultfunction call argument count does not match parameters"
 
-var renvoCheckMessageOffsets = [...]int{0, 0, 0, 21, 47, 73, 94, 115, 165, 218, 251, 269, 304, 345, 376, 412, 441, 489, 526, 574, 637, 676, 717, 761, 812, 853, 890, 929, 967, 999, 1019, 1054, 1107, 1161}
+const renvoCheckMessageOffsets = "\x00\x00\x00\x00\x00\x00\x15\x00\x2f\x00\x49\x00\x5e\x00\x73\x00\xa5\x00\xda\x00\xfb\x00\x0d\x01\x30\x01\x59\x01\x78\x01\x9c\x01\xb9\x01\xe9\x01\x0e\x02\x3e\x02\x7d\x02\xa4\x02\xcd\x02\xf9\x02\x2c\x03\x55\x03\x7a\x03\xa1\x03\xc7\x03\xe7\x03\xfb\x03\x1e\x04\x53\x04\x89\x04"
 
 const renvoSourceMessageBlob = "go.mod was not foundinvalid module declarationpackage path is outside the main modulepackage directory could not be readsource file could not be readinvalid build constraintsource syntax is invalidunresolved import dependency source is unavailable for dependency version is excluded: dependency has an invalid or missing go.mod: dependency import is ambiguous: invalid go:embed directive or pattern: cgo is not supported by RENVOstandard library package named source files must all be in one directoryexplicit source list contains no buildable Go or C filesC include could not be read: "
 
-var renvoSourceMessageOffsets = [...]int{0, 0, 20, 46, 85, 120, 149, 173, 197, 215, 252, 284, 329, 361, 400, 429, 454, 501, 557, 586}
+const renvoSourceMessageOffsets = "\x00\x00\x00\x00\x14\x00\x2e\x00\x55\x00\x78\x00\x95\x00\xad\x00\xc5\x00\xd7\x00\xfc\x00\x1c\x01\x49\x01\x69\x01\x90\x01\xad\x01\xc6\x01\xf5\x01\x2d\x02\x4a\x02"
 
 func renvoCheckMessage(detail int) string {
-	return renvoCheckMessageBlob[renvoCheckMessageOffsets[detail]:renvoCheckMessageOffsets[detail+1]]
+	return renvoDiagnosticMessage(renvoCheckMessageBlob, renvoCheckMessageOffsets, detail)
 }
 
 func renvoDiagnosticCode(group string, number int) string {
@@ -47,23 +47,23 @@ func renvoDiagnosticCode(group string, number int) string {
 
 const renvoOptionMessageBlob = "missing output after -omissing target after -tunsupported targetmissing tags after -tagsinvalid build tagsmissing package pathextra package path-windows-gui requires a Windows targetmissing arena size after -arena-sizeinvalid arena sizemissing output mode after -mode=unsupported output modekernel-module mode requires linux/amd64invalid renvo:module-license directiveconflicting renvo:module-license directives-script requires one explicit source file-script accepts exactly one source file-emit-unit and -emit-image cannot be used togethermissing system profile after -system-system cannot be combined with -t-system cannot be combined with -arena-sizemissing backend definition after -backendcould not read backend definitioninvalid backend definitionbackend definition does not export target-script requires a .go source fileobject mode requires linux/amd64object mode requires exactly one explicit source file"
 
-var renvoOptionMessageOffsets = [...]int{0, 0, 23, 46, 64, 64, 88, 106, 126, 144, 182, 182, 218, 236, 268, 291, 330, 368, 411, 452, 491, 541, 577, 577, 577, 611, 654, 695, 728, 754, 795, 829, 861, 914, 914}
+const renvoOptionMessageOffsets = "\x00\x00\x00\x00\x17\x00\x2e\x00\x40\x00\x40\x00\x58\x00\x6a\x00\x7e\x00\x90\x00\xb6\x00\xb6\x00\xda\x00\xec\x00\x0c\x01\x23\x01\x4a\x01\x70\x01\x9b\x01\xc4\x01\xeb\x01\x1d\x02\x41\x02\x41\x02\x41\x02\x63\x02\x8e\x02\xb7\x02\xd8\x02\xf2\x02\x1b\x03\x3d\x03\x5d\x03\x92\x03\x92\x03"
 
 const renvoSyntaxMessageBlob = "source contains an invalid or unterminated tokeninvalid or missing package clauseinvalid import declarationinvalid top-level declarationinvalid function or method declarationunexpected statement or expression at package scopeexpected identifier or type assertion after dot"
 
-var renvoSyntaxMessageOffsets = [...]int{0, 0, 48, 81, 107, 136, 174, 225, 272}
+const renvoSyntaxMessageOffsets = "\x00\x00\x00\x00\x30\x00\x51\x00\x6b\x00\x88\x00\xae\x00\xe1\x00\x10\x01"
 
 const renvoLowerMessageBlob = "invalid checked graph reached the lowererinvalid package index reached the lowererinvalid source token reached the lowererpackage unit construction failedunchecked program reached the lowerer"
 
-var renvoLowerMessageOffsets = [...]int{0, 0, 41, 82, 122, 154, 191}
+const renvoLowerMessageOffsets = "\x00\x00\x00\x00\x29\x00\x52\x00\x7a\x00\x9a\x00\xbf\x00"
 
 const renvoLinkMessageBlob = "linker received a failed package buildroot package is missinglinked unit is invalid"
 
-var renvoLinkMessageOffsets = [...]int{0, 0, 38, 61, 83}
+const renvoLinkMessageOffsets = "\x00\x00\x00\x00\x26\x00\x3d\x00\x53\x00"
 
 func renvoOptionMessage(detail int) string {
-	if detail > ParseOK && detail+1 < len(renvoOptionMessageOffsets) {
-		return renvoOptionMessageBlob[renvoOptionMessageOffsets[detail]:renvoOptionMessageOffsets[detail+1]]
+	if detail > ParseOK && detail+1 < len(renvoOptionMessageOffsets)/2 {
+		return renvoDiagnosticMessage(renvoOptionMessageBlob, renvoOptionMessageOffsets, detail)
 	}
 	return ""
 }
@@ -82,7 +82,7 @@ func renvoSyntaxErrorDiagnostic(d *Diagnostic, detail int) {
 		if detail == syntax.ParseErrScan {
 			number = 1
 		}
-		renvoSetDiagnostic(d, "parser", renvoDiagnosticCode("PARSE", number), renvoSyntaxMessageBlob[renvoSyntaxMessageOffsets[detail]:renvoSyntaxMessageOffsets[detail+1]])
+		renvoSetDiagnostic(d, "parser", renvoDiagnosticCode("PARSE", number), renvoDiagnosticMessage(renvoSyntaxMessageBlob, renvoSyntaxMessageOffsets, detail))
 	} else {
 		renvoSetDiagnostic(d, "compiler", "RENVO-BUG-004", "compiler bug: parser returned undeclared error code "+diagnosticIntText(detail))
 	}
@@ -119,7 +119,9 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 	if result.Error == BuildErrOptions {
 		renvoSetDiagnostic(&d, "options", "RENVO-OPTION-001", "invalid command options")
 		optionError := result.Options.Error
-		if optionError == ParseErrUnknownOption {
+		if optionError == ParseErrHeapLimit {
+			renvoSetDiagnosticDetail(&d, "RENVO-OPTION-036", "invalid managed heap configuration: "+result.Options.ErrorArg)
+		} else if optionError == ParseErrUnknownOption {
 			renvoSetDiagnosticDetail(&d, "RENVO-OPTION-005", "unknown option "+result.Options.ErrorArg)
 		} else if optionError == ParseErrMixedFileList {
 			renvoSetDiagnosticDetail(&d, "RENVO-OPTION-011", "explicit source list contains a non-.go/.c argument "+result.Options.ErrorArg)
@@ -159,7 +161,7 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 		d.Path = result.ErrorPath
 		sourceError := result.Sources.Error
 		if sourceError > SourceOK && sourceError <= SourceErrCInclude {
-			d.Message = renvoSourceMessageBlob[renvoSourceMessageOffsets[sourceError]:renvoSourceMessageOffsets[sourceError+1]]
+			d.Message = renvoDiagnosticMessage(renvoSourceMessageBlob, renvoSourceMessageOffsets, sourceError)
 			number := sourceError + 1
 			if sourceError == SourceErrParse {
 				renvoSetDiagnostic(&d, "compiler", "RENVO-BUG-015", "compiler bug: parser failure source file was not retained")
@@ -319,7 +321,7 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 			detail := built.Build.ErrorDetail
 			renvoSetDiagnostic(&d, "compiler", "RENVO-BUG-014", "compiler bug: lowerer returned undeclared error code "+diagnosticIntText(detail))
 			if detail > lower.EmitOK && detail < lower.EmitErrAssembly {
-				renvoSetDiagnostic(&d, "lowerer", renvoDiagnosticCode("LOWER", detail), renvoLowerMessageBlob[renvoLowerMessageOffsets[detail]:renvoLowerMessageOffsets[detail+1]])
+				renvoSetDiagnostic(&d, "lowerer", renvoDiagnosticCode("LOWER", detail), renvoDiagnosticMessage(renvoLowerMessageBlob, renvoLowerMessageOffsets, detail))
 			} else if detail == lower.EmitErrAssembly {
 				renvoSetDiagnostic(&d, "rtgasm", "RENVO-RTGASM-001", "invalid RTGASM source or function binding")
 				d.Path = built.ErrorPath
@@ -337,7 +339,7 @@ func diagnosticForBuild(result BuildResult) Diagnostic {
 	} else if built.Error == pipeline.PipelineErrLink {
 		detail := built.Link.Error
 		if detail > link.LinkOK && detail <= link.LinkErrUnit {
-			renvoSetDiagnostic(&d, "linker", renvoDiagnosticCode("LINK", detail), renvoLinkMessageBlob[renvoLinkMessageOffsets[detail]:renvoLinkMessageOffsets[detail+1]])
+			renvoSetDiagnostic(&d, "linker", renvoDiagnosticCode("LINK", detail), renvoDiagnosticMessage(renvoLinkMessageBlob, renvoLinkMessageOffsets, detail))
 		} else {
 			renvoSetDiagnostic(&d, "compiler", "RENVO-BUG-011", "compiler bug: linker returned undeclared error code "+diagnosticIntText(detail))
 		}
@@ -405,4 +407,13 @@ func renvoDiagnosticNamesToken(code string) bool {
 	}
 	number := int(code[13]-'0')*10 + int(code[14]-'0')
 	return number == 10 || number == 11 || number == 20 || number >= 27 && number <= 29 || number == 32
+}
+
+// Decode only the two offsets needed for a diagnostic. Keeping this immutable
+// table as bytes avoids global initialization code and heap allocation.
+func renvoDiagnosticMessage(blob string, offsets string, index int) string {
+	at := index * 2
+	start := int(offsets[at]) | int(offsets[at+1])<<8
+	end := int(offsets[at+2]) | int(offsets[at+3])<<8
+	return blob[start:end]
 }

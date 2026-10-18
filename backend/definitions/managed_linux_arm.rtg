@@ -1,0 +1,38 @@
+@import "managed_heap64.rtg"
+@import "managed_linux.rtg"
+go backend {
+	func linuxArmManagedSource() string {
+		return managed_heap64.managedHeap32Source() + managed_linux.linuxManagedSource() + `
+						const __renvoManagedPageSize = uintptr(4096)
+				const __renvoManagedMapNumber = 192
+				const __renvoManagedReleaseNumber = 91
+				const __renvoManagedExitNumber = 1
+				const __renvoManagedMapFlags = uintptr(34)
+				`
+	}
+	func linuxArmManagedStartup(out *RTGEmitter, limit int, label int) {
+		arm.asmMovRegImm(out, 3, limit)
+		arm.asmAddRegImm(out, 2, 11, 8)
+		arm.asmMovRegAbs(out, 1, 0, RTGRelocationAbsoluteBSS)
+		arm.asmMovRegAbs(out, 0, out.BSSSize(), RTGRelocationAbsoluteBSS)
+		arm.asmCallLabel(out, label)
+	}
+	func linuxArmManagedBoundary(out *RTGEmitter, label int) {
+		arm.asmAddRegImm(out, 13, 13, -64)
+		for reg := 0; reg < 15; reg++ {
+			if reg != 13 {
+				arm.asmStoreRegMem(out, reg, 13, reg*4, 4)
+			}
+		}
+		arm.asmMovRegReg(out, 1, 0)
+		// Pass the saved-register snapshot as the root range bottom.
+		arm.asmMovRegReg(out, 0, 13)
+		arm.asmCallLabel(out, label)
+		for reg := 1; reg < 15; reg++ {
+			if reg != 13 {
+				arm.asmLoadRegMem(out, reg, 13, reg*4, 4)
+			}
+		}
+		arm.asmAddRegImm(out, 13, 13, 64)
+	}
+}

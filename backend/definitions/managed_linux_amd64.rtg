@@ -1,0 +1,66 @@
+@import "managed_heap64.rtg"
+
+go backend {
+	func linuxAmd64ManagedSource() string {
+		return managed_heap64.managedHeap64Source() + `
+						//renvo:intrinsic renvo_runtime_Syscall
+						func __renvoManagedSyscall(n int, a uintptr, b uintptr, c uintptr, d uintptr, e int, f uintptr) int { return -1 }
+						const __renvoManagedPageSize = uintptr(4096)
+						func __renvoManagedMap(size uintptr) uintptr {
+						 p := __renvoManagedSyscall(9, 0, size, 3, 34, -1, 0)
+						 if p < 0 { return 0 }; return uintptr(p)
+						}
+						func __renvoManagedRelease(base uintptr, size uintptr) bool { return __renvoManagedSyscall(11, base, size, 0, 0, 0, 0) == 0 }
+						func __renvoManagedFatal(message string) { print(message); __renvoManagedSyscall(60, 2, 0, 0, 0, 0, 0) }
+						func __renvoManagedEnvironment(stack uintptr) uintptr {
+						 // Linux initial process stack: argc, argv[], null, envp[], null.
+						 p := stack + 16 + __renvoManagedRead(stack)*8
+						 for __renvoManagedRead(p) != 0 {
+						  entry := __renvoManagedRead(p)
+						  matched := true
+						  prefix := "RENVO_HEAP_LIMIT="
+						  for i := 0; i < len(prefix); i++ {
+						   if __renvoManagedByte(entry+uintptr(i)) != prefix[i] { matched = false; break }
+						  }
+						  if matched { return entry+17 }
+						  p += 8
+						 }
+						 return 0
+						}
+						func __renvoManagedRoots(roots uintptr) {
+						 if roots > __renvoManagedState[3] { __renvoManagedFatal("renvo: unsupported managed stack\n") }
+						 __renvoManagedScan(roots, __renvoManagedState[3])
+						}
+						`
+	}
+
+	// Startup adapter: pass limit, native stack top, globals begin/end to Init.
+	func linuxAmd64ManagedStartup(out *RTGEmitter, limit int, label int) {
+		out.Bytes2(0x48, 0xb9)
+		out.Int64(limit)             // rcx = limit
+		out.Text("\x48\x8d\x55\x08") // rdx = initial process stack (rbp+8)
+		out.Text("\x48\x8d\x35")
+		at := out.Len()
+		out.Int32(0)
+		out.AbsoluteReloc(at, 0, RTGRelocationAbsoluteBSS)
+		out.Text("\x48\x8d\x3d")
+		at = out.Len()
+		out.Int32(0)
+		out.AbsoluteReloc(at, 8, RTGRelocationAbsoluteBSSEnd)
+		out.Byte(0xe8)
+		out.Int32(0)
+		out.Reloc(label)
+	}
+
+	// Request in primary. Save every pointer-bearing register before collection;
+	// return the result in primary while restoring the remaining application state.
+	func linuxAmd64ManagedBoundary(out *RTGEmitter, label int) {
+		out.Text("\x50\x51\x52\x53\x55\x56\x57\x41\x50\x41\x51\x41\x52\x41\x53\x41\x54\x41\x55\x41\x56\x41\x57")
+		out.Text("\x48\x89\xc6\x48\x89\xe7")
+		out.Byte(0xe8)
+		out.Int32(0)
+		out.Reloc(label)
+		out.Text("\x48\x89\x44\x24\x70")
+		out.Text("\x41\x5f\x41\x5e\x41\x5d\x41\x5c\x41\x5b\x41\x5a\x41\x59\x41\x58\x5f\x5e\x5d\x5b\x5a\x59\x58")
+	}
+}

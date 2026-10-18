@@ -142,6 +142,29 @@ Useful options include:
 - `-I <dir>` / `-I<dir>` / `-isystem <dir>`: add C header search roots;
 - `-script`: treat one explicit file as a script.
 
+### Managed desktop self-hosting
+
+The opt-in `linux/amd64-desktop` target uses a growable conservative managed
+heap instead of the arena. It is built into the bundled compiler, so self-hosted
+stages can select it without resolving external `.rbe` files:
+
+```sh
+renvo -t linux/amd64-desktop -heap-limit 256MiB -s -o stage1 ./cmd/renvo
+./stage1 -t linux/amd64-desktop -heap-limit 256MiB -s -o stage2 ./cmd/renvo
+./stage2 -t linux/amd64-desktop -heap-limit 256MiB -s -o stage3 ./cmd/renvo
+```
+
+`RENVO_HEAP_LIMIT` overrides the running executable's compiled budget; it does
+not set the budget of executables that compiler produces. Explicitly use
+`-heap-limit` for those outputs. Arena marks/resets become lifetime hints rather
+than manual deallocation on this target; collection determines reachability.
+The managed compiler uses the in-process backend on its native stack, not JIT
+execution. See `internal/managedheap/README.md` and `STRESS.md` in that directory
+for the scope and regression coverage. All 33 Linux QEMU definitions also pass
+managed-heap acceptance after opting their selected target into
+`memory_strategy = desktop`; see `internal/managedheap/QEMU.md`. This does not
+change arena defaults or establish compiler self-hosting on those other targets.
+
 ### Hosted system profiles
 
 A hosted system profile keeps the constraints used for a compiler or
@@ -400,9 +423,9 @@ Compiler-generated invocation and dispatch frames explicitly forward the owner's
 recovery permission; ordinary authored helpers retain normal recover semantics.
 `generic_range_defers` covers normal returns, named results, nested owners,
 methods, builtins, nil callbacks, and nested/replaced panics. Variadic yield
-signatures are checked and execution has been validated on AMD64, x86-32, ARM,
-and AArch64. Go 1.25.5's compiler crashes on the separate variadic-yield probe,
-so that probe remains outside the host-Go expectation corpus.
+signatures are rejected: range iterators require non-variadic callbacks. Older
+Go type checkers accepted these signatures even though their compilers could
+not lower them; that host bug is not used as the language contract.
 Deferred tagged function values select and register their actual callable in
 the original function's defer stack. Callees and arguments are captured once;
 direct recovery, concrete/interface method values, tuple arguments and variadic
