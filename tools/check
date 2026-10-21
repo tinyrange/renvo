@@ -80,19 +80,18 @@ check_preflight() {
 		printf 'RENVO_CHECK_PREFLIGHT_BUDGET_SECONDS must be a positive integer\n' >&2
 		return 2
 	fi
-	# The tracked patterns include the generated-source authority packages. Keep
-	# them in one Go invocation so cold preflight builds compile each package once.
-	# The tracked suite saturates small CI runners, so let it finish first. The
-	# bundled-tag build and corpus compilation are short, independent cached
-	# checks; overlap only that tail instead of oversubscribing the main suite.
-	check_tracked_packages preflight
-	check_bundled_packages &
-	local bundled_pid=$!
+	# Compile the corpus harness alongside the tracked suite. Limit this
+	# auxiliary Go build to one worker so cold runners do not oversubscribe
+	# their compiler pool; all assertions and generated-source checks remain
+	# in the tracked suite. The bundled-tag suite follows that main build.
 	run_check "backend and frontend test compilation" \
-		go test -run '^$' ./backend ./frontend_tests &
+		go test -p 1 -run '^$' ./backend ./frontend_tests &
 	local compile_pid=$!
 	local failed=0
-	if ! wait "$bundled_pid"; then
+	if ! check_tracked_packages preflight; then
+		failed=1
+	fi
+	if ! check_bundled_packages; then
 		failed=1
 	fi
 	if ! wait "$compile_pid"; then
