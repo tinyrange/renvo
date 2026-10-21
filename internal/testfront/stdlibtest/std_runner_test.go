@@ -1,6 +1,6 @@
 //go:build !renvo
 
-package std_test
+package stdlibtest
 
 import (
 	"fmt"
@@ -85,7 +85,8 @@ func stdRoot(t *testing.T) string {
 	if !ok {
 		t.Fatal("runtime.Caller failed")
 	}
-	return filepath.Dir(file)
+	// This host-only harness must stay outside the embedded std source tree.
+	return filepath.Join(filepath.Dir(file), "..", "..", "..", "std")
 }
 
 func stdTestPackages(t *testing.T, root string) []string {

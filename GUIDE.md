@@ -660,7 +660,7 @@ There are usually two implementations:
 - host code used while developing with Go;
 - `renvo` code compiled into target programs.
 
-Their shared API must remain compatible. `std/api_compat_test.go` catches many
+Their shared API must remain compatible. `internal/testfront/stdlibtest/api_compat_test.go` catches many
 signature differences, but semantic tests are still needed. The same named
 symbol should behave the same in host and target implementations.
 
