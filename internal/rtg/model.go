@@ -104,6 +104,10 @@ type Document struct {
 	// retained in a parsed/resolved result, whose declarations callers may edit.
 	backendFunctions        []embeddedFunction
 	backendFunctionsIndexed bool
+
+	// Private to one generation helper invocation, never retained in a parsed
+	// or resolved document whose declarations callers may subsequently edit.
+	generation *generationIndex
 }
 
 // ImportLoader resolves an import path relative to the importing source. The

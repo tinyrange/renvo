@@ -1,5 +1,12 @@
 package rtg
 
+type generationIndex struct {
+	names        []string
+	namesReady   bool
+	symbols      [][]generatedSymbol
+	symbolsReady bool
+}
+
 type generatedSymbol struct {
 	Local  string
 	Output string
@@ -181,11 +188,18 @@ func architectureSymbols(document Document, arch Declaration) []generatedSymbol 
 // Preserve declaration groups: register-location aliases resolve within their
 // owning architecture, while output names use first-declaration precedence.
 func generatedArchitectureSymbols(document Document) [][]generatedSymbol {
+	if document.generation != nil && document.generation.symbolsReady {
+		return document.generation.symbols
+	}
 	var groups [][]generatedSymbol
 	for i := 0; i < len(document.Declarations); i++ {
 		if document.Declarations[i].Kind == DeclArch {
 			groups = append(groups, architectureSymbols(document, document.Declarations[i]))
 		}
+	}
+	if document.generation != nil {
+		document.generation.symbols = groups
+		document.generation.symbolsReady = true
 	}
 	return groups
 }

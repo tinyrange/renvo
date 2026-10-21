@@ -2150,7 +2150,14 @@ func dedentGoSource(source []byte) []byte {
 }
 
 func embeddedGoNames(document Document) []string {
-	return collectEmbeddedGoNames(document, false)
+	if document.generation == nil {
+		return collectEmbeddedGoNames(document, false)
+	}
+	if !document.generation.namesReady {
+		document.generation.names = collectEmbeddedGoNames(document, false)
+		document.generation.namesReady = true
+	}
+	return document.generation.names
 }
 
 func embeddedGoFunctionNames(document Document) []string {

@@ -2441,12 +2441,16 @@ func renvoHexDigitValue(ch byte) int {
 }
 
 func renvoDecodeStringToken(p *renvoProgram, tokIndex int) []byte {
+	tok := renvoTokAt(p, tokIndex)
+	return renvoAppendDecodedStringToken(renvoFixedByteScratch(int(tok.end)-int(tok.start)-2), p, tokIndex)
+}
+
+func renvoAppendDecodedStringToken(out []byte, p *renvoProgram, tokIndex int) []byte {
 	renvoNonNil(p)
 	tok := renvoTokAt(p, tokIndex)
 	src := p.src
 	i := int(tok.start) + 1
 	end := int(tok.end) - 1
-	out := renvoFixedByteScratch(end - i)
 	quote := renvo_runtime_UnsafeByteAt(src, int(tok.start))
 	for i < end {
 		ch := renvo_runtime_UnsafeByteAt(src, i)
@@ -19977,6 +19981,36 @@ func renvoFindGlobalType(g *renvoLinearGen, nameStart int, nameEnd int) int {
 // Named string constants may be concatenations or references to other constants.
 // Resolve their parsed expressions into immutable data rather than allocating a
 // runtime concatenation every time the constant is used.
+// Raw literal contents bound their decoded size, including escaped binary
+// bytes and raw strings. A negative result means the tree has a nonliteral leaf.
+func renvoLiteralStringTreeSize(p *renvoProgram, ep *renvoExprParse, idx int) int {
+	e := &ep.exprs[idx]
+	if e.kind == renvoExprString {
+		return int(renvoTokEnd(p, e.tok)-renvoTokStart(p, e.tok)) - 2
+	}
+	if e.kind != renvoExprBinary || !renvoTokCharIs(p, e.tok, '+') {
+		return -1
+	}
+	left := renvoLiteralStringTreeSize(p, ep, e.left)
+	if left < 0 {
+		return -1
+	}
+	right := renvoLiteralStringTreeSize(p, ep, e.right)
+	if right < 0 || left+right < left {
+		return -1
+	}
+	return left + right
+}
+
+func renvoAppendLiteralStringTree(out []byte, p *renvoProgram, ep *renvoExprParse, idx int) []byte {
+	e := &ep.exprs[idx]
+	if e.kind == renvoExprString {
+		return renvoAppendDecodedStringToken(out, p, e.tok)
+	}
+	out = renvoAppendLiteralStringTree(out, p, ep, e.left)
+	return renvoAppendLiteralStringTree(out, p, ep, e.right)
+}
+
 func renvoEvalStringConstant(g *renvoLinearGen, ep *renvoExprParse, idx int, depth int) ([]byte, bool) {
 	if idx < 0 || idx >= len(ep.exprs) || depth > len(g.meta.globals) {
 		return nil, false
@@ -19986,6 +20020,11 @@ func renvoEvalStringConstant(g *renvoLinearGen, ep *renvoExprParse, idx int, dep
 		return renvoDecodeStringToken(g.prog, e.tok), true
 	}
 	if e.kind == renvoExprBinary && renvoTokCharIs(g.prog, e.tok, '+') {
+		if size := renvoLiteralStringTreeSize(g.prog, ep, idx); size >= 0 {
+			// Reserve once for the entire constant tree. Decoding each prefix
+			// into another temporary defeats folding in the monotonic arena.
+			return renvoAppendLiteralStringTree(make([]byte, 0, size), g.prog, ep, idx), true
+		}
 		left, ok := renvoEvalStringConstant(g, ep, e.left, depth)
 		if !ok {
 			return nil, false
@@ -19997,6 +20036,10 @@ func renvoEvalStringConstant(g *renvoLinearGen, ep *renvoExprParse, idx int, dep
 		return renvoEvalStringConstant(g, ep, renvo_runtime_UnsafeIntAt(ep.args, e.firstArg), depth)
 	}
 	if e.kind == renvoExprIdent {
+		// A local may shadow a package constant inside a larger expression.
+		if renvoFindLocalIndex(g, e.nameStart, e.nameEnd) >= 0 {
+			return nil, false
+		}
 		symbol := renvoFindMetaGlobalIndex(g.meta, e.nameStart, e.nameEnd, renvoTokConst)
 		if symbol >= 0 {
 			init := &g.meta.globals[symbol]
@@ -21798,6 +21841,11 @@ func renvoEmitStringValueRegs(g *renvoLinearGen, ep *renvoExprParse, idx int) bo
 		}
 	}
 	if e.kind == renvoExprBinary && renvoTokCharIs(g.prog, e.tok, '+') && renvoTypeIsString(g.meta, renvoInferParsedExprType(g, ep, idx)) {
+		// Constant trees belong in immutable data. Materializing each literal
+		// prefix at runtime makes large constant initializers quadratic.
+		if renvoEmitNamedStringConstant(g, ep, idx) {
+			return true
+		}
 		return renvoEmitStringConcatValueRegs(g, ep, idx)
 	}
 	if e.kind == renvoExprUnary && renvoTokCharIs(g.prog, e.tok, '*') {

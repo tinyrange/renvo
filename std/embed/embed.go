@@ -258,14 +258,9 @@ func decompressArchive(compressed string, size int) ([]byte, bool) {
 			// initialized bytes, then grow the available prefix for the next
 			// chunk. This preserves repetition without a byte-at-a-time loop.
 			source := written - distance
-			for length > 0 {
-				chunk := written - source
-				if chunk > length {
-					chunk = length
-				}
-				copy(out[written:written+chunk], out[source:source+chunk])
-				written += chunk
-				length -= chunk
+			end := written + length
+			for written < end {
+				written += copy(out[written:end], out[source:written])
 			}
 		}
 	}
