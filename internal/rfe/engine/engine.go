@@ -6,11 +6,17 @@ import (
 )
 
 type EngineConfig struct {
+	Adaptive               bool   // measured payback using the Go-host monotonic clock, not fixed heat quotas
+	NaturalBlocks          bool   // end blocks at control flow, scheduling, or a code-page boundary; no artificial width
+	DynamicCode            bool   // retain live blocks and grow native storage; retire invalidated fragments individually
 	Mode                   string // interpreter, ir, native; native includes both lower tiers
 	DiscoveryThreshold     uint64 // optional bounded cold-PC observation before decoding
 	RecycleNative          bool   // reclaim a full arena only at quiescent dispatch entry
+	CacheContexts          bool   // keep distinct CodeContext identities within the same global block cap
 	EvictCold              bool   // recycle decoded-cache slots; native arena stays bounded/append-only
 	IRThreshold            uint64
+	LoopRegionsOnly        bool   // specialize/session only proven cyclic traces, not one-shot leaves
+	RegionThreshold        uint64 // additional observed block visits before region specialization
 	NativeThreshold        uint64
 	MaxBlocks              int
 	MaxInstructions        int // cold block discovery width
@@ -33,17 +39,24 @@ type Stats struct {
 	LinkContextChanges                                                            uint64
 	ProfileMissAbsent, ProfileMissInterpreted, ProfileMissCold, ProfileMissNative uint64
 
-	Regions, RegionExits                               uint64 // bounded cyclic regions and successful side exits
-	ProfileErrors                                      uint64
-	Linked                                             uint64 // instructions retired inside the native dispatcher
-	Interpreted, IR, Native                            uint64 // retired instructions in each tier
-	Blocks, Promotions, Invalidations, CompileFailures uint64
-	NativeBytes                                        int
-	NativeMemory, MemoryExits                          uint64 // native scalar instructions and precise slow exits
-	CodeReads, VersionChecks, ContextChecks            uint64 // translation discovery/revalidation only
+	Regions, RegionExits                                     uint64 // bounded cyclic regions and successful side exits
+	ProfileErrors                                            uint64
+	Linked                                                   uint64 // instructions retired inside the native dispatcher
+	Interpreted, IR, Native                                  uint64 // retired instructions in each tier
+	Blocks, Promotions, Invalidations, CompileFailures       uint64
+	NativeBytes                                              int
+	NativeMemory, MemoryExits                                uint64 // native scalar instructions and precise slow exits
+	CodeReads, VersionChecks, ContextChecks                  uint64 // translation discovery/revalidation only
+	VersionIdentityMisses, VersionEpochMisses, VersionFaults uint64 // code-proof failure reasons
 }
 
 type compiledBlock struct {
+	proof, regionProof              CodeProof
+	sessionDebt                     uint64
+	sessionLoss                     uint64
+	successor                       uint64
+	successorSeen                   bool
+	cacheContext                    *CodeIdentity // immutable translation-domain key, not a code version
 	cacheSlot                       int
 	recent                          uint8
 	regionAttempted, region         bool
@@ -54,6 +67,8 @@ type compiledBlock struct {
 	context                         CodeStamp
 	instructions                    []Instruction
 	visits                          uint64
+	sessionRetry                    uint64 // observed short guarded sessions temporarily use ordinary native leaves
+	sessionShort                    uint8
 	ops                             []emu.Op
 	prepared                        *emu.PreparedBlock
 	entry                           int
@@ -70,7 +85,21 @@ type dispatchEntry struct {
 
 type hotObservation struct{ pc, visits uint64 }
 
+type contextPC struct {
+	pc       uint64
+	identity *CodeIdentity
+}
+
 type Engine struct {
+	dispatchShift uint
+
+	codeLinks       map[codeLinkKey]*codeLinkState
+	payback         paybackModel
+	reused          map[contextPC]bool
+	pendingReleases []int
+	freeCacheSlots  []int
+	cacheContext    *CodeIdentity
+	variants        map[contextPC]*compiledBlock // optional variants share one global replacement clock
 	hot             [4096]hotObservation
 	hotVictim       uint64
 	cacheOrder      []dispatchEntry
@@ -94,25 +123,34 @@ type Engine struct {
 }
 
 func New(config EngineConfig, arch Architecture) (*Engine, error) {
+	if config.Adaptive && !paybackClockAvailable {
+		return nil, fmt.Errorf("adaptive RFE timing requires the Go-hosted runner")
+	}
 	if arch.Name == "" || arch.StateWords < 1 || arch.StateWords > 256 || arch.PC < 0 || arch.PC >= arch.StateWords || arch.Alignment == 0 || arch.Alignment > 8 || arch.Alignment&(arch.Alignment-1) != 0 || arch.Fetch == nil || arch.Lower == nil {
 		return nil, fmt.Errorf("invalid guest architecture")
 	}
 	if config.Mode != "interpreter" && config.Mode != "ir" && config.Mode != "native" {
 		return nil, fmt.Errorf("invalid engine %q", config.Mode)
 	}
-	if config.MaxRegionInstructions == 0 {
+	if config.MaxRegionInstructions == 0 && !config.NaturalBlocks {
 		config.MaxRegionInstructions = config.MaxInstructions
 	}
 	if config.MaxNativeInstructions == 0 {
 		config.MaxNativeInstructions = 64
 	}
-	if config.MaxRegionInstructions < 1 || config.MaxRegionInstructions > 256 || config.MaxNativeInstructions < 1 || config.MaxNativeInstructions > emu.NativeSessionLimit {
+	if (!config.NaturalBlocks && (config.MaxRegionInstructions < 1 || config.MaxRegionInstructions > 256)) || config.MaxNativeInstructions < 1 || config.MaxNativeInstructions > emu.NativeSessionLimit {
 		return nil, fmt.Errorf("invalid execution slice configuration")
 	}
-	if config.IRThreshold == 0 || config.NativeThreshold < config.IRThreshold || config.MaxBlocks < 1 || config.MaxBlocks > 65536 || config.MaxInstructions < 1 || config.MaxInstructions > 16 || config.NativeBytes < 4096 || config.NativeBytes > 64<<20 {
+	if !config.Adaptive && (config.IRThreshold == 0 || config.NativeThreshold < config.IRThreshold) || !config.DynamicCode && (config.MaxBlocks < 1 || config.MaxBlocks > 65536) || !config.NaturalBlocks && (config.MaxInstructions < 1 || config.MaxInstructions > 16) || config.NativeBytes < 4096 || config.NativeBytes > 64<<20 {
 		return nil, fmt.Errorf("invalid engine budget")
 	}
 	e := &Engine{arch: arch, config: config, blocks: map[uint64]*compiledBlock{}}
+	for alignment := arch.Alignment; alignment > 1; alignment >>= 1 {
+		e.dispatchShift++
+	}
+	if config.CacheContexts {
+		e.variants = make(map[contextPC]*compiledBlock)
+	}
 	if config.EvictCold {
 		e.cacheOrder = make([]dispatchEntry, config.MaxBlocks)
 	}
@@ -122,6 +160,9 @@ func New(config EngineConfig, arch Architecture) (*Engine, error) {
 			e.Stats.CompileFailures++
 		} else {
 			e.native = n
+			if config.DynamicCode {
+				n.AllowGrowth()
+			}
 			if config.ProfileNative {
 				_ = n.EnablePerfMap(config.ProfileNativeMonotonic)
 				e.Stats.ProfileErrors = n.SymbolErrors
@@ -131,6 +172,26 @@ func New(config EngineConfig, arch Architecture) (*Engine, error) {
 	return e, nil
 }
 func (e *Engine) Close() error {
+	if e.variants != nil {
+		for _, b := range e.variants {
+			if b.proof != nil {
+				b.proof.Close()
+			}
+			if b.regionProof != nil {
+				b.regionProof.Close()
+			}
+		}
+	} else {
+		for _, b := range e.blocks {
+			if b.proof != nil {
+				b.proof.Close()
+			}
+			if b.regionProof != nil {
+				b.regionProof.Close()
+			}
+		}
+	}
+	e.codeLinks = nil
 	if e.native != nil {
 		err := e.native.Close()
 		e.native = nil
@@ -143,23 +204,44 @@ func (e *Engine) block(c CPU) *compiledBlock {
 	if pc&(e.arch.Alignment-1) != 0 || c.MemoryBus() == nil {
 		return nil
 	}
-	cache := &e.dispatch[(pc>>2)&1023]
+	var context CodeStamp
+	if e.config.CacheContexts {
+		if memory, ok := c.MemoryBus().(CodeContextMemory); ok {
+			context = memory.CodeContext()
+			e.Stats.ContextChecks++
+		}
+		e.cacheContext = context.Identity
+	}
+	cache := &e.dispatch[e.dispatchSlot(pc)]
 	old := cache.block
-	direct := old != nil && cache.pc == pc
+	direct := old != nil && cache.pc == pc && old.cacheContext == e.cacheContext
 	if !direct {
-		old = e.blocks[pc]
+		old = e.cachedBlock(pc)
 	}
 	if old == nil {
 		return e.discoverBlock(c, pc, cache)
 	}
 	valid := false
-	if len(old.dependencies) != 0 {
-		var context CodeStamp
-		if memory, ok := c.MemoryBus().(CodeContextMemory); ok {
-			context = memory.CodeContext()
-			e.Stats.ContextChecks++
-			valid = context.Identity != nil && context == old.context
+	if old.proof != nil {
+		valid = old.proof.Valid()
+		if !valid {
+			valid = old.proof.Revalidate()
 		}
+		if valid {
+			if !e.config.CacheContexts {
+				memory := c.MemoryBus().(CodeContextMemory)
+				context = memory.CodeContext()
+			}
+			old.context = context
+		}
+	} else if len(old.dependencies) != 0 {
+		if !e.config.CacheContexts {
+			if memory, ok := c.MemoryBus().(CodeContextMemory); ok {
+				context = memory.CodeContext()
+				e.Stats.ContextChecks++
+			}
+		}
+		valid = context.Identity != nil && context == old.context
 		if !valid {
 			valid = e.validVersions(c, old, context)
 		}
@@ -171,6 +253,9 @@ func (e *Engine) block(c CPU) *compiledBlock {
 		e.Stats.Invalidations++
 		return nil
 	}
+	if old.regionProof != nil && !old.regionProof.Valid() && !old.regionProof.Revalidate() {
+		e.invalidateRegion(old)
+	}
 	old.recent = 1
 	if old.native {
 		old.recent = 2
@@ -179,6 +264,7 @@ func (e *Engine) block(c CPU) *compiledBlock {
 	// GC-tracked slot on every executed block. Map hits still repair collisions.
 	if !direct {
 		*cache = dispatchEntry{pc, old}
+		e.blocks[pc] = old
 	}
 	return old
 }
@@ -187,6 +273,16 @@ func (e *Engine) block(c CPU) *compiledBlock {
 // guarded lookup's frame; none of these are needed for a hot block entry.
 func (e *Engine) discoverBlock(c CPU, pc uint64, cache *dispatchEntry) *compiledBlock {
 	defer pauseTranslationClock(c)()
+	if e.config.Adaptive {
+		key := contextPC{pc, e.cacheContext}
+		if e.reused == nil {
+			e.reused = make(map[contextPC]bool)
+		}
+		if !e.reused[key] {
+			e.reused[key] = true
+			return nil
+		}
+	}
 	if e.config.DiscoveryThreshold > 1 {
 		observation := e.discoveryObservation(pc, true)
 		if observation.visits < e.config.DiscoveryThreshold {
@@ -196,14 +292,25 @@ func (e *Engine) discoverBlock(c CPU, pc uint64, cache *dispatchEntry) *compiled
 			return nil
 		}
 	}
-	if len(e.blocks) >= e.config.MaxBlocks && !e.config.EvictCold {
+	if !e.config.DynamicCode && e.CachedBlocks() >= e.config.MaxBlocks && !e.config.EvictCold {
 		return nil
 	}
-	block := &compiledBlock{cacheSlot: -1, recent: 1}
+	owner, local := c.MemoryBus().(CodeProofMemory)
+	if local {
+		local = owner.CodeProofsEnabled()
+	}
+	mutation := uint64(0)
+	if local {
+		mutation = owner.CodeMutation()
+	}
+	block := &compiledBlock{cacheSlot: -1, recent: 1, cacheContext: e.cacheContext}
 	nativeMemory, capable := c.MemoryBus().(NativeMemory)
 	allowMemory := capable && e.native != nil && nativeMemory.NativeContext() != nil
 	addr := pc
-	for i := 0; i < e.config.MaxInstructions; i++ {
+	for i := 0; e.config.NaturalBlocks || i < e.config.MaxInstructions; i++ {
+		if i > 0 && e.config.NaturalBlocks && addr>>12 != pc>>12 {
+			break
+		}
 		ins, err := e.arch.Fetch(c.MemoryBus(), addr)
 		e.Stats.CodeReads++
 		if err != nil || ins.PC != addr || ins.Length == 0 || ins.Length > 15 || uint64(ins.Length) > ^uint64(0)-addr || uint64(ins.Length)%e.arch.Alignment != 0 {
@@ -221,10 +328,14 @@ func (e *Engine) discoverBlock(c CPU, pc uint64, cache *dispatchEntry) *compiled
 		}
 		block.instructions = append(block.instructions, ins)
 		count := len(block.instructions)
-		block.memoryPrefix[count] = block.memoryPrefix[count-1]
+		if count < len(block.memoryPrefix) {
+			block.memoryPrefix[count] = block.memoryPrefix[count-1]
+		}
 		if ins.Memory {
 			block.effects = true
-			block.memoryPrefix[count]++
+			if count < len(block.memoryPrefix) {
+				block.memoryPrefix[count]++
+			}
 		}
 		if ins.Terminal || ins.ScheduleBoundary {
 			break
@@ -234,11 +345,25 @@ func (e *Engine) discoverBlock(c CPU, pc uint64, cache *dispatchEntry) *compiled
 	if len(block.instructions) == 0 {
 		return nil
 	}
+	// Wide bodies use the loop ABI even for one-shot code: retirement and
+	// memory progress live in checked native exits, never in a 17-byte prefix.
+	if len(block.instructions) > 16 {
+		block.effects = true
+	}
 	e.dependencies(c, pc, block)
+	if local {
+		block.proof = owner.ProveCode(codeRanges(block.instructions), mutation)
+		if block.proof == nil {
+			return nil
+		}
+	}
 	if e.config.EvictCold {
 		e.admit(pc, block)
 	}
 	e.blocks[pc] = block
+	if e.variants != nil {
+		e.variants[contextPC{pc, e.cacheContext}] = block
+	}
 	// An evicted PC must establish fresh heat, rather than retaining a
 	// permanent discovery ticket and repeatedly decoding during cache churn.
 	if e.config.DiscoveryThreshold > 1 {
@@ -263,6 +388,11 @@ func (e *Engine) Step(c CPU, remaining uint64) error {
 	if remaining == 0 {
 		return fmt.Errorf("instruction budget exhausted")
 	}
+	// Step is also a quiescent dispatch entry. Callers owning precise device
+	// boundaries need not use RunQuanta merely to keep the native arena alive.
+	if err := e.recycle(c); err != nil {
+		return err
+	}
 	if e.config.Mode == "interpreter" {
 		return e.interpret(c)
 	}
@@ -272,39 +402,58 @@ func (e *Engine) Step(c CPU, remaining uint64) error {
 // stepBlock consumes a lookup already validated in this single-threaded engine.
 // This lets Run fall back without a second lookup/context query at the same PC.
 func (e *Engine) stepBlock(c CPU, remaining uint64, block *compiledBlock) error {
-	if block == nil || uint64(len(block.instructions)) > remaining {
+	if block == nil {
 		return e.interpret(c)
+	}
+	if uint64(len(block.instructions)) > remaining {
+		return e.executeCached(c, block.instructions[0])
 	}
 	if block.interpretOnly {
 		// block() has validated this instruction's execute permission and
 		// code version (or bytes). Avoid fetching it a second time. Memory,
 		// traps and unsupported instructions keep CPU semantics.
-		before := *c.Retirement()
-		err := c.ExecuteInstruction(block.instructions[0])
-		e.Stats.Interpreted += *c.Retirement() - before
-		return err
+		return e.executeCached(c, block.instructions[0])
 	}
 	block.visits++
 	if block.effects {
 		return e.stepMemory(c, block)
 	}
-	if block.visits < e.config.IRThreshold {
-		return e.interpret(c)
+	if !block.native && (!e.config.Adaptive && block.visits < e.config.IRThreshold || e.config.Adaptive && block.visits < e.nativeThreshold(block)) {
+		return e.executeCached(c, block.instructions[0])
 	}
 	if !e.preparePureBlock(c, block) {
 		return e.interpret(c)
 	}
 	var err error
+	start := paybackTime{}
+	if e.config.Adaptive {
+		start = paybackNow()
+	}
 	if block.native && e.native != nil {
-		err = e.native.Call(block.entry, c.Registers())
+		var context *emu.MemoryContext
+		if memory, ok := c.MemoryBus().(NativeMemory); ok {
+			context = memory.NativeContext()
+		}
+		if context != nil && e.config.Adaptive {
+			e.publishLeaf(c, block, context)
+			// Pure leaves do not use the context, but keep the same admitted
+			// owner lease alive instead of unpinning its RAM graph on each ALU leaf.
+			err = e.native.CallMemory(block.entry, c.Registers(), context)
+		} else {
+			err = e.native.Call(block.entry, c.Registers())
+		}
 	} else {
 		err = e.ir.Run(block.prepared, c.Registers())
 	}
 	if err != nil {
 		return err
 	}
+	block.successor, block.successorSeen = c.Registers()[e.arch.PC], true
 	e.observeEdge(block.instructions[len(block.instructions)-1], c.Registers()[e.arch.PC])
 	retired := uint64(len(block.instructions))
+	if block.native {
+		e.observeLeaf(block, start, retired)
+	}
 	*c.Retirement() += retired
 	if block.native && e.native != nil {
 		e.Stats.Native += retired
@@ -313,10 +462,41 @@ func (e *Engine) stepBlock(c CPU, remaining uint64, block *compiledBlock) error 
 	}
 	return nil
 }
+
+// executeCached is reached only after this instruction's code/mode/execute
+// proof was validated in the current dispatch. It skips fetching, not any
+// architectural memory, fault, device or retirement behavior.
+func (e *Engine) executeCached(c CPU, ins Instruction) error {
+	before := *c.Retirement()
+	sampled := e.config.Adaptive && (e.Stats.Interpreted == 0 || e.Stats.Interpreted&(e.Stats.Interpreted-1) == 0)
+	start := paybackTime{}
+	if sampled {
+		start = paybackNow()
+	}
+	err := c.ExecuteInstruction(ins)
+	if sampled && *c.Retirement() > before {
+		e.payback.interpretedNS += paybackElapsed(start)
+		e.payback.interpreted += *c.Retirement() - before
+	}
+	e.Stats.Interpreted += *c.Retirement() - before
+	if err == nil && *c.Retirement() == before+1 {
+		e.observeEdge(ins, c.Registers()[e.arch.PC])
+	}
+	return err
+}
 func (e *Engine) interpret(c CPU) error {
 	before := *c.Retirement()
-	block := e.blocks[c.Registers()[e.arch.PC]]
+	sampled := e.config.Adaptive && (e.Stats.Interpreted == 0 || e.Stats.Interpreted&(e.Stats.Interpreted-1) == 0)
+	start := paybackTime{}
+	if sampled {
+		start = paybackNow()
+	}
+	block := e.cachedBlock(c.Registers()[e.arch.PC])
 	err := c.Step()
+	if sampled && *c.Retirement() > before {
+		e.payback.interpretedNS += paybackElapsed(start)
+		e.payback.interpreted += *c.Retirement() - before
+	}
 	e.Stats.Interpreted += *c.Retirement() - before
 	if err == nil && *c.Retirement() == before+1 && block != nil && len(block.instructions) != 0 {
 		e.observeEdge(block.instructions[0], c.Registers()[e.arch.PC])
@@ -326,7 +506,12 @@ func (e *Engine) interpret(c CPU) error {
 
 // NativeAvailable and CachedBlocks expose diagnostics without mutable caches.
 func (e *Engine) NativeAvailable() bool { return e.native != nil }
-func (e *Engine) CachedBlocks() int     { return len(e.blocks) }
+func (e *Engine) CachedBlocks() int {
+	if e.variants != nil {
+		return len(e.variants)
+	}
+	return len(e.blocks)
+}
 
 func (e *Engine) validateCPU(c CPU) error {
 	if e == nil || c == nil || len(c.Registers()) != e.arch.StateWords || c.Retirement() == nil {
@@ -336,10 +521,17 @@ func (e *Engine) validateCPU(c CPU) error {
 }
 
 func (e *Engine) preparePureBlock(c CPU, block *compiledBlock) bool {
+	if block.native && e.native != nil {
+		return true
+	}
 	if block.ops != nil && (e.native == nil || block.attempted || block.visits < e.nativeThreshold(block)) {
 		return true
 	}
 	defer pauseTranslationClock(c)()
+	start := paybackTime{}
+	if e.config.Adaptive {
+		start = paybackNow()
+	}
 	if block.ops == nil {
 		var b emu.Builder
 		// This translation is reachable only through its guarded PC key.
@@ -364,6 +556,7 @@ func (e *Engine) preparePureBlock(c CPU, block *compiledBlock) bool {
 	if e.native != nil && !block.attempted && block.visits >= e.nativeThreshold(block) {
 		block.attempted = true
 		entry, err := e.native.Compile(block.ops, e.arch.StateWords)
+		e.observeCompilation(start, len(block.ops), len(block.instructions))
 		if err != nil {
 			e.Stats.CompileFailures++
 		} else {
@@ -372,6 +565,10 @@ func (e *Engine) preparePureBlock(c CPU, block *compiledBlock) bool {
 			e.Stats.ProfileErrors = e.native.SymbolErrors
 			block.native = true
 			e.Stats.Promotions++
+			if e.config.DynamicCode {
+				block.ops = nil
+				block.prepared = nil
+			}
 		}
 		e.Stats.NativeBytes = e.native.Bytes
 	}

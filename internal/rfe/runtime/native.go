@@ -75,5 +75,8 @@ func (n *Native) Close() error {
 // dispatcher. Once specialized code exists, an unregistered context must use
 // ordinary checked leaves instead. The check is outside generated code.
 func (n *Native) CanLinkMemory(m *MemoryContext) bool {
+	if m == nil || m.Links != nil && !m.Links.Valid() || m.Links.Dynamic() && m.DescriptorMask != m.Links.Mask || !m.Links.Dynamic() && m.DescriptorMask != 0 {
+		return false
+	}
 	return n.codeVersionedContexts == nil || n.codeVersionedContexts[m]
 }

@@ -13,7 +13,16 @@ func (e *Engine) validVersions(c CPU, block *compiledBlock, context CodeStamp) b
 	for _, dependency := range block.dependencies {
 		stamp, err := memory.CodeVersion(dependency.address)
 		e.Stats.VersionChecks++
-		if err != nil || stamp.Identity == nil || stamp != dependency.stamp {
+		if err != nil || stamp.Identity == nil {
+			e.Stats.VersionFaults++
+			return false
+		}
+		if stamp.Identity != dependency.stamp.Identity {
+			e.Stats.VersionIdentityMisses++
+			return false
+		}
+		if stamp.Epoch != dependency.stamp.Epoch {
+			e.Stats.VersionEpochMisses++
 			return false
 		}
 	}

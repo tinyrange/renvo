@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"renvo.dev/internal/rfe/engine"
 	emu "renvo.dev/internal/rfe/runtime"
+	"renvo.dev/internal/rfeabi"
 )
 
 // Resolve checks the current privilege-domain mapping and returns a RAM-relative offset.
@@ -14,6 +15,11 @@ import (
 type Resolve func(address uint64, execute bool) (offset uint64, writable bool, err error)
 
 type RAM struct {
+	proofs           *proofBook
+	tagged           map[*engine.CodeIdentity]*emu.MemoryContext
+	selected         *emu.MemoryContext
+	StopFlag         *uint32
+	ownedWatches     *rfeabi.WriteWatches
 	direct           directMemory
 	Data             []byte
 	Profile          bool // bounded host diagnostics only; no guest semantic effects
@@ -61,6 +67,9 @@ func (m *RAM) domain() int {
 	return 0
 }
 func (m *RAM) checkDomain() {
+	if m.selected != nil {
+		return
+	}
 	domain := m.domain()
 	space := uint64(0)
 	if m.AddressSpace != nil {
@@ -82,17 +91,16 @@ func (m *RAM) Read(a uint64, n int, x bool) (uint64, error) {
 func (m *RAM) Write(a uint64, n int, v uint64) error { return m.WriteGuest(a, n, v) }
 func (m *RAM) ForgetData() {
 	if m.direct != nil {
-		for i := range m.native {
-			for j := range m.native[i] {
-				m.native[i][j].DirectGuest, m.native[i][j].DirectHost, m.native[i][j].DirectSize = 0, 0, 0
-			}
+		for _, c := range m.allContexts() {
+			c.DirectGuest, c.DirectHost, c.DirectSize = 0, 0, 0
 		}
 		m.direct.forget()
 	}
 	if m.filled {
-		for i := range m.native {
-			for j := range m.native[i] {
-				clear(m.native[i][j].Pages[:])
+		for _, c := range m.allContexts() {
+			clear(c.Pages[:])
+			if c.Memory != nil {
+				c.Memory.Clear()
 			}
 		}
 		m.filled = false
@@ -101,6 +109,9 @@ func (m *RAM) ForgetData() {
 	// cache misses. Preserve links across unchanged exception/return mappings.
 }
 func (m *RAM) InvalidateMappings() {
+	if m.proofs != nil {
+		m.proofs.suspend()
+	}
 	m.profileMapping[3]++
 	if m.clock == ^uint64(0) {
 		m.disabled = true
@@ -159,8 +170,11 @@ func (m *RAM) watch(offset uint64, bit byte) {
 	p := offset >> 12
 	if m.watched[p]&bit == 0 {
 		m.watched[p] |= bit
-		// Revoke already published aliases before the next native entry.
-		m.ForgetData()
+		// Precise owned aliases check the live byte mask at every store;
+		// adding a code/table watch does not change their mapping permissions.
+		if m.ownedWatches == nil {
+			m.ForgetData()
+		}
 	}
 }
 
@@ -185,7 +199,14 @@ func (m *RAM) BeforeWrite(offset uint64, n int) {
 		if barriers&1 != 0 {
 			m.profileMapping[1]++
 		}
-		m.InvalidateMappings()
+		if m.proofs != nil {
+			m.proofs.write(offset, n)
+		}
+		if m.ownedWatches != nil {
+			m.invalidateCode()
+		} else {
+			m.InvalidateMappings()
+		}
 		for p := first; p <= last; p++ {
 			if m.watched[p]&1 != 0 {
 				m.pageEpoch[p] = m.clock
@@ -212,8 +233,7 @@ func (m *RAM) CodeVersion(address uint64) (engine.CodeStamp, error) {
 		}
 		return engine.CodeStamp{}, err
 	}
-	m.codeOwners[offset>>12] |= 1 << uint(m.domain())
-	m.watch(offset, 1)
+	m.MarkCode(offset)
 	// Table/ASID changes force execute-checked mapping revalidation, but do
 	// not change the identity/version of untouched physical instruction RAM.
 	page := offset >> 12
@@ -224,8 +244,15 @@ func (m *RAM) NativeContext() *emu.MemoryContext {
 	if !m.usable() {
 		return nil
 	}
-	context := &m.native[m.domain()][m.contextSlot()]
+	context := m.nativeContext()
 	context.Clock = &m.clock
+	context.Stop = m.StopFlag
+	if m.ownedWatches != nil && context.Memory == nil {
+		context.Memory = rfeabi.NewOwnedMemory(m.Data, &m.clock, m.ownedWatches)
+		if m.proofs != nil {
+			context.Memory.SetDecodeEpochs(m.pageEpoch)
+		}
+	}
 	if m.direct != nil && m.domain() == 0 {
 		context.DirectGuest, context.DirectHost, context.DirectSize = m.direct.window()
 	}
@@ -244,7 +271,7 @@ func (m *RAM) NativeRefill(address uint64) {
 	offset, writable, err := m.Resolve(va, false)
 	number := address >> 12
 	if err != nil || offset >= uint64(len(m.Data)) || offset&4095 != address&4095 {
-		m.native[m.domain()][m.contextSlot()].Forget(number)
+		m.nativeContext().Forget(number)
 		if m.direct != nil {
 			m.direct.forgetPage(address)
 		}
@@ -252,7 +279,7 @@ func (m *RAM) NativeRefill(address uint64) {
 	}
 	base := offset &^ uint64(4095)
 	if uint64(len(m.Data))-base < 4096 {
-		m.native[m.domain()][m.contextSlot()].Forget(number)
+		m.nativeContext().Forget(number)
 		if m.direct != nil {
 			m.direct.forgetPage(address)
 		}
@@ -271,7 +298,12 @@ func (m *RAM) NativeRefill(address uint64) {
 		m.direct.refill(address, offset, permissions)
 	}
 	m.filled = true
-	m.native[m.domain()][m.contextSlot()].Fill(number, (*[4096]byte)(m.Data[base:base+4096]), permissions, &m.clock)
+	context := m.NativeContext()
+	if context.Memory != nil {
+		context.Memory.Fill(number, base, permissions)
+	} else {
+		context.Fill(number, (*[4096]byte)(m.Data[base:base+4096]), permissions, &m.clock)
+	}
 }
 
 func (m *RAM) NativeBacking() []byte { return m.Data }

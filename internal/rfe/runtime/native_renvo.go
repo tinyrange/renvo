@@ -23,7 +23,9 @@ func (n *Native) Call(entry int, state []uint64) error {
 func (n *Native) CallBatch(state []uint64, limit int, next func(int) (int, bool, error)) (int, error) {
 	return 0, fmt.Errorf("native mapping unavailable")
 }
-func (n *Native) Close() error { return nil }
+func (n *Native) Close() error      { return nil }
+func (n *Native) AllowGrowth()      {}
+func (n *Native) Release(entry int) {}
 
 func (n *Native) CompileMemory(ops []Op, words int) (int, error) {
 	return 0, fmt.Errorf("native mapping unavailable")

@@ -47,6 +47,17 @@ func (a *CodeArena) NameEntry(entry int, name string) error {
 	if length < 1 || length > a.used-entry {
 		return fmt.Errorf("invalid native symbol extent")
 	}
+	if a.named == nil {
+		a.named = make(map[int]string)
+	}
+	a.named[entry] = name
+	if err := a.publishSymbol(address, length, name); err != nil {
+		return err
+	}
+	return a.symbolError
+}
+
+func (a *CodeArena) publishSymbol(address uintptr, length int, name string) error {
 	if a.symbols != nil {
 		if _, err := fmt.Fprintf(a.symbols, "%x %x %s\n", address, length, name); err != nil {
 			return err

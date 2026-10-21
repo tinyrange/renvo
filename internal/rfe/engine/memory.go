@@ -7,23 +7,39 @@ import (
 
 func (e *Engine) stepMemory(c CPU, block *compiledBlock) error {
 	memory, ok := c.MemoryBus().(NativeMemory)
-	if !ok || e.native == nil || block.visits < e.nativeThreshold(block) {
-		return e.interpret(c)
+	if !ok || e.native == nil || !block.native && block.visits < e.nativeThreshold(block) {
+		return e.executeCached(c, block.instructions[0])
 	}
 	context := memory.NativeContext()
 	if context == nil {
-		return e.interpret(c)
+		return e.executeCached(c, block.instructions[0])
 	}
 	if !e.prepareMemoryBlock(c, block) {
-		return e.interpret(c)
+		return e.executeCached(c, block.instructions[0])
 	}
 	if !block.native {
-		return e.interpret(c)
+		return e.executeCached(c, block.instructions[0])
+	}
+	if len(block.instructions) > 16 {
+		start := paybackTime{}
+		if e.config.Adaptive {
+			start = paybackNow()
+		}
+		before := *c.Retirement()
+		err := e.runLinked(c, uint64(len(block.instructions)), block, memory, context, block.context, 1)
+		e.observeLeaf(block, start, *c.Retirement()-before)
+		return err
+	}
+	e.publishLeaf(c, block, context)
+	start := paybackTime{}
+	if e.config.Adaptive {
+		start = paybackNow()
 	}
 	err := e.native.CallMemory(block.entry, c.Registers(), context)
 	if err != nil {
 		return err
 	}
+	e.observeLeaf(block, start, context.Retired)
 	return e.accountMemory(c, block, memory, context)
 }
 
@@ -46,8 +62,18 @@ func (e *Engine) accountMemory(c CPU, block *compiledBlock, memory NativeMemory,
 		if context.Status == 1 {
 			memory.NativeRefill(context.Address)
 		}
+		// A trusted code-versioned owner exits before executable/PTE stores.
+		// A native prefix cannot have changed the remaining opcode. Recheck
+		// after refill too, since architectural mapping metadata can alias code.
+		if owner, ok := memory.(CodeVersionedNativeMemory); ok && owner.NativeCodeVersions() && owner.CodeContext() == block.context && (block.proof == nil || block.proof.Valid()) && retired < uint64(len(block.instructions)) {
+			ins := block.instructions[retired]
+			if c.Registers()[e.arch.PC] == ins.PC {
+				return e.executeCached(c, ins)
+			}
+		}
 		return e.interpret(c)
 	}
+	block.successor, block.successorSeen = c.Registers()[e.arch.PC], true
 	e.observeEdge(block.instructions[len(block.instructions)-1], c.Registers()[e.arch.PC])
 	return nil
 }
@@ -57,9 +83,14 @@ func (e *Engine) prepareMemoryBlock(c CPU, block *compiledBlock) bool {
 		return true
 	}
 	defer pauseTranslationClock(c)()
+	start := paybackTime{}
+	if e.config.Adaptive {
+		start = paybackNow()
+	}
 	if !block.attempted {
 		block.attempted = true
-		var b emu.Builder
+		wide := len(block.instructions) > 16
+		b := emu.Builder{MemoryInstructionProgress: wide}
 		pc := c.Registers()[e.arch.PC]
 		b.Store(e.arch.PC, b.Constant(pc))
 		for i, ins := range block.instructions {
@@ -70,8 +101,22 @@ func (e *Engine) prepareMemoryBlock(c CPU, block *compiledBlock) bool {
 			}
 		}
 		b.Checkpoint(e.arch.StateWords, len(block.instructions))
+		if wide {
+			b.LoopContinue(b.Constant(0))
+		}
 		block.ops = b.FinishMemory(e.arch.StateWords)
-		entry, err := e.native.CompileMemory(block.ops, e.arch.StateWords)
+		var entry int
+		var err error
+		if wide {
+			if owner, ok := c.MemoryBus().(CodeVersionedNativeMemory); ok && owner.NativeCodeVersions() {
+				entry, err = e.native.CompileCodeVersionedLoop(block.ops, e.arch.StateWords, len(block.instructions), owner.NativeContext())
+			} else {
+				entry, err = e.native.CompileLoop(block.ops, e.arch.StateWords, len(block.instructions))
+			}
+		} else {
+			entry, err = e.native.CompileMemory(block.ops, e.arch.StateWords)
+		}
+		e.observeCompilation(start, len(block.ops), len(block.instructions))
 		if err != nil {
 			e.Stats.CompileFailures++
 		} else {
@@ -79,6 +124,15 @@ func (e *Engine) prepareMemoryBlock(c CPU, block *compiledBlock) bool {
 			_ = e.native.NameEntry(entry, fmt.Sprintf("%s_%x_memory_%d_ops", e.arch.Name, pc, len(block.ops)))
 			e.Stats.ProfileErrors = e.native.SymbolErrors
 			e.Stats.Promotions++
+			if e.config.DynamicCode {
+				block.ops = nil
+				block.prepared = nil
+			}
+			if wide {
+				block.regionEntry, block.regionInstructions, block.region = entry, len(block.instructions), true
+				block.regionProof = block.proof
+				block.regionAttempted, block.regionGeneration = true, e.Stats.Promotions
+			}
 		}
 		e.Stats.NativeBytes = e.native.Bytes
 	}

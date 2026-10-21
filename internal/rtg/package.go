@@ -608,10 +608,7 @@ func protectVirtualFunctionBindings(source []byte, tokens []Token, protected []b
 		bodyStart := syntax.TokenStart(file.Tokens[fn.BodyStart]) - len(prefix)
 		bodyEnd := syntax.TokenEnd(file.Tokens[fn.BodyEnd-1]) - len(prefix)
 		protectVirtualLocalBindings(source, tokens, protected, bodyStart, bodyEnd, blockEnds)
-		for at := 0; at < len(tokens) && tokens[at].Kind != TokenEOF; at++ {
-			if tokens[at].Start < bodyStart || tokens[at].End > bodyEnd {
-				continue
-			}
+		for at := virtualTokenLowerBound(tokens, bodyStart); at < len(tokens) && tokens[at].Kind != TokenEOF && tokens[at].End <= bodyEnd; at++ {
 			if stringIndex(bindings, tokenText(source, tokens[at])) >= 0 {
 				protected[at] = true
 			}
@@ -621,10 +618,7 @@ func protectVirtualFunctionBindings(source []byte, tokens []Token, protected []b
 
 func protectVirtualLocalBindings(source []byte, tokens []Token, protected []bool,
 	bodyStart int, bodyEnd int, blockEnds []int) {
-	for at := 0; at < len(tokens) && tokens[at].Kind != TokenEOF; at++ {
-		if tokens[at].Start < bodyStart || tokens[at].End > bodyEnd {
-			continue
-		}
+	for at := virtualTokenLowerBound(tokens, bodyStart); at < len(tokens) && tokens[at].Kind != TokenEOF && tokens[at].End <= bodyEnd; at++ {
 		text := tokenText(source, tokens[at])
 		if text == "var" || text == "const" {
 			name := at + 1
@@ -725,12 +719,25 @@ func appendVirtualBindings(bindings []string, file syntax.File, start int, end i
 	return bindings
 }
 
-func protectVirtualSyntaxToken(tokens []Token, protected []bool, start int) {
-	for i := 0; i < len(tokens) && tokens[i].Kind != TokenEOF; i++ {
-		if tokens[i].Start == start {
-			protected[i] = true
-			return
+// Scanner spans are monotonically ordered. A function body or signature
+// binding should not rescan the complete file, including all preceding bodies.
+func virtualTokenLowerBound(tokens []Token, start int) int {
+	low, high := 0, len(tokens)
+	for low < high {
+		middle := low + (high-low)/2
+		if tokens[middle].Start < start {
+			low = middle + 1
+		} else {
+			high = middle
 		}
+	}
+	return low
+}
+
+func protectVirtualSyntaxToken(tokens []Token, protected []bool, start int) {
+	i := virtualTokenLowerBound(tokens, start)
+	if i < len(tokens) && tokens[i].Kind != TokenEOF && tokens[i].Start == start {
+		protected[i] = true
 	}
 }
 

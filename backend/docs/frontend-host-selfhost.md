@@ -32,7 +32,7 @@ Build-specific code is limited to environment boundaries:
 - `internal/arena` is harmless on the Go host. The RENVO runtime recognizes
   its intrinsic calls and uses them to reclaim transient compiler storage.
 - Packages under `std` may use host-library shims or target runtime calls.
-  Their common public API is checked by `std/api_compat_test.go`; graphics,
+  Their common public API is checked by `internal/testfront/stdlibtest/api_compat_test.go`; graphics,
   filesystem, process, and unsafe implementations remain platform boundaries.
 - `renvo_bundle` controls whether standard-library source is embedded in the
   bootstrap or frontend. It changes packaging, not compiler semantics.

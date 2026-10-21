@@ -66,9 +66,16 @@ func ReadFile(name string) ([]byte, error) {
 		return nil, errIO()
 	}
 	out := make([]byte, 0, 4096)
-	buf := make([]byte, 4096)
 	for {
-		n := read(fd, buf, -1)
+		if len(out) == cap(out) {
+			// Ask append to grow once, then let read fill the spare backing
+			// directly instead of copying a separate buffer after every read.
+			out = append(out, 0)
+			out = out[:len(out)-1]
+		}
+		used := len(out)
+		buf := out[:cap(out)]
+		n := read(fd, buf[used:], -1)
 		if n < 0 {
 			close(fd)
 			return nil, errIO()
@@ -76,7 +83,7 @@ func ReadFile(name string) ([]byte, error) {
 		if n == 0 {
 			break
 		}
-		out = append(out, buf[:n]...)
+		out = buf[:used+n]
 	}
 	close(fd)
 	return out, nil

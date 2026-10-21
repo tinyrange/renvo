@@ -1,6 +1,6 @@
 //go:build !renvo
 
-package std_test
+package stdlibtest
 
 import (
 	"bytes"

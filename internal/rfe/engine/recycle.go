@@ -6,6 +6,18 @@ import emu "renvo.dev/internal/rfe/runtime"
 // callback. Clear all rooted links before closing an append-only arena. The
 // replacement has exactly the original byte cap; no executable entries survive.
 func (e *Engine) recycle(c CPU) error {
+	if e.config.DynamicCode {
+		if e.native != nil {
+			for _, entry := range e.pendingReleases {
+				e.native.Release(entry)
+			}
+		}
+		e.pendingReleases = e.pendingReleases[:0]
+		if e.native != nil {
+			e.Stats.NativeBytes = e.native.Bytes
+		}
+		return nil
+	}
 	if !e.config.RecycleNative || e.native == nil || e.native.Bytes < e.config.NativeBytes*7/8 {
 		return nil
 	}
@@ -20,6 +32,7 @@ func (e *Engine) recycle(c CPU) error {
 	}
 	old := e.native
 	e.native = nil
+	clear(e.variants)
 	clear(e.blocks)
 	clear(e.cacheOrder)
 	e.cacheNext = 0

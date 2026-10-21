@@ -35,6 +35,9 @@ func NewDirect(size int, active func() bool, resolve Resolve) (*RAM, error) {
 // Close revokes every native view before releasing physical RAM. It is an
 // explicit end-of-memory lifetime boundary, not an interpreter/JIT toggle.
 func (m *RAM) Close() error {
+	if m.proofs != nil {
+		m.proofs.clear()
+	}
 	m.disabled = true
 	m.ForgetData()
 	if m.direct == nil {

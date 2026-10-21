@@ -310,12 +310,7 @@ func main() {
 	if err := os.WriteFile(filepath.Join(appDir, "main.go"), []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	backend := filepath.Join(t.TempDir(), "renvo-backend")
-	build := exec.Command("go", "build", "-o", backend, "./backend")
-	build.Dir = repoRoot
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("backend build failed: %v\n%s", err, output)
-	}
+	backend := driverTestBackend(t)
 	oldDir, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)

@@ -44,7 +44,7 @@ func TestPreparedTargetFullTagsCountsOffsetsAndOwners(t *testing.T) {
 	m := new(MemoryContext)
 	m.ClaimLinks(n)
 	for _, count := range []uint64{0, 2, 17, ^uint64(0), 1} {
-		m.Blocks[0] = NativeLink{PC: 0, Entry: uint64(entry), Instructions: count}
+		m.Blocks[0] = NativeLink{PC: 0, Entry: uint64(entry), Instructions: count, Generation: m.LinkEpoch}
 		state := []uint64{0, 0, 0}
 		if err = n.CallLinked(state, m, 64); err != nil {
 			t.Fatal(err)
@@ -58,7 +58,7 @@ func TestPreparedTargetFullTagsCountsOffsetsAndOwners(t *testing.T) {
 		}
 	}
 	for _, offset := range []uint64{uint64(entry + 1), uint64(entry + 16), ^uint64(0)} {
-		m.Blocks[0] = NativeLink{PC: 0, Entry: offset, Instructions: 1}
+		m.Blocks[0] = NativeLink{PC: 0, Entry: offset, Instructions: 1, Generation: m.LinkEpoch}
 		state := []uint64{0, 0, 0}
 		if err = n.CallLinked(state, m, 64); err != nil || m.Total != 0 || state[0] != 0 {
 			t.Fatal("forged entry", offset, err)

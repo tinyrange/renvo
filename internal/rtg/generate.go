@@ -19,6 +19,8 @@ func GenerateFixedBackend(resolved ResolveResult, targetName string) GenerateRes
 		copy(diagnostics, resolved.Diagnostics)
 		return GenerateResult{Diagnostics: diagnostics}
 	}
+	// All derived indices are private to this immutable generation input.
+	resolved.Document.generation = &generationIndex{}
 	target, ok := lookupResolvedTarget(resolved, targetName)
 	if !ok {
 		return GenerateResult{Diagnostics: []Diagnostic{{
@@ -65,6 +67,8 @@ func generateArchitectureBackend(resolved ResolveResult, archName string, packag
 		copy(diagnostics, resolved.Diagnostics)
 		return GenerateResult{Diagnostics: diagnostics}
 	}
+	// All derived indices are private to this immutable generation input.
+	resolved.Document.generation = &generationIndex{}
 	arch, ok := resolved.Document.Declaration(DeclArch, archName)
 	if !ok {
 		return GenerateResult{Diagnostics: []Diagnostic{{
@@ -126,6 +130,8 @@ func generatePreparedBackendWithRoots(resolved ResolveResult, targetName string,
 		copy(diagnostics, resolved.Diagnostics)
 		return GenerateResult{Diagnostics: diagnostics}
 	}
+	// All derived indices are private to this immutable generation input.
+	resolved.Document.generation = &generationIndex{}
 	target, ok := lookupResolvedTarget(resolved, targetName)
 	if !ok {
 		return GenerateResult{Diagnostics: []Diagnostic{{
@@ -2150,7 +2156,14 @@ func dedentGoSource(source []byte) []byte {
 }
 
 func embeddedGoNames(document Document) []string {
-	return collectEmbeddedGoNames(document, false)
+	if document.generation == nil {
+		return collectEmbeddedGoNames(document, false)
+	}
+	if !document.generation.namesReady {
+		document.generation.names = collectEmbeddedGoNames(document, false)
+		document.generation.namesReady = true
+	}
+	return document.generation.names
 }
 
 func embeddedGoFunctionNames(document Document) []string {

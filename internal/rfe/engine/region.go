@@ -12,7 +12,16 @@ type regionPart struct {
 	block *compiledBlock
 }
 
+func cloneRegionParts(parts []regionPart) []regionPart {
+	out := make([]regionPart, len(parts))
+	copy(out, parts)
+	return out
+}
+
 func (e *Engine) regionParts(c CPU, first *compiledBlock) []regionPart {
+	if e.config.NaturalBlocks {
+		return e.profileRegionParts(c, first)
+	}
 	if first.instructions[0].ScheduleBoundary {
 		return nil
 	}
@@ -32,130 +41,173 @@ func (e *Engine) regionParts(c CPU, first *compiledBlock) []regionPart {
 	if stamp.Identity == nil || first.context != stamp || len(first.dependencies) == 0 {
 		return nil
 	}
-	parts := []regionPart{{root, first}}
-	seen := map[uint64]bool{root: true}
-	// Explore both legal direct edges, but cap cold discovery independently of
-	// native execution. A failed taken edge must not hide a fallthrough cycle.
-	attempts := 0
-	best := []regionPart(nil)
-	bestScore := float64(0)
-	bestCycle := []regionPart(nil)
-	bestCycleScore := float64(0)
-	// A region avoids a dispatcher transition per reached block, not per
-	// guest instruction. Weight each additional block by observed reach;
-	// instruction count remains solely the unchanged static admission bound.
-	var search func(int, float64, float64) []regionPart
-	search = func(total int, score, probability float64) []regionPart {
-		if len(parts) > 1 && score > bestScore {
-			best = append([]regionPart(nil), parts...)
-			bestScore = score
-		}
-		current := parts[len(parts)-1]
-		if len(current.block.instructions) == 0 || !current.block.instructions[len(current.block.instructions)-1].Flow.Known {
-			return nil
-		}
-		flow := current.block.instructions[len(current.block.instructions)-1].Flow
-		next, alternate, conditional := flow.Next, flow.Alternate, flow.Conditional
-		targets := []uint64{next}
-		if conditional && alternate != next {
-			// Prefer the conventional loop back edge, otherwise fallthrough.
-			// This is only discovery order: every selected edge is still guarded.
-			if next > current.pc && alternate < next {
-				targets = []uint64{alternate, next}
-			} else {
-				targets = append(targets, alternate)
-			}
-		}
-		counts := e.edgeCounts[current.block.instructions[len(current.block.instructions)-1].PC]
-		if conditional && counts[0]+counts[1] != 0 {
-			if counts[1] > counts[0] {
-				targets = []uint64{alternate, next}
-			} else {
-				targets = []uint64{next, alternate}
-			}
-		}
-		for _, target := range targets {
-			attempts++
-			if attempts > 256 {
-				return nil
-			}
-			reach := probability
-			if conditional && counts[0]+counts[1] != 0 {
-				edge := 0
-				if target == alternate {
-					edge = 1
-				}
-				reach *= float64(counts[edge]+1) / float64(counts[0]+counts[1]+2)
-			}
-			if target == root {
-				// Compare expected block visits before the first side exit, including
-				// repeated iterations. A rare backedge must not defeat a hot
-				// acyclic trace merely because it is a cycle.
-				if reach == 1 {
-					return append([]regionPart(nil), parts...)
-				}
-				cycleScore := score / (1 - reach)
-				if cycleScore > bestCycleScore {
-					bestCycle = append([]regionPart(nil), parts...)
-					bestCycleScore = cycleScore
-				}
-				continue
-			}
-			candidate := e.blocks[target]
-			if seen[target] || candidate == nil || !candidate.native || candidate.context != stamp || len(candidate.dependencies) == 0 || len(candidate.instructions) == 0 || candidate.instructions[0].ScheduleBoundary || total+len(candidate.instructions) > e.config.MaxRegionInstructions {
-				continue
-			}
-			seen[target] = true
-			parts = append(parts, regionPart{target, candidate})
-			result := search(total+len(candidate.instructions), score+reach, reach)
-			parts = parts[:len(parts)-1]
-			delete(seen, target)
-			if len(result) != 0 {
-				return result
-			}
-		}
-		return nil
-	}
-	if cycle := search(len(first.instructions), 1, 1); len(cycle) != 0 {
+	s := regionSearch{engine: e, root: root, stamp: stamp,
+		parts: []regionPart{{root, first}}, seen: map[uint64]bool{root: true}}
+
+	if cycle := s.search(len(first.instructions), 1, 1); len(cycle) != 0 {
 		return cycle
 	}
-	if bestCycleScore >= bestScore && len(bestCycle) != 0 {
-		return bestCycle
+	if s.bestCycleScore >= s.bestScore && len(s.bestCycle) != 0 {
+		return s.bestCycle
 	}
-	return best
+	return s.best
+}
+
+type regionSearch struct {
+	engine                    *Engine
+	root                      uint64
+	stamp                     CodeStamp
+	parts, best, bestCycle    []regionPart
+	seen                      map[uint64]bool
+	attempts                  int
+	bestScore, bestCycleScore float64
+}
+
+// Explore both legal direct edges, with cold discovery bounded independently
+// of native execution. Score expected block visits, not guest instructions.
+func (s *regionSearch) search(total int, score, probability float64) []regionPart {
+	if len(s.parts) > 1 && score > s.bestScore {
+		s.best = cloneRegionParts(s.parts)
+		s.bestScore = score
+	}
+	current := s.parts[len(s.parts)-1]
+	if len(current.block.instructions) == 0 || !current.block.instructions[len(current.block.instructions)-1].Flow.Known {
+		return nil
+	}
+	flow := current.block.instructions[len(current.block.instructions)-1].Flow
+	next, alternate, conditional := flow.Next, flow.Alternate, flow.Conditional
+	targets := []uint64{next}
+	if conditional && alternate != next {
+		// Prefer the conventional loop back edge, otherwise fallthrough.
+		// This is only discovery order: every selected edge is still guarded.
+		if next > current.pc && alternate < next {
+			targets = []uint64{alternate, next}
+		} else {
+			targets = append(targets, alternate)
+		}
+	}
+	counts := s.engine.edgeCounts[current.block.instructions[len(current.block.instructions)-1].PC]
+	if conditional && counts[0]+counts[1] != 0 {
+		if counts[1] > counts[0] {
+			targets = []uint64{alternate, next}
+		} else {
+			targets = []uint64{next, alternate}
+		}
+	}
+	for _, target := range targets {
+		s.attempts++
+		if s.attempts > 256 {
+			return nil
+		}
+		reach := probability
+		if conditional && counts[0]+counts[1] != 0 {
+			edge := 0
+			if target == alternate {
+				edge = 1
+			}
+			reach *= float64(counts[edge]+1) / float64(counts[0]+counts[1]+2)
+		}
+		if target == s.root {
+			// Compare expected block visits before the first side exit, including
+			// repeated iterations. A rare backedge must not defeat a hot
+			// acyclic trace merely because it is a cycle.
+			if reach == 1 {
+				return cloneRegionParts(s.parts)
+			}
+			cycleScore := score / (1 - reach)
+			if cycleScore > s.bestCycleScore {
+				s.bestCycle = cloneRegionParts(s.parts)
+				s.bestCycleScore = cycleScore
+			}
+			continue
+		}
+		candidate := s.engine.cachedBlock(target)
+		if s.seen[target] || candidate == nil || !candidate.native || candidate.context != s.stamp || len(candidate.dependencies) == 0 || len(candidate.instructions) == 0 || candidate.instructions[0].ScheduleBoundary || total+len(candidate.instructions) > s.engine.config.MaxRegionInstructions {
+			continue
+		}
+		s.seen[target] = true
+		s.parts = append(s.parts, regionPart{target, candidate})
+		result := s.search(total+len(candidate.instructions), score+reach, reach)
+		s.parts = s.parts[:len(s.parts)-1]
+		delete(s.seen, target)
+		if len(result) != 0 {
+			return result
+		}
+	}
+	return nil
 }
 
 func (e *Engine) prepareRegion(c CPU, block *compiledBlock) {
-	if !block.native || e.native == nil || block.regionAttempted && block.regionGeneration == e.Stats.Promotions {
+	if block.visits < e.config.RegionThreshold || !block.native || e.native == nil || block.regionAttempted && block.regionGeneration == e.Stats.Promotions {
 		return
 	}
 	defer pauseTranslationClock(c)()
-	block.regionAttempted = true
-	block.regionGeneration = e.Stats.Promotions
 	parts := e.regionParts(c, block)
 	if len(parts) == 0 {
+		block.regionAttempted = true
+		block.regionGeneration = e.Stats.Promotions
 		return
 	}
 	count := 0
 	for _, part := range parts {
 		count += len(part.block.instructions)
 	}
-	if count > e.config.MaxRegionInstructions || block.region && count <= block.regionInstructions {
+	if !e.config.NaturalBlocks && count > e.config.MaxRegionInstructions || block.region && count <= block.regionInstructions {
+		block.regionAttempted = true
+		block.regionGeneration = e.Stats.Promotions
 		return
 	}
-	b := emu.Builder{MemoryInstructionProgress: true}
+	if !e.regionPays(block, count) {
+		return
+	}
+	block.regionAttempted = true
+	block.regionGeneration = e.Stats.Promotions
+	start := paybackTime{}
+	if e.config.Adaptive {
+		start = paybackNow()
+	}
 	pc := c.Registers()[e.arch.PC]
+	flow := parts[len(parts)-1].block.instructions[len(parts[len(parts)-1].block.instructions)-1].Flow
+	oneShot := !flow.Known || flow.Next != pc && (!flow.Conditional || flow.Alternate != pc)
+	if e.config.LoopRegionsOnly && oneShot {
+		return
+	}
+	var regionProof CodeProof
+	installed := false
+	if owner, ok := c.MemoryBus().(CodeProofMemory); ok && owner.CodeProofsEnabled() {
+		mutation := owner.CodeMutation()
+		var ranges []CodeRange
+		for _, part := range parts {
+			if part.block.proof == nil || !part.block.proof.Valid() {
+				return
+			}
+			ranges = append(ranges, codeRanges(part.block.instructions)...)
+		}
+		regionProof = owner.ProveCode(ranges, mutation)
+		if regionProof == nil {
+			return
+		}
+		defer func() {
+			if !installed {
+				regionProof.Close()
+			}
+		}()
+	}
+	b := emu.Builder{MemoryInstructionProgress: true}
 	b.Store(e.arch.PC, b.Constant(pc))
 	completed := 0
 	prefix := [17]uint8{}
 	for index, part := range parts {
-		for i, ins := range part.block.instructions {
+		for _, ins := range part.block.instructions {
 			if !e.arch.Lower(&b, ins, completed) {
 				return
 			}
 			completed++
 			if completed < len(prefix) {
-				prefix[completed] = prefix[completed-1] + part.block.memoryPrefix[i+1] - part.block.memoryPrefix[i]
+				prefix[completed] = prefix[completed-1]
+				if ins.Memory {
+					prefix[completed]++
+				}
 			}
 		}
 		if index+1 < len(parts) {
@@ -170,9 +222,6 @@ func (e *Engine) prepareRegion(c CPU, block *compiledBlock) {
 	// Direct cycles stay in the bounded body. An unknown indirect successor
 	// executes exactly once and returns to the same checked dispatcher, even
 	// when its dynamic target happens to equal the root; no target is guessed.
-	lastPart := parts[len(parts)-1]
-	flow := lastPart.block.instructions[len(lastPart.block.instructions)-1].Flow
-	oneShot := !flow.Known || flow.Next != pc && (!flow.Conditional || flow.Alternate != pc)
 	if oneShot {
 		b.LoopContinue(b.Constant(0))
 	} else {
@@ -195,28 +244,39 @@ func (e *Engine) prepareRegion(c CPU, block *compiledBlock) {
 	} else {
 		entry, err = e.native.CompileLoopMode(ops, e.arch.StateWords, count, direct)
 	}
+	e.observeCompilation(start, len(ops), count)
 	if err != nil {
 		e.Stats.CompileFailures++
 		return
 	}
-	// Validation of this entry must cover all constituent pages, not just its
-	// original block. An executable mutation clears links before revalidation.
-	dependencies := append([]codeDependency(nil), block.dependencies...)
-	for _, part := range parts[1:] {
-		for _, dependency := range part.block.dependencies {
-			found := false
-			for _, old := range dependencies {
-				if old.address == dependency.address {
-					found = true
-					break
+	if regionProof == nil {
+		// Validation of this entry must cover all constituent pages, not just its
+		// original block. An executable mutation clears links before revalidation.
+		dependencies := append([]codeDependency(nil), block.dependencies...)
+		for _, part := range parts[1:] {
+			for _, dependency := range part.block.dependencies {
+				found := false
+				for _, old := range dependencies {
+					if old.address == dependency.address {
+						found = true
+						break
+					}
+				}
+				if !found {
+					dependencies = append(dependencies, dependency)
 				}
 			}
-			if !found {
-				dependencies = append(dependencies, dependency)
-			}
 		}
+		block.dependencies = dependencies
 	}
-	block.dependencies = dependencies
+	if block.regionProof != nil && block.regionProof != block.proof {
+		block.regionProof.Close()
+	}
+	block.regionProof = regionProof
+	installed = true
+	if e.config.DynamicCode && block.region && block.regionEntry != block.entry {
+		e.pendingReleases = append(e.pendingReleases, block.regionEntry)
+	}
 	block.regionEntry, block.regionInstructions, block.region = entry, count, true
 	block.regionPrefix = prefix
 	e.Stats.Regions++
@@ -241,11 +301,51 @@ func (e *Engine) observeEdge(ins Instruction, next uint64) {
 		e.edgeCounts = map[uint64][2]uint64{}
 	}
 	counts, exists := e.edgeCounts[ins.PC]
-	if !exists && len(e.edgeCounts) >= e.config.MaxBlocks {
+	if !exists && !e.config.DynamicCode && len(e.edgeCounts) >= e.config.MaxBlocks {
 		return
 	}
 	if counts[0]+counts[1] < 65536 {
 		counts[edge]++
 		e.edgeCounts[ins.PC] = counts
+	}
+}
+
+// Follow the observed hot edge once through the resident graph. There is no
+// exponential cold DFS or attempt quota. The finite working set, guarded side
+// exits and first repeated node define the trace's natural extent.
+func (e *Engine) profileRegionParts(c CPU, first *compiledBlock) []regionPart {
+	if len(first.instructions) == 0 || first.instructions[0].ScheduleBoundary {
+		return nil
+	}
+	root := c.Registers()[e.arch.PC]
+	stamp := first.context
+	parts := []regionPart{{root, first}}
+	seen := map[uint64]bool{root: true}
+	for {
+		current := parts[len(parts)-1]
+		ins := current.block.instructions[len(current.block.instructions)-1]
+		flow := ins.Flow
+		if !flow.Known {
+			return parts
+		}
+		target := flow.Next
+		if flow.Conditional {
+			counts := e.edgeCounts[ins.PC]
+			if counts[1] > counts[0] {
+				target = flow.Alternate
+			}
+			if counts[0]+counts[1] == 0 && flow.Alternate < target {
+				target = flow.Alternate
+			}
+		}
+		if seen[target] {
+			return parts
+		}
+		next := e.cachedBlock(target)
+		if next == nil || !next.native || next.proof != nil && !next.proof.Valid() || next.context != stamp || len(next.dependencies) == 0 || len(next.instructions) == 0 || next.instructions[0].ScheduleBoundary {
+			return parts
+		}
+		seen[target] = true
+		parts = append(parts, regionPart{target, next})
 	}
 }

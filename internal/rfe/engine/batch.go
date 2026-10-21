@@ -30,13 +30,25 @@ func (e *Engine) run(c CPU, remaining uint64, quanta int) error {
 		return e.Step(c, remaining)
 	}
 	first := e.block(c)
-	if first == nil || !first.native || first.instructions[0].ScheduleBoundary || uint64(len(first.instructions)) > remaining {
+	if first == nil || !first.native || first.visits < e.config.RegionThreshold || first.visits < first.sessionRetry || e.config.Adaptive && first.sessionDebt != 0 || first.instructions[0].ScheduleBoundary || uint64(len(first.instructions)) > remaining {
 		return e.stepBlock(c, remaining, first)
+	}
+	if e.config.LoopRegionsOnly {
+		e.prepareRegion(c, first)
+		if !first.region {
+			return e.stepBlock(c, remaining, first)
+		}
 	}
 	if memory, ok := c.MemoryBus().(NativeMemory); ok {
 		if context := memory.NativeContext(); context != nil {
+			if first.proof != nil {
+				e.claimCodeLinks(context, first.context, true)
+			}
 			stamp := first.context // block() just validated this context in the same thread
-			if stamp.Identity != nil {
+			if stamp.Identity != nil || len(first.instructions) > 16 {
+				if !e.linkedWorkReady(first, context) {
+					return e.stepBlock(c, remaining, first)
+				}
 				return e.runLinked(c, remaining, first, memory, context, stamp, quanta)
 			}
 		}
@@ -91,7 +103,7 @@ func (e *Engine) run(c CPU, remaining uint64, quanta int) error {
 				}
 				continue
 			}
-			if !block.native || block.effects && context == nil {
+			if !block.native || len(block.instructions) > 16 || block.effects && context == nil {
 				return 0, false, nil
 			}
 			block.visits++

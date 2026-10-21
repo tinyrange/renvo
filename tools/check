@@ -41,8 +41,11 @@ check_format() {
 
 check_tracked_packages() {
 	local package_patterns=(
+		# Start the long suites as soon as their dependencies are built, rather
+		# than leaving them behind the many short internal package binaries.
+		./internal/rtg ./internal/backendjit
 		. ./driver
-		./internal/... ./std/... ./cmd/...
+		./internal/... ./rfe/... ./std/... ./cmd/...
 		./backend/unit ./backend/target ./backend/bringup
 		./backend/omnibus/... ./backend/cmd/...
 	)

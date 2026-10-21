@@ -420,7 +420,7 @@ func (b *Builder) Finish(words int) []Op {
 	return out
 }
 func Validate(ops []Op, words int) error {
-	if words < 1 || words > 256 || len(ops) == 0 || len(ops) > 2048 {
+	if words < 1 || words > 256 || len(ops) == 0 {
 		return fmt.Errorf("invalid block dimensions")
 	}
 	for i, o := range ops {

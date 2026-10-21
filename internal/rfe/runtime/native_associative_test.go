@@ -144,6 +144,7 @@ func TestNativeSessionAdmissionIsFresh(t *testing.T) {
 		case "zero-hole":
 			record := *m.LookupLink(0)
 			m.ClearLinks()
+			record.Generation = m.LinkEpoch // republish into a different live way
 			m.Blocks[768] = record
 		}
 		// Public data cannot grant authority, even if it resembles a past token.

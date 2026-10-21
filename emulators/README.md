@@ -11,6 +11,7 @@ files and do not require separately maintained emulator Go packages.
 | `aarch64.rfe` | A64 integer CPU with interpreter, IR and native tiers |
 | `linux-arm64-user.rfe` | Static-ELF Linux AArch64 personality; requires `aarch64` |
 | `amd64.rfe` | Scalar x86-64 integer CPU with interpreter, IR and native tiers |
+| `x86.rfe` | Experimental multimode PC variant (16/32/64-bit decode), importable as `renvo.dev/rfe/x86`; native 16/32/64-bit PC tiering with architectural slow paths, incomplete x87/system support |
 | `linux-amd64-user.rfe` | Static-ELF Linux x86-64 personality; requires `amd64` |
 | `pdp11-machine.rfe` | PDP-11 machine, console, clock and RK05 disks; requires `pdp11` |
 
