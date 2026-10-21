@@ -105,7 +105,7 @@ type Document struct {
 	backendFunctions        []embeddedFunction
 	backendFunctionsIndexed bool
 
-	// Private to one generation helper invocation, never retained in a parsed
+	// Private to one immutable generation invocation, never retained in a parsed
 	// or resolved document whose declarations callers may subsequently edit.
 	generation *generationIndex
 }

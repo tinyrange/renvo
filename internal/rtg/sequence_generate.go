@@ -153,7 +153,9 @@ func appendArchitectureSequences(out []byte, document Document, arch Declaration
 	nativeEmitter bool, exposeExports bool, excludeExports bool, selected []string) []byte {
 	// The document is unchanged throughout this helper, including all nested
 	// rewrites. Share its derived lookups only within this invocation.
-	document.generation = &generationIndex{}
+	if document.generation == nil {
+		document.generation = &generationIndex{}
+	}
 	sequences := architectureSequences(arch)
 	exports := architectureExports(arch)
 	names := embeddedGoNames(document)

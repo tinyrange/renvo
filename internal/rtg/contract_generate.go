@@ -18,7 +18,9 @@ func appendDirectEmitterBindings(out []byte, document Document, arch Declaration
 	if len(bindings) == 0 {
 		return out
 	}
-	document.generation = &generationIndex{}
+	if document.generation == nil {
+		document.generation = &generationIndex{}
+	}
 	prefix := "rtg" + exportedName(document.Unit)
 	exports := architectureExports(arch)
 	for operation := 0; operation < len(directEmitterV1); operation++ {

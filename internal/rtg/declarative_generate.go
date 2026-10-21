@@ -576,6 +576,13 @@ func findEmbeddedFunctionKind(document Document, name string, kind string) (embe
 	if kind == "backend" && document.backendFunctionsIndexed {
 		return indexedEmbeddedFunction(document.backendFunctions, name)
 	}
+	if kind == "backend" && document.generation != nil {
+		if !document.generation.functionsReady {
+			document.generation.functions = indexEmbeddedFunctions(document, kind)
+			document.generation.functionsReady = true
+		}
+		return indexedEmbeddedFunction(document.generation.functions, name)
+	}
 	for i := 0; i < len(document.Declarations); i++ {
 		declaration := document.Declarations[i]
 		if declaration.Kind != DeclGo || declaration.Name != kind {

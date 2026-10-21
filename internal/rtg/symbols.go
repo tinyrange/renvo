@@ -1,10 +1,12 @@
 package rtg
 
 type generationIndex struct {
-	names        []string
-	namesReady   bool
-	symbols      [][]generatedSymbol
-	symbolsReady bool
+	functions      []embeddedFunction
+	functionsReady bool
+	names          []string
+	namesReady     bool
+	symbols        [][]generatedSymbol
+	symbolsReady   bool
 }
 
 type generatedSymbol struct {
