@@ -130,6 +130,8 @@ func generatePreparedBackendWithRoots(resolved ResolveResult, targetName string,
 		copy(diagnostics, resolved.Diagnostics)
 		return GenerateResult{Diagnostics: diagnostics}
 	}
+	// All derived indices are private to this immutable generation input.
+	resolved.Document.generation = &generationIndex{}
 	target, ok := lookupResolvedTarget(resolved, targetName)
 	if !ok {
 		return GenerateResult{Diagnostics: []Diagnostic{{
