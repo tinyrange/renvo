@@ -310,14 +310,8 @@ func runHostMainCase(t *testing.T, src []byte) {
 	if !ok {
 		t.Skipf("no directly runnable frontend target for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
-	repoRoot := driverRepoRoot(t)
 	dir := writeHostSourceCase(t, src)
-	backend := filepath.Join(t.TempDir(), "renvo-backend")
-	cmd := exec.Command("go", "build", "-o", backend, "./backend")
-	cmd.Dir = repoRoot
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("backend build failed: %v\n%s", err, string(out))
-	}
+	backend := driverTestBackend(t)
 
 	oldwd, err := os.Getwd()
 	if err != nil {

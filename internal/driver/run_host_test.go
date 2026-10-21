@@ -4,7 +4,6 @@ package driver
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -15,15 +14,7 @@ func TestRunScriptCommandCompilesImageAndForwardsArguments(t *testing.T) {
 		t.Skipf("no native Renvo target for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 	repoRoot := driverRepoRoot(t)
-	backend := filepath.Join(t.TempDir(), "renvo-backend")
-	if runtime.GOOS == "windows" {
-		backend += ".exe"
-	}
-	command := exec.Command("go", "build", "-o", backend, "./backend")
-	command.Dir = repoRoot
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("backend build failed: %v\n%s", err, output)
-	}
+	backend := driverTestBackend(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/script\n"), 0o644); err != nil {
 		t.Fatal(err)
