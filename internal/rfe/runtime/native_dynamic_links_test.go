@@ -8,6 +8,9 @@ import (
 )
 
 func TestNativeDynamicSuccessorsExceedFixedCapacityAndHonorTombstones(t *testing.T) {
+	if !NativeSessionsAvailable() {
+		t.Skip("supported foreign boundary unavailable")
+	}
 	n, m, ram := ownedFixture(t)
 	if !n.AdmitCodeVersionedContext(m) {
 		t.Fatal("owned context admission")
@@ -64,6 +67,9 @@ func TestNativeDynamicSuccessorsExceedFixedCapacityAndHonorTombstones(t *testing
 }
 
 func TestNativeDynamicSuccessorProbeStopsAtFullTombstoneCycle(t *testing.T) {
+	if !NativeSessionsAvailable() {
+		t.Skip("supported foreign boundary unavailable")
+	}
 	n, m, ram := ownedFixture(t)
 	if !n.AdmitCodeVersionedContext(m) {
 		t.Fatal("owned context")

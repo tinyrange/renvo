@@ -8,6 +8,9 @@ import (
 )
 
 func TestLinkedOwnerSurvivesArenaRelocationAndRetiresOnlyDeadEntries(t *testing.T) {
+	if !NativeSessionsAvailable() {
+		t.Skip("supported foreign boundary unavailable")
+	}
 	n, err := NewNative(4096)
 	if err != nil {
 		t.Fatal(err)

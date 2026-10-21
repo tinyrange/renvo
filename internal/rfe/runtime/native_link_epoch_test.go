@@ -5,6 +5,9 @@ package runtime
 import "testing"
 
 func TestLinkGenerationRevokesPreparedAndGenericEntries(t *testing.T) {
+	if !NativeSessionsAvailable() {
+		t.Skip("supported foreign boundary unavailable")
+	}
 	n, err := NewNative(1 << 20)
 	if err != nil {
 		t.Fatal(err)

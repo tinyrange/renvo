@@ -9,6 +9,9 @@ import (
 )
 
 func TestNativeStopReplacesInstructionQuantumAndPreservesProgress(t *testing.T) {
+	if !NativeSessionsAvailable() {
+		t.Skip("supported foreign boundary unavailable")
+	}
 	n, m, ram := ownedFixture(t)
 	var stop uint32
 	m.Stop = &stop
