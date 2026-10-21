@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "9013c36f3f26efd3ed981bdd912a4cf7cab63ac85e84d2c5ae4a2a5fcf897b57"
+const CompilerSourceDigest = "21e3df0deb140240888d766a17475c1cf91aa92dee3231f4346fdbdd6ea1f700"
 
 // source: backend/compiler_common_impl.go
 
@@ -4736,16 +4736,7 @@ return start
 
 func renvoAddExpr(ep *renvoExprParse, kind int, tok int, left int, right int, firstArg int, argCount int, nameStart int, nameEnd int) int {
 renvoNonNil(ep)
-
-
-index := len(ep.exprs)
-if index < cap(ep.exprs) {
-ep.exprs = ep.exprs[:index+1]
-} else {
-ep.exprs = append(ep.exprs, renvoExpr{})
-}
-e := &ep.exprs[index]
-e.inferred = 0
+var e renvoExpr
 e.kind = kind
 e.tok = tok
 e.left = left
@@ -4754,6 +4745,8 @@ e.firstArg = firstArg
 e.argCount = argCount
 e.nameStart = nameStart
 e.nameEnd = nameEnd
+ep.exprs = append(ep.exprs, e)
+index := len(ep.exprs) - 1
 return index
 }
 

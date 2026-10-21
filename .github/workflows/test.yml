@@ -52,6 +52,9 @@ jobs:
       - name: Run preflight
         env:
           RENVO_CHECK_PREFLIGHT_BUDGET_SECONDS: "100"
+          # Large generated Go sources benefit from less frequent host GC.
+          # This affects preflight only, never native compiler performance gates.
+          GOGC: "200"
         run: ./tools/check preflight
 
   backend-amd64:
