@@ -3,11 +3,10 @@ package engine
 import (
 	"fmt"
 	emu "renvo.dev/internal/rfe/runtime"
-	"time"
 )
 
 type EngineConfig struct {
-	Adaptive               bool   // measured compilation/transition payback, not fixed heat quotas
+	Adaptive               bool   // measured payback using the Go-host monotonic clock, not fixed heat quotas
 	NaturalBlocks          bool   // end blocks at control flow, scheduling, or a code-page boundary; no artificial width
 	DynamicCode            bool   // retain live blocks and grow native storage; retire invalidated fragments individually
 	Mode                   string // interpreter, ir, native; native includes both lower tiers
@@ -124,6 +123,9 @@ type Engine struct {
 }
 
 func New(config EngineConfig, arch Architecture) (*Engine, error) {
+	if config.Adaptive && !paybackClockAvailable {
+		return nil, fmt.Errorf("adaptive RFE timing requires the Go-hosted runner")
+	}
 	if arch.Name == "" || arch.StateWords < 1 || arch.StateWords > 256 || arch.PC < 0 || arch.PC >= arch.StateWords || arch.Alignment == 0 || arch.Alignment > 8 || arch.Alignment&(arch.Alignment-1) != 0 || arch.Fetch == nil || arch.Lower == nil {
 		return nil, fmt.Errorf("invalid guest architecture")
 	}
@@ -227,7 +229,8 @@ func (e *Engine) block(c CPU) *compiledBlock {
 		}
 		if valid {
 			if !e.config.CacheContexts {
-				context = c.MemoryBus().(CodeContextMemory).CodeContext()
+				memory := c.MemoryBus().(CodeContextMemory)
+				context = memory.CodeContext()
 			}
 			old.context = context
 		}
@@ -422,9 +425,9 @@ func (e *Engine) stepBlock(c CPU, remaining uint64, block *compiledBlock) error 
 		return e.interpret(c)
 	}
 	var err error
-	start := time.Time{}
+	start := paybackTime{}
 	if e.config.Adaptive {
-		start = time.Now()
+		start = paybackNow()
 	}
 	if block.native && e.native != nil {
 		var context *emu.MemoryContext
@@ -466,13 +469,13 @@ func (e *Engine) stepBlock(c CPU, remaining uint64, block *compiledBlock) error 
 func (e *Engine) executeCached(c CPU, ins Instruction) error {
 	before := *c.Retirement()
 	sampled := e.config.Adaptive && (e.Stats.Interpreted == 0 || e.Stats.Interpreted&(e.Stats.Interpreted-1) == 0)
-	start := time.Time{}
+	start := paybackTime{}
 	if sampled {
-		start = time.Now()
+		start = paybackNow()
 	}
 	err := c.ExecuteInstruction(ins)
 	if sampled && *c.Retirement() > before {
-		e.payback.interpretedNS += uint64(time.Since(start))
+		e.payback.interpretedNS += paybackElapsed(start)
 		e.payback.interpreted += *c.Retirement() - before
 	}
 	e.Stats.Interpreted += *c.Retirement() - before
@@ -484,14 +487,14 @@ func (e *Engine) executeCached(c CPU, ins Instruction) error {
 func (e *Engine) interpret(c CPU) error {
 	before := *c.Retirement()
 	sampled := e.config.Adaptive && (e.Stats.Interpreted == 0 || e.Stats.Interpreted&(e.Stats.Interpreted-1) == 0)
-	start := time.Time{}
+	start := paybackTime{}
 	if sampled {
-		start = time.Now()
+		start = paybackNow()
 	}
 	block := e.cachedBlock(c.Registers()[e.arch.PC])
 	err := c.Step()
 	if sampled && *c.Retirement() > before {
-		e.payback.interpretedNS += uint64(time.Since(start))
+		e.payback.interpretedNS += paybackElapsed(start)
 		e.payback.interpreted += *c.Retirement() - before
 	}
 	e.Stats.Interpreted += *c.Retirement() - before
@@ -525,9 +528,9 @@ func (e *Engine) preparePureBlock(c CPU, block *compiledBlock) bool {
 		return true
 	}
 	defer pauseTranslationClock(c)()
-	start := time.Time{}
+	start := paybackTime{}
 	if e.config.Adaptive {
-		start = time.Now()
+		start = paybackNow()
 	}
 	if block.ops == nil {
 		var b emu.Builder

@@ -3,8 +3,6 @@ package engine
 import (
 	"fmt"
 	emu "renvo.dev/internal/rfe/runtime"
-	"sync/atomic"
-	"time"
 )
 
 // Only blocks validated in the current code context are published. Native
@@ -83,9 +81,9 @@ func (e *Engine) runLinked(c CPU, remaining uint64, first *compiledBlock, memory
 		budget = uint64(e.config.MaxNativeInstructions)
 	}
 	var err error
-	sessionStart := time.Time{}
+	sessionStart := paybackTime{}
 	if e.config.Adaptive {
-		sessionStart = time.Now()
+		sessionStart = paybackNow()
 	}
 	if e.config.MaxNativeInstructions > 64 {
 		if owner, ok := memory.(NativeBackingMemory); ok && owner.NativeCodeVersions() {
@@ -174,7 +172,7 @@ func (e *Engine) runLinked(c CPU, remaining uint64, first *compiledBlock, memory
 		}
 		return e.interpret(c)
 	}
-	if context.Total == 0 && context.Stop != nil && atomic.LoadUint32(context.Stop) != 0 {
+	if context.Total == 0 && context.Stop != nil && nativeStopRequested(context.Stop) {
 		return nil
 	}
 	if context.Total == 0 {

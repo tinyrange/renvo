@@ -2,8 +2,6 @@ package engine
 
 import (
 	emu "renvo.dev/internal/rfe/runtime"
-	"sync/atomic"
-	"time"
 )
 
 // paybackModel learns from real interpreter, compiler and native work. No
@@ -23,21 +21,21 @@ func (e *Engine) compilationCost(instructions int) uint64 {
 	} // bootstrap from first actual reuse
 	return uint64(instructions) * m.operations / m.instructions * m.compileNS / m.compileOps
 }
-func (e *Engine) observeCompilation(start time.Time, ops, instructions int) {
+func (e *Engine) observeCompilation(start paybackTime, ops, instructions int) {
 	if !e.config.Adaptive {
 		return
 	}
 	m := &e.payback
-	m.compileNS += uint64(time.Since(start))
+	m.compileNS += paybackElapsed(start)
 	m.compileOps += uint64(ops)
 	m.operations += uint64(ops)
 	m.instructions += uint64(instructions)
 }
-func (e *Engine) observeLeaf(block *compiledBlock, start time.Time, retired uint64) {
+func (e *Engine) observeLeaf(block *compiledBlock, start paybackTime, retired uint64) {
 	if !e.config.Adaptive {
 		return
 	}
-	ns := uint64(time.Since(start))
+	ns := paybackElapsed(start)
 	e.payback.leafNS += ns
 	e.payback.leafInstructions += retired
 	if ns >= block.sessionDebt {
@@ -58,14 +56,14 @@ func (e *Engine) regionPays(block *compiledBlock, count int) bool {
 	saving := e.payback.leafNS / e.payback.leafInstructions
 	return block.visits*uint64(count)*saving >= e.compilationCost(count)
 }
-func (e *Engine) sessionResult(block *compiledBlock, start time.Time, context *emu.MemoryContext, budget uint64) {
+func (e *Engine) sessionResult(block *compiledBlock, start paybackTime, context *emu.MemoryContext, budget uint64) {
 	if !e.config.Adaptive || budget <= uint64(len(block.instructions)) {
 		return
 	}
 	// True asynchronous scheduling events and successful long runs are not a
 	// failed optimization. A missing mapping is retried immediately after refill.
-	ns := uint64(time.Since(start))
-	if context.Stop != nil && atomic.LoadUint32(context.Stop) != 0 {
+	ns := paybackElapsed(start)
+	if context.Stop != nil && nativeStopRequested(context.Stop) {
 		return
 	}
 	baseline := uint64(0)

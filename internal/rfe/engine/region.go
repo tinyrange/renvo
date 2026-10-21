@@ -3,7 +3,6 @@ package engine
 import (
 	"fmt"
 	emu "renvo.dev/internal/rfe/runtime"
-	"time"
 )
 
 // Already validated hot blocks may form a bounded cyclic trace. Each internal
@@ -11,6 +10,12 @@ import (
 type regionPart struct {
 	pc    uint64
 	block *compiledBlock
+}
+
+func cloneRegionParts(parts []regionPart) []regionPart {
+	out := make([]regionPart, len(parts))
+	copy(out, parts)
+	return out
 }
 
 func (e *Engine) regionParts(c CPU, first *compiledBlock) []regionPart {
@@ -36,97 +41,100 @@ func (e *Engine) regionParts(c CPU, first *compiledBlock) []regionPart {
 	if stamp.Identity == nil || first.context != stamp || len(first.dependencies) == 0 {
 		return nil
 	}
-	parts := []regionPart{{root, first}}
-	seen := map[uint64]bool{root: true}
-	// Explore both legal direct edges, but cap cold discovery independently of
-	// native execution. A failed taken edge must not hide a fallthrough cycle.
-	attempts := 0
-	best := []regionPart(nil)
-	bestScore := float64(0)
-	bestCycle := []regionPart(nil)
-	bestCycleScore := float64(0)
-	// A region avoids a dispatcher transition per reached block, not per
-	// guest instruction. Weight each additional block by observed reach;
-	// instruction count remains solely the unchanged static admission bound.
-	var search func(int, float64, float64) []regionPart
-	search = func(total int, score, probability float64) []regionPart {
-		if len(parts) > 1 && score > bestScore {
-			best = append([]regionPart(nil), parts...)
-			bestScore = score
-		}
-		current := parts[len(parts)-1]
-		if len(current.block.instructions) == 0 || !current.block.instructions[len(current.block.instructions)-1].Flow.Known {
-			return nil
-		}
-		flow := current.block.instructions[len(current.block.instructions)-1].Flow
-		next, alternate, conditional := flow.Next, flow.Alternate, flow.Conditional
-		targets := []uint64{next}
-		if conditional && alternate != next {
-			// Prefer the conventional loop back edge, otherwise fallthrough.
-			// This is only discovery order: every selected edge is still guarded.
-			if next > current.pc && alternate < next {
-				targets = []uint64{alternate, next}
-			} else {
-				targets = append(targets, alternate)
-			}
-		}
-		counts := e.edgeCounts[current.block.instructions[len(current.block.instructions)-1].PC]
-		if conditional && counts[0]+counts[1] != 0 {
-			if counts[1] > counts[0] {
-				targets = []uint64{alternate, next}
-			} else {
-				targets = []uint64{next, alternate}
-			}
-		}
-		for _, target := range targets {
-			attempts++
-			if attempts > 256 {
-				return nil
-			}
-			reach := probability
-			if conditional && counts[0]+counts[1] != 0 {
-				edge := 0
-				if target == alternate {
-					edge = 1
-				}
-				reach *= float64(counts[edge]+1) / float64(counts[0]+counts[1]+2)
-			}
-			if target == root {
-				// Compare expected block visits before the first side exit, including
-				// repeated iterations. A rare backedge must not defeat a hot
-				// acyclic trace merely because it is a cycle.
-				if reach == 1 {
-					return append([]regionPart(nil), parts...)
-				}
-				cycleScore := score / (1 - reach)
-				if cycleScore > bestCycleScore {
-					bestCycle = append([]regionPart(nil), parts...)
-					bestCycleScore = cycleScore
-				}
-				continue
-			}
-			candidate := e.cachedBlock(target)
-			if seen[target] || candidate == nil || !candidate.native || candidate.context != stamp || len(candidate.dependencies) == 0 || len(candidate.instructions) == 0 || candidate.instructions[0].ScheduleBoundary || total+len(candidate.instructions) > e.config.MaxRegionInstructions {
-				continue
-			}
-			seen[target] = true
-			parts = append(parts, regionPart{target, candidate})
-			result := search(total+len(candidate.instructions), score+reach, reach)
-			parts = parts[:len(parts)-1]
-			delete(seen, target)
-			if len(result) != 0 {
-				return result
-			}
-		}
-		return nil
-	}
-	if cycle := search(len(first.instructions), 1, 1); len(cycle) != 0 {
+	s := regionSearch{engine: e, root: root, stamp: stamp,
+		parts: []regionPart{{root, first}}, seen: map[uint64]bool{root: true}}
+
+	if cycle := s.search(len(first.instructions), 1, 1); len(cycle) != 0 {
 		return cycle
 	}
-	if bestCycleScore >= bestScore && len(bestCycle) != 0 {
-		return bestCycle
+	if s.bestCycleScore >= s.bestScore && len(s.bestCycle) != 0 {
+		return s.bestCycle
 	}
-	return best
+	return s.best
+}
+
+type regionSearch struct {
+	engine                    *Engine
+	root                      uint64
+	stamp                     CodeStamp
+	parts, best, bestCycle    []regionPart
+	seen                      map[uint64]bool
+	attempts                  int
+	bestScore, bestCycleScore float64
+}
+
+// Explore both legal direct edges, with cold discovery bounded independently
+// of native execution. Score expected block visits, not guest instructions.
+func (s *regionSearch) search(total int, score, probability float64) []regionPart {
+	if len(s.parts) > 1 && score > s.bestScore {
+		s.best = cloneRegionParts(s.parts)
+		s.bestScore = score
+	}
+	current := s.parts[len(s.parts)-1]
+	if len(current.block.instructions) == 0 || !current.block.instructions[len(current.block.instructions)-1].Flow.Known {
+		return nil
+	}
+	flow := current.block.instructions[len(current.block.instructions)-1].Flow
+	next, alternate, conditional := flow.Next, flow.Alternate, flow.Conditional
+	targets := []uint64{next}
+	if conditional && alternate != next {
+		// Prefer the conventional loop back edge, otherwise fallthrough.
+		// This is only discovery order: every selected edge is still guarded.
+		if next > current.pc && alternate < next {
+			targets = []uint64{alternate, next}
+		} else {
+			targets = append(targets, alternate)
+		}
+	}
+	counts := s.engine.edgeCounts[current.block.instructions[len(current.block.instructions)-1].PC]
+	if conditional && counts[0]+counts[1] != 0 {
+		if counts[1] > counts[0] {
+			targets = []uint64{alternate, next}
+		} else {
+			targets = []uint64{next, alternate}
+		}
+	}
+	for _, target := range targets {
+		s.attempts++
+		if s.attempts > 256 {
+			return nil
+		}
+		reach := probability
+		if conditional && counts[0]+counts[1] != 0 {
+			edge := 0
+			if target == alternate {
+				edge = 1
+			}
+			reach *= float64(counts[edge]+1) / float64(counts[0]+counts[1]+2)
+		}
+		if target == s.root {
+			// Compare expected block visits before the first side exit, including
+			// repeated iterations. A rare backedge must not defeat a hot
+			// acyclic trace merely because it is a cycle.
+			if reach == 1 {
+				return cloneRegionParts(s.parts)
+			}
+			cycleScore := score / (1 - reach)
+			if cycleScore > s.bestCycleScore {
+				s.bestCycle = cloneRegionParts(s.parts)
+				s.bestCycleScore = cycleScore
+			}
+			continue
+		}
+		candidate := s.engine.cachedBlock(target)
+		if s.seen[target] || candidate == nil || !candidate.native || candidate.context != s.stamp || len(candidate.dependencies) == 0 || len(candidate.instructions) == 0 || candidate.instructions[0].ScheduleBoundary || total+len(candidate.instructions) > s.engine.config.MaxRegionInstructions {
+			continue
+		}
+		s.seen[target] = true
+		s.parts = append(s.parts, regionPart{target, candidate})
+		result := s.search(total+len(candidate.instructions), score+reach, reach)
+		s.parts = s.parts[:len(s.parts)-1]
+		delete(s.seen, target)
+		if len(result) != 0 {
+			return result
+		}
+	}
+	return nil
 }
 
 func (e *Engine) prepareRegion(c CPU, block *compiledBlock) {
@@ -154,9 +162,9 @@ func (e *Engine) prepareRegion(c CPU, block *compiledBlock) {
 	}
 	block.regionAttempted = true
 	block.regionGeneration = e.Stats.Promotions
-	start := time.Time{}
+	start := paybackTime{}
 	if e.config.Adaptive {
-		start = time.Now()
+		start = paybackNow()
 	}
 	pc := c.Registers()[e.arch.PC]
 	flow := parts[len(parts)-1].block.instructions[len(parts[len(parts)-1].block.instructions)-1].Flow

@@ -3,7 +3,6 @@ package engine
 import (
 	"fmt"
 	emu "renvo.dev/internal/rfe/runtime"
-	"time"
 )
 
 func (e *Engine) stepMemory(c CPU, block *compiledBlock) error {
@@ -22,9 +21,9 @@ func (e *Engine) stepMemory(c CPU, block *compiledBlock) error {
 		return e.executeCached(c, block.instructions[0])
 	}
 	if len(block.instructions) > 16 {
-		start := time.Time{}
+		start := paybackTime{}
 		if e.config.Adaptive {
-			start = time.Now()
+			start = paybackNow()
 		}
 		before := *c.Retirement()
 		err := e.runLinked(c, uint64(len(block.instructions)), block, memory, context, block.context, 1)
@@ -32,9 +31,9 @@ func (e *Engine) stepMemory(c CPU, block *compiledBlock) error {
 		return err
 	}
 	e.publishLeaf(c, block, context)
-	start := time.Time{}
+	start := paybackTime{}
 	if e.config.Adaptive {
-		start = time.Now()
+		start = paybackNow()
 	}
 	err := e.native.CallMemory(block.entry, c.Registers(), context)
 	if err != nil {
@@ -84,9 +83,9 @@ func (e *Engine) prepareMemoryBlock(c CPU, block *compiledBlock) bool {
 		return true
 	}
 	defer pauseTranslationClock(c)()
-	start := time.Time{}
+	start := paybackTime{}
 	if e.config.Adaptive {
-		start = time.Now()
+		start = paybackNow()
 	}
 	if !block.attempted {
 		block.attempted = true

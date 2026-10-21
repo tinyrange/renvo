@@ -1,3 +1,5 @@
+//go:build !renvo
+
 package engine
 
 import "testing"
