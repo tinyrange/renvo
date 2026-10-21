@@ -4729,16 +4729,7 @@ func renvoPrimaryTypeEnd(p *renvoProgram, start int, end int) int {
 
 func renvoAddExpr(ep *renvoExprParse, kind int, tok int, left int, right int, firstArg int, argCount int, nameStart int, nameEnd int) int {
 	renvoNonNil(ep)
-	// The parser reserves token-bounded scratch. Initialize its next slot
-	// directly, avoiding a temporary node and redundant zero/copy traffic.
-	index := len(ep.exprs)
-	if index < cap(ep.exprs) {
-		ep.exprs = ep.exprs[:index+1]
-	} else {
-		ep.exprs = append(ep.exprs, renvoExpr{})
-	}
-	e := &ep.exprs[index]
-	e.inferred = 0
+	var e renvoExpr
 	e.kind = kind
 	e.tok = tok
 	e.left = left
@@ -4747,6 +4738,8 @@ func renvoAddExpr(ep *renvoExprParse, kind int, tok int, left int, right int, fi
 	e.argCount = argCount
 	e.nameStart = nameStart
 	e.nameEnd = nameEnd
+	ep.exprs = append(ep.exprs, e)
+	index := len(ep.exprs) - 1
 	return index
 }
 
@@ -5631,7 +5624,11 @@ func renvoHashRange(src []byte, start int, end int) int {
 	}
 	// This is only a bucket fingerprint; every lookup still verifies all bytes.
 	// Sampling keeps identifier lookup bounded even for long generated names.
-	return (size&127)<<24 | int(renvo_runtime_UnsafeByteAt(src, start))<<16 | int(renvo_runtime_UnsafeByteAt(src, end-1))<<8 | int(renvo_runtime_UnsafeByteAt(src, start+size/2))
+	// Fold every sampled byte into the low bits too: bucket counts with
+	// powers of two otherwise discard the old high-byte samples entirely.
+	hash := size*33 + int(renvo_runtime_UnsafeByteAt(src, start))
+	hash = hash*33 + int(renvo_runtime_UnsafeByteAt(src, start+size/2))
+	return (hash*33 + int(renvo_runtime_UnsafeByteAt(src, end-1))) & 2147483647
 }
 
 func renvoMetaAppendGlobal(m *renvoMeta, sym renvoSymbolInfo) {

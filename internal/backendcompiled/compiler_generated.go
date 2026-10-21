@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "9013c36f3f26efd3ed981bdd912a4cf7cab63ac85e84d2c5ae4a2a5fcf897b57"
+const CompilerSourceDigest = "387d3620832e0585877437e2ef22a1c26d942a470a1a2e558ca3da82ada08b51"
 
 // source: backend/compiler_common_impl.go
 
@@ -4736,16 +4736,7 @@ return start
 
 func renvoAddExpr(ep *renvoExprParse, kind int, tok int, left int, right int, firstArg int, argCount int, nameStart int, nameEnd int) int {
 renvoNonNil(ep)
-
-
-index := len(ep.exprs)
-if index < cap(ep.exprs) {
-ep.exprs = ep.exprs[:index+1]
-} else {
-ep.exprs = append(ep.exprs, renvoExpr{})
-}
-e := &ep.exprs[index]
-e.inferred = 0
+var e renvoExpr
 e.kind = kind
 e.tok = tok
 e.left = left
@@ -4754,6 +4745,8 @@ e.firstArg = firstArg
 e.argCount = argCount
 e.nameStart = nameStart
 e.nameEnd = nameEnd
+ep.exprs = append(ep.exprs, e)
+index := len(ep.exprs) - 1
 return index
 }
 
@@ -5638,7 +5631,11 @@ return 0
 }
 
 
-return (size&127)<<24 | int(renvo_runtime_UnsafeByteAt(src, start))<<16 | int(renvo_runtime_UnsafeByteAt(src, end-1))<<8 | int(renvo_runtime_UnsafeByteAt(src, start+size/2))
+
+
+hash := size*33 + int(renvo_runtime_UnsafeByteAt(src, start))
+hash = hash*33 + int(renvo_runtime_UnsafeByteAt(src, start+size/2))
+return (hash*33 + int(renvo_runtime_UnsafeByteAt(src, end-1))) & 2147483647
 }
 
 func renvoMetaAppendGlobal(m *renvoMeta, sym renvoSymbolInfo) {
