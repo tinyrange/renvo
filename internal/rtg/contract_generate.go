@@ -20,6 +20,12 @@ func appendDirectEmitterBindings(out []byte, document Document, arch Declaration
 	}
 	prefix := "rtg" + exportedName(document.Unit)
 	exports := architectureExports(arch)
+	// All wrappers share this immutable declaration set. Parse it once, not
+	// once per parameter and result of every bound operation.
+	var names []string
+	if nativeEmitter {
+		names = embeddedGoNames(document)
+	}
 	for operation := 0; operation < len(directEmitterV1); operation++ {
 		var binding architectureBinding
 		found := false
@@ -55,7 +61,7 @@ func appendDirectEmitterBindings(out []byte, document Document, arch Declaration
 			}
 			if nativeEmitter {
 				out = appendRewrittenGoMode(out, function.Parameters[i].Source,
-					embeddedGoNames(document), prefix, true, &document)
+					names, prefix, true, &document)
 			} else {
 				out = append(out, function.Parameters[i].Source...)
 			}
@@ -65,7 +71,7 @@ func appendDirectEmitterBindings(out []byte, document Document, arch Declaration
 			out = append(out, ' ')
 			if nativeEmitter {
 				out = appendRewrittenGoMode(out, function.Result,
-					embeddedGoNames(document), prefix, true, &document)
+					names, prefix, true, &document)
 			} else {
 				out = append(out, function.Result...)
 			}
