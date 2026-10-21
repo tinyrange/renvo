@@ -30104,6 +30104,19 @@ func renvoRFELoopColdOrder(a *renvoAsm, records []int, cold []bool, done []bool,
 	return append(order, value)
 }
 func renvoRFELoopColdLocations(a *renvoAsm, records []int, locations []int, cold []bool, roots []int, reuseHot bool) []int {
+	// Most precise memory exits only restore constants or already allocated
+	// hot values. No cold schedule exists for them: avoid rescanning the
+	// entire body and allocating body-sized scratch for each such exit.
+	needed := false
+	for _, value := range roots {
+		if value >= 0 && cold[value] && records[value*4] != 0 {
+			needed = true
+			break
+		}
+	}
+	if !needed {
+		return locations
+	}
 	registers := []int{6, 7}
 	if renvoRFEArm(a) {
 		registers = []int{9, 10}

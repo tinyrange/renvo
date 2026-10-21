@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "f98c896ea82beda410dda18bc701f4a8e15249811bc80cd57da333ce49694dff"
+const CompilerSourceDigest = "21e3df0deb140240888d766a17475c1cf91aa92dee3231f4346fdbdd6ea1f700"
 
 // source: backend/compiler_common_impl.go
 
@@ -30111,6 +30111,19 @@ order = renvoRFELoopColdOrder(a, records, cold, done, order, third)
 return append(order, value)
 }
 func renvoRFELoopColdLocations(a *renvoAsm, records []int, locations []int, cold []bool, roots []int, reuseHot bool) []int {
+
+
+
+needed := false
+for _, value := range roots {
+if value >= 0 && cold[value] && records[value*4] != 0 {
+needed = true
+break
+}
+}
+if !needed {
+return locations
+}
 registers := []int{6, 7}
 if renvoRFEArm(a) {
 registers = []int{9, 10}
