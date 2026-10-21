@@ -31,7 +31,7 @@ func (e *Engine) recordLinkMiss(pc uint64) {
 		*sample = LinkMissSample{PC: pc}
 	}
 	sample.Kind, sample.Decoded, sample.Bits = 0, nil, 0
-	block := e.blocks[pc]
+	block := e.cachedBlock(pc)
 	if block == nil {
 		e.Stats.ProfileMissAbsent++
 	} else {

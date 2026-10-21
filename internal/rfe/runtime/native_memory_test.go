@@ -172,7 +172,7 @@ func TestNativeMemoryGuardAndValidation(t *testing.T) {
 	}
 	for _, ops := range [][]Op{
 		nil, {{Kind: MemoryLoad, A: 0, Imm: 8}}, {{Kind: Const}, {Kind: MemoryLoad, A: 0, Imm: 3}},
-		{{Kind: Const}, {Kind: Progress, Imm: 257}}, {{Kind: Const}, {Kind: MemoryStore, A: 0, B: 0, Imm: 8}, {Kind: Add, A: 1, B: 0}},
+		{{Kind: Const}, {Kind: Progress, Imm: 1 << 31}}, {{Kind: Const}, {Kind: MemoryStore, A: 0, B: 0, Imm: 8}, {Kind: Add, A: 1, B: 0}},
 		{{Kind: Const}, {Kind: Guard, A: 0}, {Kind: MemoryLoad, A: 1, Imm: 8}},
 	} {
 		if ValidateMemory(ops, 2) == nil {

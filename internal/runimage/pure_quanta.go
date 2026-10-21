@@ -43,7 +43,7 @@ func (c *LinkedCall) CallQuanta(state []uint64, m *LinkedContextABI, pcSlot, lim
 	}
 	m.Total, m.MemoryTotal, m.Status, m.Retired = 0, 0, 0, 0
 	m.LoopExits, m.LoopIterations = 0, 0
-	a.borrowLinked(&m.CodeView, &m.PreparedTargets)
+	a.borrowLinked(&m.CodeView, &m.PreparedTargets, m)
 	for completed < limit {
 		budget := remaining
 		if budget > 64 {
@@ -68,12 +68,16 @@ func (c *LinkedCall) CallQuanta(state []uint64, m *LinkedContextABI, pcSlot, lim
 		}
 		pc := state[pcSlot]
 		var link *LinkedDescriptorABI
-		base := ((pc >> 2) ^ (pc >> 12)) & 255
-		for way := uint64(0); way < 4; way++ {
-			candidate := &m.Blocks[base+way*256]
-			if candidate.PC == pc && candidate.Instructions != 0 {
-				link = candidate
-				break
+		if m.Links.Dynamic() {
+			link = m.Links.Lookup(pc, m.LinkEpoch)
+		} else {
+			base := ((pc >> 2) ^ (pc >> 12)) & 255
+			for way := uint64(0); way < 4; way++ {
+				candidate := &m.LinkDescriptors()[base+way*256]
+				if candidate.PC == pc && candidate.Instructions != 0 && candidate.Generation == m.LinkEpoch {
+					link = candidate
+					break
+				}
 			}
 		}
 		if link == nil {

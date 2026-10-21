@@ -47,7 +47,7 @@ func (n *Native) CompileOwnedDirectLoop(ops []Op, words, instructions int, memor
 }
 
 func (n *Native) compileLoopMode(ops []Op, words, instructions int, direct bool, codeVersions *MemoryContext) (int, error) {
-	if !linkLayoutOK() || instructions < 1 || instructions > 256 {
+	if !linkLayoutOK() || instructions < 1 || instructions > 2147483647 {
 		return 0, fmt.Errorf("invalid native loop dimensions")
 	}
 	if err := ValidateMemory(ops, words); err != nil {
@@ -109,6 +109,7 @@ func (n *Native) compileLoopMode(ops []Op, words, instructions int, direct bool,
 	var code []byte
 	var faults []int
 	var ok bool
+	framed := false
 	if codeVersions != nil && !direct {
 		code, ok = backendcompiled.RenvoEmitCodeVersionedLoopBlock(records, words, instructions, runtime.GOARCH == "arm64")
 	} else if direct && runtime.GOOS == "linux" && runtime.GOARCH == "amd64" && NativeSessionsAvailable() {
@@ -117,13 +118,21 @@ func (n *Native) compileLoopMode(ops []Op, words, instructions int, direct bool,
 		code, ok = backendcompiled.RenvoEmitSharedLoopBlock(records, words, instructions, runtime.GOARCH == "arm64")
 	}
 	if !ok {
-		return 0, fmt.Errorf("Renvo could not emit native loop")
+		var stack int
+		code, stack, ok = backendcompiled.RenvoEmitFramedLoopBlock(records, words, instructions, runtime.GOARCH == "arm64", codeVersions != nil)
+		if !ok {
+			return 0, fmt.Errorf("Renvo could not emit native loop")
+		}
+		if err := n.arena.EnsureStack(stack); err != nil {
+			return 0, err
+		}
+		framed = true
 	}
 	var entry int
 	var err error
 	if len(faults) != 0 {
 		entry, err = n.arena.InstallFaultLoopBlock(code, words, instructions, faults)
-	} else if runtime.GOARCH == "amd64" && !direct {
+	} else if runtime.GOARCH == "amd64" && !direct && !framed {
 		entry, err = n.arena.InstallRegisterLoopBlock(code, words, instructions)
 	} else {
 		entry, err = n.arena.InstallLoopBlock(code, words, instructions)

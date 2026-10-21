@@ -119,11 +119,11 @@ func (b *Builder) FinishMemory(words int) []Op {
 	return out
 }
 func ValidateMemory(ops []Op, words int) error {
-	if words < 1 || words > 256 || len(ops) == 0 || len(ops) > 2048 {
+	if words < 1 || words > 256 || len(ops) == 0 {
 		return fmt.Errorf("invalid memory block dimensions")
 	}
 	for i, o := range ops {
-		if o.Kind == NativeElapsed && (o.B < 1 || o.B > 1024 || o.Imm > 256) {
+		if o.Kind == NativeElapsed && (o.B < 1 || o.B > 1024 || o.Imm > 2147483647) {
 			return fmt.Errorf("invalid native elapsed encoding")
 		}
 		if carryKind(o.Kind) && (o.Imm>>8 >= uint64(i) || effectOnly(ops[o.Imm>>8].Kind) || !validFlags(Op{Kind: ArithmeticFlags, Imm: o.Imm & 255})) {
@@ -156,7 +156,7 @@ func ValidateMemory(ops []Op, words int) error {
 		if o.Kind == MemoryLoad && o.Imm == 16 && (i+1 >= len(ops) || ops[i+1].Kind != PairHigh || ops[i+1].A != Value(i)) {
 			return fmt.Errorf("missing paired load result")
 		}
-		if o.Kind == Progress && (o.Imm > 256 || o.B < 0 || o.B > 1) {
+		if o.Kind == Progress && (o.Imm > 2147483647 || o.B < 0 || o.B > 1) {
 			return fmt.Errorf("invalid progress checkpoint")
 		}
 		left, right := memoryOperands(o)
@@ -205,6 +205,9 @@ func (m *MemoryContext) Fill(number uint64, data *[4096]byte, permissions uint64
 	m.Pages[number&63] = NativePage{number, data, permissions, epoch}
 }
 func (m *MemoryContext) Forget(number uint64) {
+	if m.Memory != nil {
+		m.Memory.Forget(number)
+	}
 	p := &m.Pages[number&63]
 	if p.Number == number {
 		*p = NativePage{}

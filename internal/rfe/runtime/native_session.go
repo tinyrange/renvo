@@ -26,7 +26,7 @@ func (n *Native) runLinkedSession(state []uint64, m *MemoryContext, budget uint6
 	if m != nil {
 		m.CodeView, m.PreparedTargets, m.DescriptorBase, m.AdmissionEpoch = [4]uint64{}, 0, 0, 0
 	}
-	if m == nil || !n.CanLinkMemory(m) || m.linkOwner != n || n.linkWords == 0 || len(state) != n.linkWords || budget == 0 || budget > NativeSessionLimit {
+	if m == nil || !n.CanLinkMemory(m) || m.linkOwner != n || n.linkWords == 0 || len(state) != n.linkWords || budget == 0 || budget > NativeSessionLimit && m.Stop == nil {
 		if n.linkCall != nil {
 			n.linkCall.ReleaseOwnedSessionPins()
 		}

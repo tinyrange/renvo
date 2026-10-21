@@ -32,7 +32,7 @@ func linkLayoutOK() bool {
 		unsafe.Offsetof(m.AdmissionEpoch) == backendcompiled.RenvoRFEAdmissionEpoch &&
 		unsafe.Offsetof(m.DirectGuest) == backendcompiled.RenvoRFEDirectGuest &&
 		unsafe.Offsetof(m.DirectHost) == backendcompiled.RenvoRFEDirectHost &&
-		unsafe.Offsetof(m.DirectSize) == backendcompiled.RenvoRFEDirectSize
+		unsafe.Offsetof(m.DirectSize) == backendcompiled.RenvoRFEDirectSize && unsafe.Offsetof(m.Memory) == backendcompiled.RenvoRFEOwnedMemory && unsafe.Offsetof(m.Stop) == backendcompiled.RenvoRFEStop && unsafe.Offsetof(m.LinkEpoch) == backendcompiled.RenvoRFELinkEpoch && unsafe.Offsetof(m.Links) == backendcompiled.RenvoRFEPublicLinks && unsafe.Offsetof(m.DescriptorMask) == backendcompiled.RenvoRFEDescriptorMask && unsafe.Offsetof(b.Generation) == 56
 }
 
 // PrepareLinks compiles the bounded dispatcher outside the arena call lock.

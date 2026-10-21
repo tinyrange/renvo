@@ -65,7 +65,7 @@ func TestNativeLinkedBudgetsAndAdmission(t *testing.T) {
 		t.Fatal("unaligned PC executed")
 	}
 	m.ClaimLinks(nil)
-	if m.Blocks[0].Instructions != 0 || n.CallLinked(state, m, 64) == nil {
+	if m.LookupLink(0) != nil || n.CallLinked(state, m, 64) == nil {
 		t.Fatal("owner mismatch accepted")
 	}
 	if n.PrepareLinks(3, 1) == nil {

@@ -18,7 +18,12 @@ func clearLinkedBorrow(view *[4]uint64, targets *uint64) {
 		*targets = 0
 	}
 }
-func (a *CodeArena) borrowLinked(view *[4]uint64, targets *uint64) {
+func (a *CodeArena) borrowLinked(view *[4]uint64, targets *uint64, m *LinkedContextABI) {
+	m.DescriptorMask = 0
+	if m.Links.Dynamic() {
+		m.DescriptorMask = m.Links.Mask
+	}
+	m.DescriptorBase = uint64(uintptr(unsafe.Pointer(m.DescriptorPointer())))
 	a.releaseOwnedPinsLocked() // compatibility calls do not retain owned leases
 	*view = a.linkedView
 	if targets != nil {
@@ -47,6 +52,7 @@ func (a *CodeArena) CallLinked(entry int, state []uint64, context unsafe.Pointer
 	a.mu.Lock()
 	defer func() {
 		clearLinkedBorrow(view, nil)
+		clearContextBorrow((*LinkedContextABI)(context))
 		a.mu.Unlock()
 	}()
 	if a.base == 0 || a.broken || context == nil || view == nil || entry < 0 || entry&15 != 0 || entry>>4 >= len(a.entries) || len(state) == 0 {
@@ -56,7 +62,7 @@ func (a *CodeArena) CallLinked(entry int, state []uint64, context unsafe.Pointer
 	if words&49152 != 49152 || words&8192 != 0 || words == 65535 || int(words&16383) != len(state) {
 		return fmt.Errorf("invalid native dispatcher entry")
 	}
-	a.borrowLinked(view, nil)
+	a.borrowLinked(view, nil, (*LinkedContextABI)(context))
 	top := (uintptr(unsafe.Pointer(&a.stack[len(a.stack)-1])) + 1) &^ 15
 	(*LinkedContextABI)(context).AdmissionEpoch = 0
 	callContext(a.base+uintptr(entry), uintptr(unsafe.Pointer(&state[0])), uintptr(context), top)
@@ -74,7 +80,7 @@ func (a *CodeArena) CallLinked(entry int, state []uint64, context unsafe.Pointer
 func (a *CodeArena) AdmitLinkedBlock(entry, words, instructions int) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.base == 0 || a.broken || entry < 0 || entry&15 != 0 || entry >= a.used || entry>>4 >= len(a.entries) || words < 1 || words > 256 || instructions < 1 || instructions > 256 {
+	if a.base == 0 || a.broken || entry < 0 || entry&15 != 0 || entry >= a.used || entry>>4 >= len(a.entries) || words < 1 || words > 256 || instructions < 1 || instructions > 2147483647 {
 		return fmt.Errorf("invalid linked block admission")
 	}
 	record := &a.entries[entry>>4]
@@ -125,7 +131,9 @@ func (a *CodeArena) PrepareLinkedCall(entry, words int) (*LinkedCall, error) {
 		return nil, fmt.Errorf("invalid prepared native dispatcher")
 	}
 	top := (uintptr(unsafe.Pointer(&a.stack[len(a.stack)-1])) + 1) &^ 15
-	return &LinkedCall{arena: a, entry: a.base + uintptr(entry), top: top, words: words}, nil
+	call := &LinkedCall{arena: a, entry: a.base + uintptr(entry), top: top, words: words}
+	a.prepared = append(a.prepared, call)
+	return call, nil
 }
 
 func (c *LinkedCall) Call(state []uint64, context unsafe.Pointer, view *[4]uint64) error {
@@ -141,12 +149,13 @@ func (c *LinkedCall) CallWithTargets(state []uint64, context unsafe.Pointer, vie
 	a.mu.Lock()
 	defer func() {
 		clearLinkedBorrow(view, targets)
+		clearContextBorrow((*LinkedContextABI)(context))
 		a.mu.Unlock()
 	}()
 	if a.base == 0 || a.broken || len(state) != c.words || context == nil || view == nil {
 		return fmt.Errorf("invalid prepared native dispatcher call")
 	}
-	a.borrowLinked(view, targets)
+	a.borrowLinked(view, targets, (*LinkedContextABI)(context))
 	(*LinkedContextABI)(context).AdmissionEpoch = 0
 	callContext(c.entry, uintptr(unsafe.Pointer(&state[0])), uintptr(context), c.top)
 	runtime.KeepAlive(context)
@@ -173,12 +182,13 @@ func (c *LinkedCall) CallBatchWithTargets(state []uint64, context unsafe.Pointer
 	a.mu.Lock()
 	defer func() {
 		clearLinkedBorrow(view, targets)
+		clearContextBorrow((*LinkedContextABI)(context))
 		a.mu.Unlock()
 	}()
 	if a.base == 0 || a.broken || len(state) != c.words || context == nil || view == nil {
 		return 0, fmt.Errorf("invalid prepared dispatcher batch call")
 	}
-	a.borrowLinked(view, targets)
+	a.borrowLinked(view, targets, (*LinkedContextABI)(context))
 	for {
 		more, err := next(completed)
 		if err != nil || !more {
@@ -211,7 +221,7 @@ type linkedTarget struct {
 // PrepareTarget is cold work, separate from execution. Replacing an indexed
 // proof cannot race a borrowed native view because both hold the arena lock.
 func (c *LinkedCall) PrepareTarget(pc uint64, entry, instructions int) error {
-	if c == nil || c.arena == nil || instructions < 1 || instructions > 256 {
+	if c == nil || c.arena == nil || instructions < 1 || instructions > 2147483647 {
 		return fmt.Errorf("invalid prepared target")
 	}
 	a := c.arena

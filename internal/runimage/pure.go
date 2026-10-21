@@ -5,6 +5,7 @@ package runimage
 import (
 	"fmt"
 	"io"
+	"os"
 	"renvo.dev/internal/rfenativebridge"
 	"runtime"
 	"sync"
@@ -16,10 +17,16 @@ import (
 // Installation, calls, and Close are serialized. Entries are offsets, so callers
 // cannot accidentally invoke an arbitrary host address.
 type CodeArena struct {
+	backingPins  *ownedBackingPins
+	pageLive     []uint32
+	named        map[int]string
+	symbolError  error
 	faults       []rfenativebridge.FaultSite
 	mu           sync.Mutex
 	base         uintptr
 	size, used   int
+	growable     bool
+	prepared     []*LinkedCall
 	symbols      io.Writer
 	jitSymbols   JITCodeWriter
 	extents      []codeExtent // sorted exact extents, one per installed image
@@ -52,7 +59,7 @@ func NewCodeArena(size int) (*CodeArena, error) {
 	if unsafe.Sizeof(linkedTarget{}) != 64 || unsafe.Offsetof(linkedTarget{}.CheckedSession) != 32 || unsafe.Offsetof(linkedTarget{}.DescriptorOffset) != 40 || unsafe.Offsetof(linkedTarget{}.BodyFlags) != 24 || unsafe.Sizeof(arenaEntry{}) != 16 || unsafe.Offsetof(arenaEntry{}.Linked) != 2 || unsafe.Offsetof(arenaEntry{}.Body) != 4 || unsafe.Offsetof(arenaEntry{}.Instructions) != 8 || unsafe.Offsetof(arenaEntry{}.AdmittedCount) != 12 {
 		return nil, fmt.Errorf("unsupported native admission ABI")
 	}
-	if size < 4096 || size > 64<<20 {
+	if size < 4096 || uint64(size) > uint64(^uint32(0))-16383 {
 		return nil, fmt.Errorf("invalid code arena size")
 	}
 	size = (size + 16383) &^ 16383
@@ -80,7 +87,7 @@ func (a *CodeArena) InstallBlock(code []byte, words int) (int, error) {
 // InstallLoopBlock admits a bounded loop only as a native dispatcher target.
 // Exact body length has its own immutable field; family bits no longer pack it.
 func (a *CodeArena) InstallLoopBlock(code []byte, words, instructions int) (int, error) {
-	if words < 1 || words > 256 || instructions < 1 || instructions > 256 {
+	if words < 1 || words > 256 || instructions < 1 || instructions > 2147483647 {
 		return 0, fmt.Errorf("invalid native loop dimensions")
 	}
 	return a.installLoop(code, uint16(words)|32768|8192, instructions)
@@ -92,7 +99,7 @@ func (a *CodeArena) InstallLoopBlock(code []byte, words, instructions int) (int,
 // resident R11 state base and uses the dispatcher's shared context. Legacy and
 // signal-recovery entries must not use this tag.
 func (a *CodeArena) InstallRegisterLoopBlock(code []byte, words, instructions int) (int, error) {
-	if runtime.GOARCH != "amd64" || words < 1 || words > 256 || instructions < 1 || instructions > 256 {
+	if runtime.GOARCH != "amd64" || words < 1 || words > 256 || instructions < 1 || instructions > 2147483647 {
 		return 0, fmt.Errorf("invalid register-result loop dimensions or host")
 	}
 	return a.installRecord(code, uint16(words)|32768|8192|512, 16, instructions)
@@ -126,7 +133,7 @@ func (a *CodeArena) installRecord(code []byte, words uint16, body, instructions 
 // Offsets cannot escape the installed fragment; table growth shares the same
 // lock as code installation, native calls, and Close.
 func (a *CodeArena) InstallFaultLoopBlock(code []byte, words, instructions int, faults []int) (int, error) {
-	if words < 1 || words > 256 || instructions < 1 || instructions > 256 || len(faults)%3 != 0 || !rfenativebridge.EnableFaults() {
+	if words < 1 || words > 256 || instructions < 1 || instructions > 2147483647 || len(faults)%3 != 0 || !rfenativebridge.EnableFaults() {
 		return 0, fmt.Errorf("invalid direct loop dimensions or unavailable fault recovery")
 	}
 	return a.installFaultRecord(code, uint16(words)|32768|8192, 0, instructions, faults)
@@ -134,8 +141,15 @@ func (a *CodeArena) InstallFaultLoopBlock(code []byte, words, instructions int, 
 func (a *CodeArena) installFaultRecord(code []byte, words uint16, body, instructions int, faults []int) (int, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.releaseOwnedPinsLocked() // entries/fault slices may change during installation
 	at := (a.used + 15) &^ 15
+	if at>>4 >= cap(a.entries) || len(a.faults)+len(faults)/3 > cap(a.faults) {
+		a.releaseOwnedPinsLocked()
+	}
+	if a.growable && len(code) > a.size-at {
+		if err := a.growLocked(at + len(code)); err != nil {
+			return 0, err
+		}
+	}
 	if a.base == 0 || a.broken || len(code) == 0 || len(code) > a.size-at || body < 0 || body >= len(code) {
 		return 0, fmt.Errorf("native code arena full or closed")
 	}
@@ -147,11 +161,22 @@ func (a *CodeArena) installFaultRecord(code []byte, words uint16, body, instruct
 	}
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-	if err := pureWritable(a.base, a.size, true); err != nil {
+	// Installation and all calls share mu. Page-protected hosts need only
+	// this append's pages RW: earlier pages stay RX and the unpublished tail
+	// remains non-executable. Darwin retains its per-thread JIT write guard.
+	// This bounds page-protection work by fragment size, not arena size,
+	// without introducing simultaneously writable/executable pages.
+	page := os.Getpagesize()
+	start := at &^ (page - 1)
+	end := (at + len(code) + page - 1) &^ (page - 1)
+	if end > a.size {
+		end = a.size
+	}
+	if err := pureWritable(a.base+uintptr(start), end-start, true); err != nil {
 		return 0, err
 	}
 	copy(unsafe.Slice((*byte)(unsafe.Pointer(a.base+uintptr(at))), len(code)), code)
-	if err := pureSeal(a.base, a.size, at, len(code)); err != nil {
+	if err := pureSeal(a.base+uintptr(start), end-start, at-start, len(code)); err != nil {
 		a.broken = true
 		return 0, err
 	}
@@ -165,6 +190,13 @@ func (a *CodeArena) installFaultRecord(code []byte, words uint16, body, instruct
 	}
 	a.entries[slot] = arenaEntry{Words: words, Body: uint32(body), Instructions: uint32(instructions)}
 	a.extents = append(a.extents, codeExtent{uint32(at), uint32(len(code))})
+	pages := (a.used + page - 1) / page
+	if len(a.pageLive) < pages {
+		a.pageLive = append(a.pageLive, make([]uint32, pages-len(a.pageLive))...)
+	}
+	for p := at / page; p <= (a.used-1)/page; p++ {
+		a.pageLive[p]++
+	}
 	a.linkedView = [4]uint64{uint64(a.base), uint64(a.used), uint64(uintptr(unsafe.Pointer(&a.entries[0]))), uint64(len(a.entries))}
 	return at, nil
 }
@@ -182,7 +214,12 @@ func (a *CodeArena) CallContext(entry int, state []uint64, context unsafe.Pointe
 	return a.callLocked(entry, state, context)
 }
 func (a *CodeArena) callLocked(entry int, state []uint64, context unsafe.Pointer) error {
-	a.releaseOwnedPinsLocked()
+	if a.ownedPins == nil || context == nil || context != unsafe.Pointer(a.ownedPins.context) || a.ownedPins.context.Memory == nil {
+		a.releaseOwnedPinsLocked()
+		if context == nil {
+			a.releaseBackingPinsLocked()
+		}
+	}
 	if a.base == 0 || a.broken || entry < 0 || entry&15 != 0 || entry>>4 >= len(a.entries) || len(state) == 0 {
 		return fmt.Errorf("invalid native block entry")
 	}
@@ -205,6 +242,7 @@ func (a *CodeArena) Close() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.releaseOwnedPinsLocked()
+	a.releaseBackingPinsLocked()
 	if a.base == 0 {
 		return nil
 	}
@@ -212,6 +250,8 @@ func (a *CodeArena) Close() error {
 	if err == nil {
 		a.base = 0
 		a.entries = nil
+		a.pageLive, a.named, a.prepared = nil, nil, nil
+		a.symbolError = nil
 		a.faults = nil
 		a.extents = nil
 		a.linkedView = [4]uint64{}

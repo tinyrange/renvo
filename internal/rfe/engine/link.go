@@ -3,29 +3,19 @@ package engine
 import (
 	"fmt"
 	emu "renvo.dev/internal/rfe/runtime"
+	"sync/atomic"
+	"time"
 )
 
 // Only blocks validated in the current code context are published. Native
 // non-executable stores preserve that context. All other memory operations exit
 // before returning to Go, so no code-context change can occur within this loop.
 func (e *Engine) runLinked(c CPU, remaining uint64, first *compiledBlock, memory NativeMemory, context *emu.MemoryContext, stamp CodeStamp, quanta int) error {
-	claimed := context.ClaimLinks(e.native)
-	if e.linkContexts == nil {
-		e.linkContexts = make(map[*emu.MemoryContext]CodeStamp)
-	}
-	if _, known := e.linkContexts[context]; !known && len(e.linkContexts) >= 64 {
-		clear(e.linkContexts)
-	}
-	if claimed || e.linkContexts[context] != stamp {
-		context.ClearLinks()
-		e.Stats.LinkContextChanges++
-		e.linkContexts[context] = stamp
-		e.linkContext = stamp
-	}
+	e.claimCodeLinks(context, stamp, first.proof != nil)
 	if !e.linkReady {
 		if err := e.native.PrepareLinks(e.arch.StateWords, e.arch.PC); err != nil {
 			// Arena exhaustion preserves the original leaf fallback.
-			return e.stepBlock(c, remaining, first)
+			return e.linkFallback(c, remaining, first)
 		}
 		e.linkReady = true
 		e.Stats.NativeBytes = e.native.Bytes
@@ -41,11 +31,11 @@ func (e *Engine) runLinked(c CPU, remaining uint64, first *compiledBlock, memory
 	// checked leaves remain usable without entering the specialized dispatcher.
 	if owner, ok := memory.(CodeVersionedNativeMemory); ok && owner.NativeCodeVersions() {
 		if !e.native.AdmitCodeVersionedContext(context) {
-			return e.stepBlock(c, remaining, first)
+			return e.linkFallback(c, remaining, first)
 		}
 	}
 	if !e.native.CanLinkMemory(context) {
-		return e.stepBlock(c, remaining, first)
+		return e.linkFallback(c, remaining, first)
 	}
 	pc := c.Registers()[e.arch.PC]
 	entry, instructions := first.entry, len(first.instructions)
@@ -70,8 +60,15 @@ func (e *Engine) runLinked(c CPU, remaining uint64, first *compiledBlock, memory
 		}
 	}
 	link = context.LookupLink(pc)
+	proof := first.proof
+	if region {
+		proof = first.regionProof
+	}
+	if proof != nil {
+		proof.Bind(link, entry)
+	}
 	if link == nil {
-		return e.stepBlock(c, remaining, first)
+		return e.linkFallback(c, remaining, first)
 	}
 	// This publication has completed cold region preparation at the current
 	// promotion generation. Suppress per-quantum retries for an installed region;
@@ -82,10 +79,14 @@ func (e *Engine) runLinked(c CPU, remaining uint64, first *compiledBlock, memory
 	}
 	first.visits++
 	budget := remaining
-	if budget > uint64(e.config.MaxNativeInstructions) {
+	if context.Stop == nil && budget > uint64(e.config.MaxNativeInstructions) {
 		budget = uint64(e.config.MaxNativeInstructions)
 	}
 	var err error
+	sessionStart := time.Time{}
+	if e.config.Adaptive {
+		sessionStart = time.Now()
+	}
 	if e.config.MaxNativeInstructions > 64 {
 		if owner, ok := memory.(NativeBackingMemory); ok && owner.NativeCodeVersions() {
 			err = e.native.RunLinkedBackingSession(c.Registers(), context, budget, owner.NativeBacking())
@@ -106,6 +107,25 @@ func (e *Engine) runLinked(c CPU, remaining uint64, first *compiledBlock, memory
 		// a fault or cold target stops scheduling before any host slow path.
 		_, err = e.native.RunLinkedQuanta(c.Registers(), context, quanta, remaining, e.Stats.Promotions)
 	}
+	// A hot loop is not necessarily a profitable session: watched stores,
+	// segment guards and short side exits can force a host return every few
+	// instructions. Keep its ordinary native leaves, but periodically retry
+	// the owned session instead of paying foreign-call/pin costs each time.
+	// Allow one short refill/side exit before backing off: a one-off missing
+	// descriptor should get its immediate chance to become a resident loop.
+	// Repeated status-1 exits can also be persistent watched/readonly stores.
+	if e.config.LoopRegionsOnly && remaining >= 64 {
+		if context.Total >= 64 {
+			first.sessionShort = 0
+		} else {
+			first.sessionShort++
+			if first.sessionShort >= 2 {
+				first.sessionRetry = first.visits + e.config.RegionThreshold
+				first.sessionShort = 0
+			}
+		}
+	}
+	e.sessionResult(first, sessionStart, context, budget)
 	e.Stats.NativeSessions++
 	if context.Status == 0 && context.Remaining != 0 {
 		pc := c.Registers()[e.arch.PC]
@@ -140,15 +160,35 @@ func (e *Engine) runLinked(c CPU, remaining uint64, first *compiledBlock, memory
 			e.recordMemoryExit(c.Registers()[e.arch.PC], context)
 		}
 		if context.Status == 1 {
+			var old emu.NativePage
+			if context.Memory != nil {
+				old, _ = context.Memory.Lookup(context.Address >> 12)
+			}
 			memory.NativeRefill(context.Address)
+			if context.Memory != nil {
+				next, ok := context.Memory.Lookup(context.Address >> 12)
+				if ok && (old.Data != next.Data || old.Permissions != next.Permissions) {
+					first.sessionDebt = 0
+				}
+			}
 		}
 		return e.interpret(c)
+	}
+	if context.Total == 0 && context.Stop != nil && atomic.LoadUint32(context.Stop) != 0 {
+		return nil
 	}
 	if context.Total == 0 {
 		if quanta != 1 {
 			first = e.block(c)
 		}
-		return e.stepBlock(c, remaining, first)
+		return e.linkFallback(c, remaining, first)
 	}
 	return nil
+}
+
+func (e *Engine) linkFallback(c CPU, remaining uint64, first *compiledBlock) error {
+	if len(first.instructions) > 16 {
+		return e.executeCached(c, first.instructions[0])
+	}
+	return e.stepBlock(c, remaining, first)
 }

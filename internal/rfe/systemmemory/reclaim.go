@@ -4,6 +4,12 @@ package systemmemory
 // Another privilege domain may retain a separate arena; never forget that
 // owner's execution proofs. Page-table barriers always remain in place.
 func (m *RAM) ReclaimCode() {
+	if m.proofs != nil {
+		m.proofs.clear()
+	}
+	if m.ownedWatches != nil {
+		m.ownedWatches.Clear(1)
+	}
 	m.InvalidateMappings()
 	mask := byte(7)
 	if m.MultipleArenas {
