@@ -106,7 +106,7 @@ func functionRangeDeferOwners(program *unit.Program) []unit.Func {
 	// Avoid signature discovery entirely for the usual units with no defers.
 	hasDefer := false
 	for tok := 0; tok < len(program.Tokens); tok++ {
-		if functionValueTokenEquals(program, tok, "defer") {
+		if program.Tokens[tok].Size == 5 && functionValueTokenEquals(program, tok, "defer") {
 			hasDefer = true
 			break
 		}

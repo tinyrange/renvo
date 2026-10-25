@@ -14,7 +14,7 @@ func BenchmarkCompilerSelfHost(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	args := []string{"-t", "linux/amd64", "-s", "-o", "compiler", "./cmd/renvo"}
+	args := []string{"-tags", "renvo_bundle", "-t", "linux/amd64", "-arena-size", "201326592", "-s", "-o", "compiler", "./cmd/renvo"}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
