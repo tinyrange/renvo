@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "0d93ea0d18dbc3d23632d42c46ba0cb3b686ce01eb1d55fa1930859c01c10011"
+const CompilerSourceDigest = "2ddcd8a2bad5447e0156719a6d1bca6bbc372058810c4c467d02301d9ec8e231"
 
 // source: backend/compiler_common_impl.go
 
@@ -54331,7 +54331,17 @@ renvoAsmJmpLabel(a, shortDone)
 renvoAsmMarkLabel(a, bulk)
 
 
-renvoAsmEmitText(a, "\x48\x39\xf7\x0f\x86\x1d\x00\x00\x00\x48\x8d\x04\x0e\x48\x39\xc7\x0f\x83\x10\x00\x00\x00\x48\x8d\x74\x0e\xff\x48\x8d\x7c\x0f\xff\xfd\xf3\xa4\xfc\xeb\x03\xfc\xf3\xa4")
+forward := renvoAsmNewLabel(a)
+renvoAsmEmitText(a, "\x48\x39\xf7")
+renvoAmd64AsmJccLabel(a, 0x86, forward)
+renvoAsmEmitText(a, "\x48\x8d\x04\x0e\x48\x39\xc7")
+renvoAmd64AsmJccLabel(a, 0x83, forward)
+
+
+
+renvoAsmEmitText(a, "\x49\x89\xca\x48\x8d\x74\x0e\xf8\x48\x8d\x7c\x0f\xf8\x48\xc1\xe9\x03\xfd\xf3\x48\xa5\x4c\x89\xd1\x83\xe1\x07\x48\x83\xc6\x07\x48\x83\xc7\x07\xf3\xa4\xfc\xc3")
+renvoAsmMarkLabel(a, forward)
+renvoAsmEmitText(a, "\xfc\xf3\xa4")
 renvoAsmRet(a)
 renvoAsmMarkLabel(a, end)
 renvoAsmMarkLabel(a, after)
