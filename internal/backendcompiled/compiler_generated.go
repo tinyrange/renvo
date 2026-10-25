@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "bece70e23b234e18a05f1bc651e0ebd8d1d4b2cc1ef9ada5036999553ab3d210"
+const CompilerSourceDigest = "6c5ba2fea09f05a4f983dfc6858e33d5e20ac14006fe9c670647e414992e4ac0"
 
 // source: backend/compiler_common_impl.go
 
@@ -22572,7 +22572,10 @@ g.funcQueue = append(g.funcQueue, fnIndex)
 
 
 
-if renvoObjectProgram(g.c) && (renvoPreparedBackendActive == 0 || renvoRTGPreparedFunctionSymbols == 0) {
+if renvoObjectProgram(g.c) {
+if renvoPreparedBackendActive != 0 && renvoRTGPreparedFunctionSymbols != 0 {
+renvoLinearMarkObjectFuncSymbol(g, fnIndex)
+}
 return
 }
 if g.c.stripSymbols && !renvoAsmNeedsFunctionSymbols(&g.asm) {
@@ -22582,14 +22585,23 @@ src := g.meta.prog.src
 nameStart := g.meta.funcs[fnIndex].nameStart
 nameEnd := g.meta.funcs[fnIndex].nameEnd
 renvoAsmAddFuncSymbol(&g.asm, src, nameStart, nameEnd, g.funcLabels[fnIndex])
-if renvoObjectProgram(g.c) {
+}
+
+func renvoLinearMarkObjectFuncSymbol(g *renvoLinearGen, fnIndex int) {
 
 
+
+if g.c.stripSymbols && !renvoAsmNeedsFunctionSymbols(&g.asm) {
+return
+}
+src := g.meta.prog.src
+nameStart := g.meta.funcs[fnIndex].nameStart
+nameEnd := g.meta.funcs[fnIndex].nameEnd
+renvoAsmAddFuncSymbol(&g.asm, src, nameStart, nameEnd, g.funcLabels[fnIndex])
 start, end := renvoAsmCopyObjectPrefixedText(&g.asm, "__renvo_impl_", src, nameStart, nameEnd)
 index := len(g.asm.symbols) - 1
 g.asm.symbols[index].nameStart = start
 g.asm.symbols[index].nameEnd = end
-}
 }
 
 func renvoObjectExportWordCount(meta *renvoMeta, fn *renvoFuncInfo) int {
