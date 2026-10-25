@@ -2090,6 +2090,14 @@ rtgLlvmDirectSignedDivide(out, remainder)
 func renvoRTGDirectCopyBytes(out *renvoAsm) {
 rtgLlvmDirectCopyBytes(out)
 }
+
+const renvoRTGObjectStackOffset = 0
+
+const renvoRTGObjectShadowSpace = 0
+
+const renvoRTGObjectStackAlignment = 16
+
+var renvoRTGObjectCalleeSaved = []RTGRegister{}
 var renvoRTGObjectArgument0 = rtgLlvmRDI
 var renvoRTGObjectArgument1 = rtgLlvmRSI
 var renvoRTGObjectArgument2 = rtgLlvmRDX
@@ -2294,7 +2302,7 @@ return renvoIsSysVObject(c)
 
 func renvoObjectRegisterScalarABI(c *renvoCompileContext) bool {
 renvoNonNil(c)
-return renvoIsSysVObject(c)
+return renvoIsSysVObject(c) || renvoRTGPreparedObject != 0 && c != nil && c.objectFile && renvoRTGObjectRegisterCount() > 0
 }
 
 func renvoObjectStackScalarABI(c *renvoCompileContext) bool {
@@ -2519,7 +2527,7 @@ return 0
 
 func renvoObjectStackArguments(c *renvoCompileContext) bool {
 renvoNonNil(c)
-return false
+return renvoRTGObjectStackOffset > 0
 }
 
 func renvoAsmStringCompareArguments(a *renvoAsm, left int, leftLength int, right int, rightLength int) {
@@ -2554,7 +2562,7 @@ return false
 
 func renvoObjectWordLimit(c *renvoCompileContext, export bool) int {
 renvoNonNil(c)
-if export { return 20 }
+if export || renvoRTGObjectStackOffset > 0 { return 20 }
 limit := renvoRTGObjectRegisterCount()
 if limit > 20 { limit = 20 }
 return limit
@@ -2893,8 +2901,7 @@ renvoNonNil(a)
 
 func renvoAsmObjectIndirectRegisterCall(a *renvoAsm, handleOffset int) {
 renvoNonNil(a)
-renvoRTGAsmLoadFrame(a, renvoRTGScratch, handleOffset)
-renvoRTGDirectCallIndirect(a, renvoRTGScratch)
+if !renvoRTGObjectIndirectCall(a, handleOffset, nil) { a.patchFailed = true }
 }
 
 func renvoAsmLoadObjectArgumentWord(a *renvoAsm, word int, offset int) bool {
@@ -2909,7 +2916,7 @@ return true
 
 func renvoAsmObjectIndirectStackCall(a *renvoAsm, handleOffset int, argOffsets []int) bool {
 renvoNonNil(a)
-	return false
+return renvoRTGObjectIndirectCall(a, handleOffset, argOffsets)
 }
 
 func renvoAsmObjectIntegerStackCall(a *renvoAsm, importID int, wordCount int) bool {
@@ -2959,7 +2966,7 @@ renvoNonNil(a)
 
 func renvoBeginObjectStackArgs(a *renvoAsm) {
 renvoNonNil(a)
-	a.patchFailed = true
+if renvoRTGObjectStackOffset <= 0 { a.patchFailed = true }
 }
 
 func renvoAsmPushObjectRegisterWordKind(a *renvoAsm, register int, kind int) bool {
@@ -2977,7 +2984,7 @@ return true
 
 func renvoAsmPushObjectStackWordKind(a *renvoAsm, word int, kind int) bool {
 renvoNonNil(a)
-return false
+return renvoRTGPushObjectStackWord(a, word, kind)
 }
 
 func renvoObjectExportFrame(g *renvoLinearGen, reserve bool) {
@@ -4101,22 +4108,12 @@ return
 
 func renvoAsmLoadPrimaryThreadState(g *renvoLinearGen, stateOffset int) {
 renvoNonNil(g)
-	renvoAsmPushSecondary(&g.asm)
-	renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
-	renvoAsmCopyPrimaryToSecondary(&g.asm)
-	renvoAsmLoadPrimaryMemSecondaryDisp(&g.asm, stateOffset)
-	renvoAsmPopSecondary(&g.asm)
+renvoRTGLoadThreadState(g, stateOffset)
 }
 
 func renvoAsmStorePrimaryThreadState(g *renvoLinearGen, stateOffset int) {
 renvoNonNil(g)
-	renvoAsmPushSecondary(&g.asm)
-	renvoAsmPushPrimary(&g.asm)
-	renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
-	renvoAsmCopyPrimaryToSecondary(&g.asm)
-	renvoAsmPopPrimary(&g.asm)
-	renvoAsmStorePrimaryMemSecondaryDisp(&g.asm, stateOffset)
-	renvoAsmPopSecondary(&g.asm)
+renvoRTGStoreThreadState(g, stateOffset)
 }
 
 func renvoEmitTargetRuntimeStack(g *renvoLinearGen, ep *renvoExprParse, e *renvoExpr, count int) bool {
@@ -4409,7 +4406,7 @@ renvoRTGDirectReturn(a)
 
 func renvoAsmLeave(a *renvoAsm) {
 renvoNonNil(a)
-renvoRTGDirectLeave(a)
+if !renvoRTGABIFrameEnd(a) { renvoRTGDirectLeave(a) }
 }
 
 func renvoAsmCopyPrimaryToCallWord0(a *renvoAsm) {
@@ -5957,6 +5954,9 @@ return rtgLlvmLlvmAmd64PackageLlvmFrameStart(out)
 }
 func renvoRTGFrameFinish(out *renvoAsm, framePatch int, stackUsed int) {
 rtgLlvmLlvmAmd64PackageLlvmFrameFinish(out, framePatch, stackUsed)
+}
+func renvoRTGABIFrameEnd(out *renvoAsm) bool {
+return false
 }
 func renvoRTGABIPushRegister(out *renvoAsm, source RTGRegister) bool {
 rtgLlvmLlvmAmd64PackageLlvmPushRegister(out, source)

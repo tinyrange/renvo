@@ -459,7 +459,7 @@ func declarationAllowedFields(kind string) []string {
 			"entry_arguments", "foreign_call", "return_address", "frame_pointer",
 			"overflow_stride", "scalar_result", "string_result", "slice_result",
 			"hidden_result_word", "internal", "caller_saved", "callee_saved", "red_zone",
-			"frame_start", "frame_finish", "push_register", "push_immediate",
+			"frame_start", "frame_finish", "frame_end", "push_register", "push_immediate",
 			"pop_register", "frame_load", "frame_store", "frame_address",
 			"store_param_word", "call_word_count", "mark_label",
 			"structured_functions", "function_start", "function_finish", "jit_call",
@@ -555,9 +555,10 @@ func validateABI(document Document, declaration Declaration) []Diagnostic {
 		"frame_start", "frame_finish", "push_register", "push_immediate",
 		"pop_register", "frame_load", "frame_store", "frame_address",
 		"store_param_word", "call_word_count", "mark_label",
-		"function_start", "function_finish", "jit_call", "unsigned_divide",
+		"function_start", "function_finish", "jit_call", "unsigned_divide", "frame_end",
 	}
-	hookParameters := make([][]string, 15)
+	hookParameters := make([][]string, 16)
+	hookParameters[15] = []string{"*RTGEmitter"}
 	hookParameters[0] = []string{"*RTGEmitter"}
 	hookParameters[1] = []string{"*RTGEmitter", "int", "int"}
 	hookParameters[2] = []string{"*RTGEmitter", "RTGRegister"}

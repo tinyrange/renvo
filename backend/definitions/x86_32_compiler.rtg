@@ -2313,10 +2313,10 @@ go compiler {
 	}
 
 	func renvo386CompilerLoadPrimaryThreadState(g *renvoLinearGen, stateOffset int) {
-		if renvoFixedTarget == 0 && renvoIsCdeclObject(g.c) && g.c.code16 {
-			// Object wrappers reserve R15 for the word-index helper. Until object
-			// output has a TLS runtime contract, retain unwind state in this object's
-			// private BSS instead of clobbering that ABI register.
+		if renvoFixedTarget == 0 && renvoIsCdeclObject(g.c) {
+			// Foreign object entry points do not run executable startup and have
+			// no initialized ThreadState pointer. Keep unwind state in the object's
+			// private BSS, matching the other native object ABI.
 			renvoEnsurePanicState(g)
 			renvoAsmLoadPrimaryBss(&g.asm, g.mainThreadStateOff+stateOffset)
 			return
@@ -2329,6 +2329,11 @@ go compiler {
 	}
 
 	func renvo386CompilerStorePrimaryThreadState(g *renvoLinearGen, stateOffset int) {
+		if renvoFixedTarget == 0 && renvoIsCdeclObject(g.c) {
+			renvoEnsurePanicState(g)
+			renvoAsmStorePrimaryBss(&g.asm, g.mainThreadStateOff+stateOffset)
+			return
+		}
 		renvoAsmPushSecondary(&g.asm)
 		renvoAsmPushPrimary(&g.asm)
 		renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)

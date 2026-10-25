@@ -1,0 +1,406 @@
+definition 1
+unit windows_kernel_amd64
+implements direct_emitter_v1
+
+@import "../x86_64.rtg"
+
+# Native PE32+ drivers: no user-mode startup, host linker or imported runtime.
+go backend {
+	func ntCString(data []byte, text string) []byte {
+		for i := 0; i < len(text); i++ {
+			data = append(data, text[i])
+		}
+		return append(data, 0)
+	}
+
+	func ntImports(out *RTGEmitter, data []byte, rva int) ([]byte, []int, int, int) {
+		count := out.StaticImportCount()
+		iat := make([]int, count)
+		if count == 0 {
+			return data, iat, 0, 0
+		}
+		var dlls []string
+		for i := 0; i < count; i++ {
+			dll := out.StaticImportDLL(i)
+			found := false
+			for j := 0; j < len(dlls); j++ {
+				if dlls[j] == dll {
+					found = true
+				}
+			}
+			if !found {
+				dlls = append(dlls, dll)
+			}
+		}
+		table := RTGAlignValue(len(data), 8)
+		tableSize := (len(dlls) + 1) * 20
+		data = ntAppendUntil(data, table+tableSize)
+		for d := 0; d < len(dlls); d++ {
+			var ids []int
+			for i := 0; i < count; i++ {
+				if out.StaticImportDLL(i) == dlls[d] {
+					ids = append(ids, i)
+				}
+			}
+			lookup := RTGAlignValue(len(data), 8)
+			thunks := lookup + (len(ids)+1)*8
+			data = ntAppendUntil(data, thunks+(len(ids)+1)*8)
+			name := len(data)
+			data = ntCString(data, dlls[d])
+			for j := 0; j < len(ids); j++ {
+				data = ntAppendUntil(data, RTGAlignValue(len(data), 2))
+				hint := len(data)
+				data = append(data, 0, 0)
+				data = ntCString(data, out.StaticImportName(ids[j]))
+				ntPut64(data, lookup+j*8, rva+hint)
+				ntPut64(data, thunks+j*8, rva+hint)
+				iat[ids[j]] = rva + thunks + j*8
+			}
+			ntPut32(data, table+d*20, rva+lookup)
+			ntPut32(data, table+d*20+12, rva+name)
+			ntPut32(data, table+d*20+16, rva+thunks)
+		}
+		return data, iat, rva + table, tableSize
+	}
+	func ntPut16(data []byte, at int, value int) {
+		data[at] = byte(value)
+		data[at+1] = byte(value >> 8)
+	}
+
+	func ntPut32(data []byte, at int, value int) {
+		data[at] = byte(value)
+		data[at+1] = byte(value >> 8)
+		data[at+2] = byte(value >> 16)
+		data[at+3] = byte(value >> 24)
+	}
+
+	func ntPut64(data []byte, at int, value int) {
+		ntPut32(data, at, value)
+		ntPut32(data, at+4, 0)
+	}
+
+	func ntAppendUntil(data []byte, size int) []byte {
+		for len(data) < size {
+			data = append(data, 0)
+		}
+		return data
+	}
+
+	func ntSection(data []byte, at int, name string, virtualSize int,
+		rva int, rawSize int, rawAt int, flags int) {
+		for i := 0; i < len(name) && i < 8; i++ {
+			data[at+i] = name[i]
+		}
+		ntPut32(data, at+8, virtualSize)
+		ntPut32(data, at+12, rva)
+		ntPut32(data, at+16, rawSize)
+		ntPut32(data, at+20, rawAt)
+		ntPut32(data, at+36, flags)
+	}
+
+	func ntStaticCall(out *RTGEmitter, id int, words int) {
+		if words > 0 {
+			out.Byte(0x59)
+		}
+		if words > 1 {
+			out.Byte(0x5a)
+		}
+		if words > 2 {
+			out.Bytes2(0x41, 0x58)
+		}
+		if words > 3 {
+			out.Bytes2(0x41, 0x59)
+		}
+		stacked := words - 4
+		if stacked < 0 {
+			stacked = 0
+		}
+		out.Bytes3(0x49, 0x89, 0xe2)
+		out.Bytes4(0x48, 0x83, 0xe4, 0xf0)
+		saved := 32 + stacked*8
+		reserve := RTGAlignValue(saved+8, 16)
+		out.Bytes3(0x48, 0x81, 0xec)
+		out.Int32(reserve)
+		for i := 0; i < stacked; i++ {
+			out.Bytes3(0x49, 0x8b, 0x82)
+			out.Int32(i * 8)
+			out.Bytes4(0x48, 0x89, 0x84, 0x24)
+			out.Int32(32 + i*8)
+		}
+		out.Bytes4(0x4c, 0x89, 0x94, 0x24)
+		out.Int32(saved)
+		out.Bytes2(0xff, 0x15)
+		at := out.Len()
+		out.Int32(0)
+		out.AbsoluteReloc(at, id, RTGRelocationImport)
+		out.Bytes4(0x48, 0x8b, 0xa4, 0x24)
+		out.Int32(saved)
+		if stacked > 0 {
+			out.Bytes3(0x48, 0x81, 0xc4)
+			out.Int32(stacked * 8)
+		}
+	}
+
+	// Establish the frame before the body allocates its locals. All subsequent
+	// evaluation-stack allocation is dynamic relative to RBP, so the unwinder
+	// can recover the caller even while an expression or foreign call is active.
+	func ntFrameStart(out *RTGEmitter) int {
+		at := out.Len()
+		out.Bytes4(0x55, 0x48, 0x89, 0xe5)
+		out.Bytes3(0x48, 0x81, 0xec)
+		out.Int32(0)
+		return at
+	}
+	func ntFrameFinish(out *RTGEmitter, at int, stackUsed int) {
+		out.PatchUint32(at+7, RTGAlignValue(stackUsed, 16))
+	}
+	func ntFrameEnd(out *RTGEmitter) {
+		// LEA + POP is an OS-recognizable x64 epilogue; LEAVE is not.
+		out.Bytes4(0x48, 0x8d, 0x65, 0)
+		out.Byte(0x5d)
+	}
+	func ntPushRegister(out *RTGEmitter, register RTGRegister) {
+		if register.Code >= 8 {
+			out.Byte(0x41)
+		}
+		out.Byte(byte(0x50 + (register.Code & 7)))
+	}
+	func ntUnwind(out *RTGEmitter, rva int) ([]byte, int) {
+		var starts []int
+		for i := 0; i < out.SymbolCount(); i++ {
+			pc := out.SymbolPC(i)
+			if pc < 0 || pc >= out.Len() {
+				continue
+			}
+			at := 0
+			for at < len(starts) && starts[at] < pc {
+				at++
+			}
+			if at < len(starts) && starts[at] == pc {
+				continue
+			}
+			starts = append(starts, 0)
+			for j := len(starts) - 1; j > at; j-- {
+				starts[j] = starts[j-1]
+			}
+			starts[at] = pc
+		}
+		tableSize := len(starts) * 12
+		data := make([]byte, tableSize)
+		code := out.Code()
+		for i := 0; i < len(starts); i++ {
+			pc := starts[i]
+			end := out.Len()
+			if i+1 < len(starts) {
+				end = starts[i+1]
+			}
+			if code[pc] == 0xc3 {
+				ntPut32(data, i*12, 0x1000+pc)
+				ntPut32(data, i*12+4, 0x1000+end)
+				ntPut32(data, i*12+8, rva+len(data))
+				data = append(data, 1, 0, 0, 0)
+				continue
+			}
+			at := pc
+			var pushes []byte
+			for at < end {
+				reg := 0
+				if code[at] == 0x41 {
+					reg = 8
+					at++
+				}
+				if at >= end || code[at] < 0x50 || code[at] > 0x57 {
+					return nil, 0
+				}
+				reg += int(code[at] - 0x50)
+				at++
+				pushes = append(pushes, byte(at-pc), byte(reg<<4))
+				if reg == 5 {
+					break
+				}
+			}
+			if at+3 > end || code[at] != 0x48 || code[at+1] != 0x89 || code[at+2] != 0xe5 {
+				return nil, 0
+			}
+			at += 3
+			info := len(data)
+			data = append(data, 1, byte(at-pc), byte(len(pushes)/2+1), 5, byte(at-pc), 3)
+			for j := len(pushes) - 2; j >= 0; j -= 2 {
+				data = append(data, pushes[j], pushes[j+1])
+			}
+			data = ntAppendUntil(data, RTGAlignValue(len(data), 4))
+			ntPut32(data, i*12, 0x1000+pc)
+			ntPut32(data, i*12+4, 0x1000+end)
+			ntPut32(data, i*12+8, rva+info)
+		}
+		return data, tableSize
+	}
+
+	func ntImage(out *RTGEmitter) []byte {
+		entry := -1
+		display := -1
+		for i := 0; i < out.SymbolCount(); i++ {
+			if out.SymbolNameEquals(i, "DriverEntry") {
+				entry = out.SymbolPC(i)
+			}
+			if out.SymbolNameEquals(i, "DrvEnableDriver") {
+				display = out.SymbolPC(i)
+			}
+		}
+		dll := false
+		if entry < 0 && display >= 0 {
+			entry, dll = display, true
+		}
+		if entry < 0 {
+			return nil
+		}
+		textSize := out.Len()
+		textRaw := RTGAlignValue(textSize, 0x200)
+		dataRVA := RTGAlignValue(0x1000+textSize, 0x1000)
+		data := out.Data()
+		bssRVA := dataRVA + len(data)
+		data = ntAppendUntil(data, len(data)+out.BSSSize())
+		data, iat, importsRVA, importsSize := ntImports(out, data, dataRVA)
+		for i := 0; i < out.RelocationCount(); i++ {
+			at := out.RelocationOffset(i) & 0x7fffffff
+			target := out.LabelPosition(out.RelocationLabel(i) & 0x7fffffff)
+			if target < 0 || at < 0 || at+4 > textSize {
+				return nil
+			}
+			out.PatchUint32(at, target-at-4)
+		}
+		for i := 0; i < out.AbsoluteRelocationCount(); i++ {
+			at := out.AbsoluteRelocationOffset(i)
+			kind, addend := out.AbsoluteRelocationKind(i), out.AbsoluteRelocationAddend(i)
+			target, ok := RTGResolveAbsoluteRelocation(out, kind, addend, dataRVA, bssRVA)
+			if kind == RTGRelocationImport {
+				if addend < 0 || addend >= len(iat) {
+					return nil
+				}
+				target, ok = iat[addend], true
+			}
+			if kind == RTGRelocationAbsoluteBSS && addend >= 0x20000000 {
+				id := (addend - 0x20000000) / 0x100000
+				if id >= out.ExternalImportCount() {
+					return nil
+				}
+				ok = false
+				for j := 0; j < out.SymbolCount(); j++ {
+					if out.SymbolNameEquals(j, out.ExternalImportName(id)) {
+						target = 0x1000 + out.SymbolPC(j) + (addend-0x20000000)%0x100000
+						ok = true
+					}
+				}
+			}
+			if !ok || at < 0 || at+4 > textSize {
+				return nil
+			}
+			out.PatchUint32(at, target-(0x1000+at+4))
+		}
+		// RIP-relative code needs no base fixups. A valid empty relocation
+		// block tells the kernel loader the image is not fixed at its base.
+		relocAt := RTGAlignValue(len(data), 4)
+		data = ntAppendUntil(data, relocAt+12)
+		ntPut32(data, relocAt, 0x1000)
+		ntPut32(data, relocAt+4, 12)
+		dataSize := len(data)
+		dataRaw := RTGAlignValue(dataSize, 0x200)
+		pdataRVA := RTGAlignValue(dataRVA+dataSize, 0x1000)
+		pdata, tableSize := ntUnwind(out, pdataRVA)
+		if tableSize == 0 {
+			return nil
+		}
+		pdataRaw := RTGAlignValue(len(pdata), 0x200)
+		// Reserve room for resources added by the portable PE resource writer.
+		headerSize := 0x400
+		header := make([]byte, headerSize)
+		ntPut16(header, 0, 0x5a4d)
+		ntPut32(header, 0x3c, 0x80)
+		ntPut32(header, 0x80, 0x4550)
+		ntPut16(header, 0x84, 0x8664)
+		ntPut16(header, 0x86, 3)
+		ntPut16(header, 0x94, 0xf0)
+		characteristics := 0x22
+		if dll {
+			characteristics |= 0x2000
+		}
+		ntPut16(header, 0x96, characteristics)
+		opt := 0x98
+		ntPut16(header, opt, 0x20b)
+		ntPut32(header, opt+4, textRaw)
+		ntPut32(header, opt+8, dataRaw+pdataRaw)
+		ntPut32(header, opt+16, 0x1000+entry)
+		ntPut32(header, opt+20, 0x1000)
+		ntPut32(header, opt+24, 0x40000000)
+		ntPut32(header, opt+28, 1)
+		ntPut32(header, opt+32, 0x1000)
+		ntPut32(header, opt+36, 0x200)
+		ntPut16(header, opt+40, 5)
+		ntPut16(header, opt+42, 2)
+		ntPut16(header, opt+48, 5)
+		ntPut16(header, opt+50, 2)
+		ntPut32(header, opt+56, RTGAlignValue(pdataRVA+len(pdata), 0x1000))
+		ntPut32(header, opt+60, headerSize)
+		ntPut16(header, opt+68, 1)
+		ntPut16(header, opt+70, 0x140)
+		ntPut32(header, opt+108, 16)
+		ntPut32(header, opt+120, importsRVA)
+		ntPut32(header, opt+124, importsSize)
+		ntPut32(header, opt+136, pdataRVA)
+		ntPut32(header, opt+140, tableSize)
+		ntPut32(header, opt+152, dataRVA+relocAt)
+		ntPut32(header, opt+156, 12)
+		ntSection(header, opt+240, ".text", textSize, 0x1000, textRaw, headerSize, 0x60000020)
+		ntSection(header, opt+280, ".data", dataSize, dataRVA, dataRaw, headerSize+textRaw, 0xc0000040)
+		ntSection(header, opt+320, ".pdata", len(pdata), pdataRVA, pdataRaw, headerSize+textRaw+dataRaw, 0x40000040)
+		image := append(header, out.Code()...)
+		image = ntAppendUntil(image, headerSize+textRaw)
+		image = append(image, data...)
+		image = ntAppendUntil(image, headerSize+textRaw+dataRaw)
+		image = append(image, pdata...)
+		image = ntAppendUntil(image, headerSize+textRaw+dataRaw+pdataRaw)
+		checksum := 0
+		for i := 0; i < len(image); i += 2 {
+			checksum += int(image[i]) | int(image[i+1])<<8
+			checksum = (checksum & 65535) + (checksum >> 16)
+		}
+		checksum = (checksum & 65535) + (checksum >> 16)
+		ntPut32(image, opt+64, checksum+len(image))
+		return image
+	}
+}
+
+abi windows_kernel_x64 {
+	internal = renvo_x86_64
+	frame_start = go ntFrameStart
+	frame_finish = go ntFrameFinish
+	frame_end = go ntFrameEnd
+	push_register = go ntPushRegister
+	arguments = [rcx, rdx, r8, r9]
+	result = [rax]
+	caller_saved = [rax, rcx, rdx, r8, r9, r10, r11]
+	callee_saved = [rbx, rbp, rdi, rsi, r12, r13, r14, r15]
+	stack_alignment = 16
+	shadow_space = 32
+	overflow_arguments = 48 # Established RBP + return address + caller home area.
+}
+runtime windows_kernel_x64 {
+	emit_static_call = go ntStaticCall
+}
+format windows_kernel_pe64 {
+	kind = "pe-driver"
+	byte_order = little
+	address_bits = 64
+	code_offset = 0x1000
+	image = go ntImage
+}
+target windows-kernel/amd64 {
+	family = native_v1
+	os = windows
+	arch = x86_64
+	abi = windows_kernel_x64
+	runtime = windows_kernel_x64
+	object = windows_kernel_pe64
+	build_tags = [windows, amd64, renvo_kernel]
+	capabilities = [freestanding, object, function_symbols, imports, linkstatic]
+}
