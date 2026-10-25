@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "6c5ba2fea09f05a4f983dfc6858e33d5e20ac14006fe9c670647e414992e4ac0"
+const CompilerSourceDigest = "0d93ea0d18dbc3d23632d42c46ba0cb3b686ce01eb1d55fa1930859c01c10011"
 
 // source: backend/compiler_common_impl.go
 
@@ -65120,6 +65120,12 @@ binding := s.binding
 if binding == 0 && bindingPass != 0 || binding != 0 && bindingPass == 0 {
 continue
 }
+
+
+
+if binding == 0 && s.endLabel == 0 && renvoObjectHasFunctionRange(a, s.label) {
+continue
+}
 position := renvoAsmLabelPosition(a, s.label)
 section, value, ok := renvoObjectMapCode(codeMap, position)
 if !ok {
@@ -65595,6 +65601,15 @@ return external.importID, offset - external.offset
 }
 }
 return -1, 0
+}
+
+func renvoObjectHasFunctionRange(a *renvoAsm, label int) bool {
+for i := 0; i < len(a.objectFunctions); i++ {
+if a.objectFunctions[i].label == label {
+return true
+}
+}
+return false
 }
 
 func renvoObjectCodeRanges(a *renvoAsm) []renvoObjectCodeRange {

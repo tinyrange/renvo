@@ -269,6 +269,12 @@ func renvoAsmImageRelocatableObjectX86(a *renvoAsm, elf386 bool) []byte {
 			if binding == 0 && bindingPass != 0 || binding != 0 && bindingPass == 0 {
 				continue
 			}
+			// Prepared formats also expose implementation starts through the
+			// generic symbol view. ELF already emitted their authoritative
+			// ranges above; do not append a second, zero-sized local symbol.
+			if binding == 0 && s.endLabel == 0 && renvoObjectHasFunctionRange(a, s.label) {
+				continue
+			}
 			position := renvoAsmLabelPosition(a, s.label)
 			section, value, ok := renvoObjectMapCode(codeMap, position)
 			if !ok {
@@ -744,6 +750,15 @@ func renvoObjectMapExternal(a *renvoAsm, offset int) (int, int) {
 		}
 	}
 	return -1, 0
+}
+
+func renvoObjectHasFunctionRange(a *renvoAsm, label int) bool {
+	for i := 0; i < len(a.objectFunctions); i++ {
+		if a.objectFunctions[i].label == label {
+			return true
+		}
+	}
+	return false
 }
 
 func renvoObjectCodeRanges(a *renvoAsm) []renvoObjectCodeRange {
