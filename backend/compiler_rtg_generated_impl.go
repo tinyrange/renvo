@@ -732,6 +732,11 @@ var renvoRTGSyscallWord4 = RTGNoRegister
 var renvoRTGSyscallWord5 = RTGNoRegister
 var renvoRTGSyscallResult = RTGNoRegister
 const renvoRTGStackWordBytes = 0
+const renvoRTGObjectStackOffset = 0
+const renvoRTGObjectShadowSpace = 0
+const renvoRTGObjectStackAlignment = 0
+var renvoRTGObjectCalleeSaved []RTGRegister
+func renvoRTGABIFrameEnd(out *renvoAsm) bool { return false }
 func renvoRTGConditionFromSetcc(setcc int) RTGCondition { return RTGCondition{} }
 func renvoRTGConditionFromSemantic(condition int) RTGCondition { return RTGCondition{} }
 func renvoRTGPatchRelocations(out *renvoAsm) {}
@@ -8268,10 +8273,10 @@ if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
 }
 if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
-if renvoFixedTarget == 0 && renvoIsCdeclObject(g.c) && g.c.code16 {
-			// Object wrappers reserve R15 for the word-index helper. Until object
-			// output has a TLS runtime contract, retain unwind state in this object's
-			// private BSS instead of clobbering that ABI register.
+if renvoFixedTarget == 0 && renvoIsCdeclObject(g.c) {
+			// Foreign object entry points do not run executable startup and have
+			// no initialized ThreadState pointer. Keep unwind state in the object's
+			// private BSS, matching the other native object ABI.
 			renvoEnsurePanicState(g)
 			renvoAsmLoadPrimaryBss(&g.asm, g.mainThreadStateOff+stateOffset)
 			return
@@ -8302,6 +8307,13 @@ if renvoFixedTarget == 0 && renvoIsSysVObject(g.c) {
 		return
 }
 if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+if renvoFixedTarget == 0 && renvoIsCdeclObject(g.c) {
+			renvoEnsurePanicState(g)
+			renvoAsmStorePrimaryBss(&g.asm, g.mainThreadStateOff+stateOffset)
+			return
+		}
+}
 renvoAsmPushSecondary(&g.asm)
 		renvoAsmPushPrimary(&g.asm)
 		renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
@@ -8310,7 +8322,6 @@ renvoAsmPushSecondary(&g.asm)
 		renvoAsmStorePrimaryMemSecondaryDisp(&g.asm, stateOffset)
 		renvoAsmPopSecondary(&g.asm)
 return
-
 }
 g.asm.patchFailed = true
 }

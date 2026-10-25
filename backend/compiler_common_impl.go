@@ -22562,10 +22562,13 @@ func renvoLinearMarkFunc(g *renvoLinearGen, fnIndex int) {
 	}
 	g.funcReachable[fnIndex] = true
 	g.funcQueue = append(g.funcQueue, fnIndex)
-	// Relocatable targets publish only explicit export-wrapper labels. The
-	// implementation functions and any dependencies they reach remain local to
-	// the translation unit and therefore do not enter the ELF global symtab.
+	// Relocatable targets publish explicit export wrappers by default. A
+	// prepared format may request local function boundaries as well, for
+	// example to describe native unwind tables for every non-leaf function.
 	if renvoObjectProgram(g.c) {
+		if renvoPreparedBackendActive != 0 && renvoRTGPreparedFunctionSymbols != 0 {
+			renvoLinearMarkObjectFuncSymbol(g, fnIndex)
+		}
 		return
 	}
 	if g.c.stripSymbols && !renvoAsmNeedsFunctionSymbols(&g.asm) {
@@ -22575,6 +22578,23 @@ func renvoLinearMarkFunc(g *renvoLinearGen, fnIndex int) {
 	nameStart := g.meta.funcs[fnIndex].nameStart
 	nameEnd := g.meta.funcs[fnIndex].nameEnd
 	renvoAsmAddFuncSymbol(&g.asm, src, nameStart, nameEnd, g.funcLabels[fnIndex])
+}
+
+func renvoLinearMarkObjectFuncSymbol(g *renvoLinearGen, fnIndex int) {
+	// Keep object-only name allocation out of the ordinary reachability frame.
+	// A local implementation can share its source name with an explicit export;
+	// prefix it so format symbol lookups remain unambiguous.
+	if g.c.stripSymbols && !renvoAsmNeedsFunctionSymbols(&g.asm) {
+		return
+	}
+	src := g.meta.prog.src
+	nameStart := g.meta.funcs[fnIndex].nameStart
+	nameEnd := g.meta.funcs[fnIndex].nameEnd
+	renvoAsmAddFuncSymbol(&g.asm, src, nameStart, nameEnd, g.funcLabels[fnIndex])
+	start, end := renvoAsmCopyObjectPrefixedText(&g.asm, "__renvo_impl_", src, nameStart, nameEnd)
+	index := len(g.asm.symbols) - 1
+	g.asm.symbols[index].nameStart = start
+	g.asm.symbols[index].nameEnd = end
 }
 
 func renvoObjectExportWordCount(meta *renvoMeta, fn *renvoFuncInfo) int {

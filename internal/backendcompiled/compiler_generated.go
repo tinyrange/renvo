@@ -3,7 +3,7 @@
 
 package backendcompiled
 
-const CompilerSourceDigest = "8b8a8c914e611e7abe974c619f4938ffc3e8b6cceb0966a0aae22d83f0d37c6e"
+const CompilerSourceDigest = "2ddcd8a2bad5447e0156719a6d1bca6bbc372058810c4c467d02301d9ec8e231"
 
 // source: backend/compiler_common_impl.go
 
@@ -22573,6 +22573,9 @@ g.funcQueue = append(g.funcQueue, fnIndex)
 
 
 if renvoObjectProgram(g.c) {
+if renvoPreparedBackendActive != 0 && renvoRTGPreparedFunctionSymbols != 0 {
+renvoLinearMarkObjectFuncSymbol(g, fnIndex)
+}
 return
 }
 if g.c.stripSymbols && !renvoAsmNeedsFunctionSymbols(&g.asm) {
@@ -22582,6 +22585,23 @@ src := g.meta.prog.src
 nameStart := g.meta.funcs[fnIndex].nameStart
 nameEnd := g.meta.funcs[fnIndex].nameEnd
 renvoAsmAddFuncSymbol(&g.asm, src, nameStart, nameEnd, g.funcLabels[fnIndex])
+}
+
+func renvoLinearMarkObjectFuncSymbol(g *renvoLinearGen, fnIndex int) {
+
+
+
+if g.c.stripSymbols && !renvoAsmNeedsFunctionSymbols(&g.asm) {
+return
+}
+src := g.meta.prog.src
+nameStart := g.meta.funcs[fnIndex].nameStart
+nameEnd := g.meta.funcs[fnIndex].nameEnd
+renvoAsmAddFuncSymbol(&g.asm, src, nameStart, nameEnd, g.funcLabels[fnIndex])
+start, end := renvoAsmCopyObjectPrefixedText(&g.asm, "__renvo_impl_", src, nameStart, nameEnd)
+index := len(g.asm.symbols) - 1
+g.asm.symbols[index].nameStart = start
+g.asm.symbols[index].nameEnd = end
 }
 
 func renvoObjectExportWordCount(meta *renvoMeta, fn *renvoFuncInfo) int {
@@ -37406,6 +37426,11 @@ var renvoRTGSyscallWord4 = RTGNoRegister
 var renvoRTGSyscallWord5 = RTGNoRegister
 var renvoRTGSyscallResult = RTGNoRegister
 const renvoRTGStackWordBytes = 0
+const renvoRTGObjectStackOffset = 0
+const renvoRTGObjectShadowSpace = 0
+const renvoRTGObjectStackAlignment = 0
+var renvoRTGObjectCalleeSaved []RTGRegister
+func renvoRTGABIFrameEnd(out *renvoAsm) bool { return false }
 func renvoRTGConditionFromSetcc(setcc int) RTGCondition { return RTGCondition{} }
 func renvoRTGConditionFromSemantic(condition int) RTGCondition { return RTGCondition{} }
 func renvoRTGPatchRelocations(out *renvoAsm) {}
@@ -44942,7 +44967,7 @@ return
 }
 if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
 if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
-if renvoFixedTarget == 0 && renvoIsCdeclObject(g.c) && g.c.code16 {
+if renvoFixedTarget == 0 && renvoIsCdeclObject(g.c) {
 
 
 
@@ -44976,6 +45001,13 @@ renvoAsmEmit32(&g.asm, stateOffset)
 return
 }
 if renvoCompilerSelector.renvoTargetArch == renvoArch386 || renvoCompilerSelector.renvoTargetArch == renvoArchAarch64 || renvoCompilerSelector.renvoTargetArch == renvoArchArm || renvoCompilerSelector.renvoTargetArch == renvoArchWasm32 {
+if renvoCompilerSelector.renvoTargetArch == renvoArch386 {
+if renvoFixedTarget == 0 && renvoIsCdeclObject(g.c) {
+renvoEnsurePanicState(g)
+renvoAsmStorePrimaryBss(&g.asm, g.mainThreadStateOff+stateOffset)
+return
+}
+}
 renvoAsmPushSecondary(&g.asm)
 renvoAsmPushPrimary(&g.asm)
 renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
@@ -44984,7 +45016,6 @@ renvoAsmPopPrimary(&g.asm)
 renvoAsmStorePrimaryMemSecondaryDisp(&g.asm, stateOffset)
 renvoAsmPopSecondary(&g.asm)
 return
-
 }
 g.asm.patchFailed = true
 }
@@ -53725,12 +53756,123 @@ renvoRTGDirectAdd(a, renvoRTGStack, renvoRTGScratch)
 }
 
 func renvoRTGObjectExportFrame(a *renvoAsm, reserve bool) {
+
+
+
+saved := renvoRTGObjectCalleeSaved
+if renvoRTGObjectStackOffset == 0 {
+saved = nil
+}
 if reserve {
+for _, register := range saved {
+if register.Code != renvoRTGFrame.Code {
+renvoRTGAsmPushRegister(a, register)
+}
+}
 patch := renvoRTGFrameStart(a)
 renvoRTGFrameFinish(a, patch, 0)
 } else {
 renvoAsmLeave(a)
+for i := len(saved) - 1; i >= 0; i-- {
+if saved[i].Code != renvoRTGFrame.Code {
+renvoRTGAsmPopRegister(a, saved[i])
 }
+}
+}
+}
+
+func renvoRTGPushObjectStackWord(a *renvoAsm, word int, kind int) bool {
+if renvoRTGObjectStackOffset <= 0 || word < 0 || word >= 20 {
+return false
+}
+for _, register := range renvoRTGObjectCalleeSaved {
+if register.Code != renvoRTGFrame.Code {
+word++
+}
+}
+renvoRTGDirectLoadNative(a, renvoRTGPrimary, renvoRTGAsmAddress(renvoRTGFrame, RTGNoRegister,
+renvoRTGObjectStackOffset+word*renvoRTGStackWordBytes, 1))
+if kind != 0 {
+renvoAsmNormalizePrimaryForKind(a, kind)
+}
+renvoAsmPushPrimary(a)
+return true
+}
+
+func renvoRTGObjectIndirectCall(a *renvoAsm, handleOffset int, argOffsets []int) bool {
+if renvoRTGObjectShadowSpace == 0 {
+if len(argOffsets) != 0 {
+return false
+}
+renvoRTGAsmLoadFrame(a, renvoRTGScratch, handleOffset)
+renvoRTGDirectCallIndirect(a, renvoRTGScratch)
+return true
+}
+registers := renvoRTGObjectRegisterCount()
+for _, register := range renvoRTGObjectRegisters() {
+if register.Valid && (register.Code == renvoRTGPrimary.Code || register.Code == renvoRTGScratch.Code) {
+return false
+}
+}
+stackWords := len(argOffsets) - registers
+if stackWords < 0 {
+stackWords = 0
+}
+align := renvoRTGObjectStackAlignment
+if align < 1 || align&(align-1) != 0 {
+return false
+}
+savedOffset := renvoRTGObjectShadowSpace + stackWords*renvoRTGStackWordBytes
+reserve := (savedOffset + renvoRTGStackWordBytes + align - 1) & -align
+
+
+renvoRTGDirectMove(a, renvoRTGScratch, renvoRTGStack)
+renvoRTGDirectMoveImmediate(a, renvoRTGPrimary, int64(-align))
+renvoRTGDirectBitAnd(a, renvoRTGStack, renvoRTGPrimary)
+renvoRTGDirectMoveImmediate(a, renvoRTGPrimary, int64(reserve))
+renvoRTGDirectSubtract(a, renvoRTGStack, renvoRTGPrimary)
+renvoRTGDirectStoreNative(a, renvoRTGAsmAddress(renvoRTGStack, RTGNoRegister, savedOffset, 1), renvoRTGScratch)
+for i := registers; i < len(argOffsets); i++ {
+renvoRTGAsmLoadFrame(a, renvoRTGPrimary, argOffsets[i])
+renvoRTGDirectStoreNative(a, renvoRTGAsmAddress(renvoRTGStack, RTGNoRegister,
+renvoRTGObjectShadowSpace+(i-registers)*renvoRTGStackWordBytes, 1), renvoRTGPrimary)
+}
+renvoRTGAsmLoadFrame(a, renvoRTGScratch, handleOffset)
+renvoRTGDirectCallIndirect(a, renvoRTGScratch)
+renvoRTGDirectLoadNative(a, renvoRTGScratch, renvoRTGAsmAddress(renvoRTGStack, RTGNoRegister, savedOffset, 1))
+renvoRTGDirectMove(a, renvoRTGStack, renvoRTGScratch)
+return true
+}
+
+func renvoRTGThreadStateAddress(g *renvoLinearGen) {
+renvoAsmLoadPrimaryBss(&g.asm, g.threadStatePointerOff)
+if g.c.objectFile {
+
+
+
+ready := renvoAsmNewLabel(&g.asm)
+renvoAsmJnzPrimary(&g.asm, ready)
+renvoAsmPrimaryBssAddr(&g.asm, g.mainThreadStateOff)
+renvoAsmMarkLabel(&g.asm, ready)
+}
+}
+
+func renvoRTGLoadThreadState(g *renvoLinearGen, stateOffset int) {
+renvoAsmPushSecondary(&g.asm)
+renvoRTGThreadStateAddress(g)
+renvoAsmCopyPrimaryToSecondary(&g.asm)
+renvoAsmLoadPrimaryMemSecondaryDisp(&g.asm, stateOffset)
+renvoAsmPopSecondary(&g.asm)
+}
+
+func renvoRTGStoreThreadState(g *renvoLinearGen, stateOffset int) {
+renvoAsmPushSecondary(&g.asm)
+renvoAsmPushPrimary(&g.asm)
+renvoRTGThreadStateAddress(g)
+renvoAsmCopyPrimaryToSecondary(&g.asm)
+renvoAsmPopPrimary(&g.asm)
+renvoAsmStorePrimaryMemSecondaryDisp(&g.asm, stateOffset)
+renvoAsmPopSecondary(&g.asm)
 }
 
 func renvoRTGObjectRegisters() []RTGRegister {
@@ -54189,7 +54331,17 @@ renvoAsmJmpLabel(a, shortDone)
 renvoAsmMarkLabel(a, bulk)
 
 
-renvoAsmEmitText(a, "\x48\x39\xf7\x0f\x86\x1d\x00\x00\x00\x48\x8d\x04\x0e\x48\x39\xc7\x0f\x83\x10\x00\x00\x00\x48\x8d\x74\x0e\xff\x48\x8d\x7c\x0f\xff\xfd\xf3\xa4\xfc\xeb\x03\xfc\xf3\xa4")
+forward := renvoAsmNewLabel(a)
+renvoAsmEmitText(a, "\x48\x39\xf7")
+renvoAmd64AsmJccLabel(a, 0x86, forward)
+renvoAsmEmitText(a, "\x48\x8d\x04\x0e\x48\x39\xc7")
+renvoAmd64AsmJccLabel(a, 0x83, forward)
+
+
+
+renvoAsmEmitText(a, "\x49\x89\xca\x48\x8d\x74\x0e\xf8\x48\x8d\x7c\x0f\xf8\x48\xc1\xe9\x03\xfd\xf3\x48\xa5\x4c\x89\xd1\x83\xe1\x07\x48\x83\xc6\x07\x48\x83\xc7\x07\xf3\xa4\xfc\xc3")
+renvoAsmMarkLabel(a, forward)
+renvoAsmEmitText(a, "\xfc\xf3\xa4")
 renvoAsmRet(a)
 renvoAsmMarkLabel(a, end)
 renvoAsmMarkLabel(a, after)
@@ -64978,6 +65130,12 @@ binding := s.binding
 if binding == 0 && bindingPass != 0 || binding != 0 && bindingPass == 0 {
 continue
 }
+
+
+
+if binding == 0 && s.endLabel == 0 && renvoObjectHasFunctionRange(a, s.label) {
+continue
+}
 position := renvoAsmLabelPosition(a, s.label)
 section, value, ok := renvoObjectMapCode(codeMap, position)
 if !ok {
@@ -65453,6 +65611,15 @@ return external.importID, offset - external.offset
 }
 }
 return -1, 0
+}
+
+func renvoObjectHasFunctionRange(a *renvoAsm, label int) bool {
+for i := 0; i < len(a.objectFunctions); i++ {
+if a.objectFunctions[i].label == label {
+return true
+}
+}
+return false
 }
 
 func renvoObjectCodeRanges(a *renvoAsm) []renvoObjectCodeRange {

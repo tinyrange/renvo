@@ -925,6 +925,7 @@ func TestResolveRejectsABIHookContractErrors(t *testing.T) {
 	}{
 		{"frame_start", []string{"*RTGEmitter"}},
 		{"frame_finish", []string{"*RTGEmitter", "int", "int"}},
+		{"frame_end", []string{"*RTGEmitter"}},
 		{"push_register", []string{"*RTGEmitter", "RTGRegister"}},
 		{"push_immediate", []string{"*RTGEmitter", "int"}},
 		{"pop_register", []string{"*RTGEmitter", "RTGRegister"}},

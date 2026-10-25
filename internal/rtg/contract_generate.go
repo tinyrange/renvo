@@ -442,6 +442,11 @@ var renvoRTGSyscallWord4 = RTGNoRegister
 var renvoRTGSyscallWord5 = RTGNoRegister
 var renvoRTGSyscallResult = RTGNoRegister
 const renvoRTGStackWordBytes = 0
+const renvoRTGObjectStackOffset = 0
+const renvoRTGObjectShadowSpace = 0
+const renvoRTGObjectStackAlignment = 0
+var renvoRTGObjectCalleeSaved []RTGRegister
+func renvoRTGABIFrameEnd(out *renvoAsm) bool { return false }
 func renvoRTGConditionFromSetcc(setcc int) RTGCondition { return RTGCondition{} }
 func renvoRTGConditionFromSemantic(condition int) RTGCondition { return RTGCondition{} }
 func renvoRTGPatchRelocations(out *renvoAsm) {}
@@ -497,6 +502,8 @@ func appendPreparedABIAdapters(out []byte, document Document, target ResolvedTar
 		out = append(out, "(out, framePatch, stackUsed)\n"...)
 	}
 	out = append(out, "}\n"...)
+	out = appendPreparedABIHook(out, document, target.ABI, prefix,
+		"renvoRTGABIFrameEnd", "frame_end", "out *renvoAsm", "out")
 	out = appendPreparedABIHook(out, document, target.ABI, prefix,
 		"renvoRTGABIPushRegister", "push_register",
 		"out *renvoAsm, source RTGRegister", "out, source")
@@ -1306,6 +1313,27 @@ func nativeDirectEmitterType(typ string) string {
 }
 
 func appendPreparedLocationAdapters(out []byte, document Document, target ResolvedTarget) []byte {
+	// Callback layout belongs to the declared foreign ABI. A numeric
+	// overflow_arguments is its first incoming stack word relative to the
+	// established frame pointer; ABIs without it retain register-only callbacks.
+	for _, field := range []struct{ name, constant string }{
+		{"overflow_arguments", "renvoRTGObjectStackOffset"},
+		{"shadow_space", "renvoRTGObjectShadowSpace"},
+		{"stack_alignment", "renvoRTGObjectStackAlignment"},
+	} {
+		value, _ := integerField(document, target.ABI, field.name)
+		out = append(out, "\nconst "+field.constant+" = "...)
+		out = appendDecimalFrame(out, value)
+		out = append(out, '\n')
+	}
+	out = append(out, "\nvar renvoRTGObjectCalleeSaved = []RTGRegister{"...)
+	for _, name := range listField(document, target.ABI, "callee_saved") {
+		if register, ok := architectureRegisterOutput(document, target.Arch, name); ok {
+			out = append(out, register...)
+			out = append(out, ',')
+		}
+	}
+	out = append(out, "}\n"...)
 	objectArguments := listField(document, target.ABI, "arguments")
 	if len(objectArguments) == 0 {
 		objectArguments = targetABICallWords(document, target.ABI)

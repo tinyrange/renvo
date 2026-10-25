@@ -966,8 +966,11 @@ func sourceEmbedArchiveMatch(data []byte, buckets []int32, previous []int32, pos
 			continue
 		}
 		length := 3
-		for length+4 <= limit && data[candidate+length] == data[pos+length] && data[candidate+length+1] == data[pos+length+1] && data[candidate+length+2] == data[pos+length+2] && data[candidate+length+3] == data[pos+length+3] {
-			length += 4
+		// Compare complete chunks through the portable string-equality path.
+		// These immediately consumed conversions borrow their source slices;
+		// native targets can compare words without copying or per-byte checks.
+		for length+8 <= limit && string(data[candidate+length:candidate+length+8]) == string(data[pos+length:pos+length+8]) {
+			length += 8
 		}
 		for length < limit && data[candidate+length] == data[pos+length] {
 			length++

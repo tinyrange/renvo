@@ -1,6 +1,7 @@
 package driver
 
 import (
+	"bytes"
 	"math/rand"
 	"testing"
 )
@@ -85,4 +86,34 @@ func referenceSourceEmbedArchiveMatch(data []byte, buckets []int32, previous []i
 		}
 	}
 	return bestDistance, bestLength
+}
+
+func TestSourceEmbedArchiveMatchChunkBoundaries(t *testing.T) {
+	const pos = 300
+	data := make([]byte, pos*2)
+	for i := 0; i < pos; i++ {
+		data[i] = byte(1 + i%251)
+	}
+	buckets := make([]int32, 262144)
+	previous := make([]int32, 4096)
+	sourceEmbedArchiveAddPosition(data, buckets, previous, 0)
+	for length := 3; length <= 273; length++ {
+		copy(data[pos:], data[:pos])
+		data[pos+length] ^= 0x80
+		for _, end := range []int{len(data), pos + length} {
+			distance, got := sourceEmbedArchiveMatch(data[:end], buckets, previous, pos)
+			if distance != pos || got != length {
+				t.Fatalf("prefix %d, end %d: distance=%d length=%d", length, end, distance, got)
+			}
+		}
+	}
+
+	// LZ matches may overlap the bytes they reproduce, including full chunks.
+	data = bytes.Repeat([]byte{'a'}, 274)
+	clear(buckets)
+	clear(previous)
+	sourceEmbedArchiveAddPosition(data, buckets, previous, 0)
+	if distance, length := sourceEmbedArchiveMatch(data, buckets, previous, 1); distance != 1 || length != 273 {
+		t.Fatalf("overlapping match: distance=%d length=%d", distance, length)
+	}
 }

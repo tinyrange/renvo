@@ -94,7 +94,11 @@ measurement scope must be updated before that architecture change lands.
 CPU accounting removes time spent descheduled from the main signal. It still
 varies with CPU frequency, cache contention, and host load. Same-runner paired
 samples and medians reduce that noise without promising perfectly deterministic
-CI. Wall time remains in the report for diagnosis and a 15-minute per-invocation
+CI. A short functional smoke compilation can finish within one Windows CPU
+accounting quantum and report zero CPU time. The observer preserves that value
+and the actual process exit status. Smoke compilation remains outside the
+performance samples; the policy still rejects zero CPU for any measured
+self-hosting sample. Wall time remains in the report for diagnosis and a 15-minute per-invocation
 hang timeout; it is not the performance threshold. VM also has an outer
 500-million-instruction hang limit. Missing runners, zero measurements, failed
 compilation, and failed smoke tests fail the gate rather than skipping it.
