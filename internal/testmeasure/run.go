@@ -10,6 +10,9 @@ import (
 // in-process; OS CPU accounting includes every compiler thread. Virtual-machine
 // runners also execute in-process, so their host CPU and memory are included.
 // A command which delegates compilation to subprocesses is not this workload.
+// CPU can be zero for a process shorter than the OS accounting quantum. Return
+// that observation unchanged; callers using it as a benchmark sample must
+// reject insufficient measurements rather than inventing a positive duration.
 func Run(cmd *exec.Cmd) (Result, error) {
 	observer, err := prepare(cmd)
 	if err != nil {
@@ -31,8 +34,8 @@ func Run(cmd *exec.Cmd) (Result, error) {
 		result.CPUNanoseconds = int64(cmd.ProcessState.UserTime() + cmd.ProcessState.SystemTime())
 	}
 	measureErr := observer.finish(cmd, &result)
-	if measureErr == nil && (result.PeakMemoryBytes == 0 || result.MemoryMetric == "" || result.CPUNanoseconds <= 0) {
-		measureErr = errors.New("OS did not report positive CPU and peak memory measurements")
+	if measureErr == nil && (result.PeakMemoryBytes == 0 || result.MemoryMetric == "" || result.CPUNanoseconds < 0) {
+		measureErr = errors.New("OS did not report valid CPU and peak memory measurements")
 	}
 	return result, errors.Join(waitErr, measureErr)
 }

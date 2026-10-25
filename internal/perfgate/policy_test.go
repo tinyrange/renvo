@@ -103,13 +103,15 @@ func TestRegressionAndAbsoluteGates(t *testing.T) {
 	if fail := p.Check(base, base, true); len(fail) != 0 {
 		t.Fatal(fail)
 	}
-	for _, metric := range []string{"cpu", "memory", "artifact", "steps", "missing", "absolute-outlier", "kind"} {
+	for _, metric := range []string{"cpu", "zero-cpu", "memory", "artifact", "steps", "missing", "absolute-outlier", "kind"} {
 		t.Run(metric, func(t *testing.T) {
 			candidate := slices.Clone(base)
 			for i := range candidate {
 				switch metric {
 				case "cpu":
 					candidate[i].CPU = 1251
+				case "zero-cpu":
+					candidate[i].CPU = 0
 				case "memory":
 					candidate[i].Memory = 120001
 				case "artifact":

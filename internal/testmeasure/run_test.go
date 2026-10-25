@@ -17,6 +17,12 @@ func TestMeasuredChild(t *testing.T) {
 	if mode == "" {
 		return
 	}
+	if mode == "quick" {
+		os.Exit(0)
+	}
+	if mode == "quick-fail" {
+		os.Exit(7)
+	}
 	pages := make([]byte, 32*1024*1024)
 	for i := 0; i < len(pages); i += 4096 {
 		pages[i] = byte(i / 4096)
@@ -79,5 +85,32 @@ func TestStartFailureIsReported(t *testing.T) {
 	_, err := Run(exec.Command("renvo-nonexistent-measurement-fixture"))
 	if err == nil {
 		t.Fatal("missing executable was accepted")
+	}
+}
+
+func TestFastChildPreservesExitStatus(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" && runtime.GOOS != "windows" {
+		t.Skip("unsupported measurement host")
+	}
+	for _, mode := range []string{"quick", "quick-fail"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMeasuredChild$")
+			cmd.Env = append(os.Environ(), "RENVO_MEASURE_CHILD="+mode)
+			result, err := Run(cmd)
+			if mode == "quick" && err != nil {
+				t.Fatal(err)
+			}
+			if mode == "quick-fail" {
+				var exit *exec.ExitError
+				if !errors.As(err, &exit) || exit.ExitCode() != 7 {
+					t.Fatalf("exit error: %v", err)
+				}
+			}
+			if result.CPUNanoseconds < 0 || result.PeakMemoryBytes == 0 || result.MemoryMetric == "" {
+				t.Fatalf("invalid observation: %+v", result)
+			}
+		})
 	}
 }
