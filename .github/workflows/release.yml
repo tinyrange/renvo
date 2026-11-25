@@ -24,7 +24,7 @@ jobs:
             goos: windows
             goarch: amd64
             artifact: renvo-windows-amd64.exe
-          - runner: macos-14
+          - runner: macos-15
             goos: darwin
             goarch: arm64
             artifact: renvo-darwin-arm64
