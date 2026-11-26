@@ -73,9 +73,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y qemu-user
 
-      - name: Install Wasmtime
+      - name: Install pinned WASI runner
         run: |
-          curl -fsSL https://wasmtime.dev/install.sh | bash
+          curl -fsSL https://wasmtime.dev/install.sh | bash -s -- --version v36.0.2
           echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
 
       - name: Set up Go
