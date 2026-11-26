@@ -73,9 +73,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y qemu-user
 
-      - name: Install Wasmtime
+      - name: Install pinned WASI runner
         run: |
-          curl -fsSL https://wasmtime.dev/install.sh | bash
+          curl -fsSL https://wasmtime.dev/install.sh | bash -s -- --version v36.0.2
           echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
 
       - name: Set up Go
@@ -147,7 +147,7 @@ jobs:
     name: Backend compiler tests (darwin-arm64)
     needs: preflight
     if: ${{ github.event_name != 'pull_request' }}
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 30
 
     steps:
@@ -213,10 +213,10 @@ jobs:
           go test -count=1 -timeout 15m -run '^TestRunScriptCommandCompilesImageAndForwardsArguments$' ./internal/driver
 
   package-tests:
-    name: Package tests (macos-14)
+    name: Package tests (macos-15)
     needs: preflight
     if: ${{ github.event_name != 'pull_request' }}
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 15
 
     steps:
