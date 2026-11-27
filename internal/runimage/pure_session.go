@@ -109,8 +109,15 @@ func (c *LinkedCall) callSession(state []uint64, m *LinkedContextABI, budget uin
 	if !rfenativebridge.Available || compatible {
 		a.releaseOwnedPinsLocked()
 		a.releaseBackingPinsLocked()
-		if actual > 64 {
-			actual = 64
+		// Aliasing contexts can change their pointer graph during execution.
+		// Independent contexts keep a bounded native slice while allowing
+		// enough work to amortize repeated host dispatch and admission.
+		limit := uint64(64)
+		if !compatible {
+			limit = 256
+		}
+		if actual > limit {
+			actual = limit
 		}
 		m.Remaining = actual
 		a.borrowLinked(&m.CodeView, &m.PreparedTargets, m)

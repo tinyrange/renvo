@@ -351,6 +351,8 @@ func targetLabel(name string) string {
 	switch name {
 	case "linux/amd64":
 		return "Linux x86-64"
+	case "linux/amd64-desktop":
+		return "Linux x86-64 Desktop"
 	case "linux/386":
 		return "Linux x86 (32-bit)"
 	case "linux/aarch64":
